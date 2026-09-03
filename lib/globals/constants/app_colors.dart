@@ -5,21 +5,21 @@ import 'package:flutter/material.dart';
 class AppColors {
   const AppColors._();
 
-  static const Color primary = Color(0xFF0A5C36);
-  static const Color primaryDark = Color(0xFF063F25);
-  static const Color primarySoft = Color(0xFFE6F2EC);
-  static const Color background = Color(0xFFF5F7F6);
+  static const Color primary = Color(0xFF0C6B45);
+  static const Color primaryDark = Color(0xFF08472E);
+  static const Color primarySoft = Color(0xFFE2F0E8);
+  static const Color background = Color(0xFFF7F7F4);
   static const Color surface = Color(0xFFFFFFFF);
-  static const Color surfaceMuted = Color(0xFFF7F9F8);
-  static const Color error = Color(0xFFD32F2F);
-  static const Color errorDark = Color(0xFFB02626);
-  static const Color errorBackground = Color(0xFFFBEDED);
+  static const Color surfaceMuted = Color(0xFFFAFAF7);
+  static const Color error = Color(0xFFC62828);
+  static const Color errorDark = Color(0xFFA32020);
+  static const Color errorBackground = Color(0xFFFBEAEA);
   static const Color success = Color(0xFF2E7D32);
-  static const Color successBackground = Color(0xFFEAF7ED);
-  static const Color border = Color(0xFFE0E4E2);
+  static const Color successBackground = Color(0xFFE7F4EA);
+  static const Color border = Color(0xFFE4E7E4);
   static const Color borderStrong = Color(0xFFC9D2CD);
-  static const Color textPrimary = Color(0xFF1A1F1D);
-  static const Color textSecondary = Color(0xFF5B655F);
+  static const Color textPrimary = Color(0xFF18211D);
+  static const Color textSecondary = Color(0xFF5C6B64);
 
   /// Sombras em camadas ("shadow-border"): 1px de anel + elevação sutil +
   /// profundidade ambiente — substitui bordas sólidas em cards/botões.

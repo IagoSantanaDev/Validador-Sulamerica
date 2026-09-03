@@ -3,14 +3,15 @@ import 'package:flutter/material.dart';
 import '../../../../globals/constants/app_colors.dart';
 import '../../../../globals/constants/app_dimens.dart';
 import '../../../../globals/constants/app_strings.dart';
+import '../../../../globals/themes/app_theme.dart';
 import '../../data/models/guia_validada.dart';
 
-/// Uma linha representando uma ocorrência de guia validada.
+/// Uma linha representando uma ocorrência de guia — foco em quem tem erro
+/// (a interface mostra apenas erros por padrão).
 ///
-/// [corDoGrupo] identifica visualmente ocorrências consecutivas com o
-/// mesmo numeroGuiaPrestador; [primeiraDaSequencia] desenha uma borda
-/// superior que separa uma sequência da outra, mesmo permanecendo cada
-/// ocorrência em sua própria linha.
+/// Visual limpo: chip de status à esquerda, campos com números tabulares
+/// (sem layout shift) e cada erro em um tile de tom suave, sem bordas
+/// (skill make-interfaces-feel-better).
 class ErroGuiaCard extends StatelessWidget {
   const ErroGuiaCard({
     super.key,
@@ -25,91 +26,142 @@ class ErroGuiaCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final bool temErro = guiaValidada.temErro;
+
     return Container(
       margin: EdgeInsets.only(
-        top: primeiraDaSequencia ? AppDimens.spaceMd : 0,
+        top: primeiraDaSequencia ? AppDimens.spaceMd : AppDimens.spaceSm,
       ),
+      padding: const EdgeInsets.all(AppDimens.spaceMd),
       decoration: BoxDecoration(
         color: corDoGrupo,
-        border: Border(
-          left: BorderSide(
-            color: guiaValidada.temErro ? AppColors.error : AppColors.success,
-            width: 4,
-          ),
-          top: primeiraDaSequencia
-              ? const BorderSide(color: AppColors.border)
-              : BorderSide.none,
-        ),
-      ),
-      padding: const EdgeInsets.symmetric(
-        horizontal: AppDimens.spaceMd,
-        vertical: AppDimens.spaceSm,
+        borderRadius: BorderRadius.circular(AppDimens.radiusLg),
+        boxShadow: AppTheme.sombraDeSurface(),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildIndicadorStatus(),
+          _ChipStatus(temErro: temErro),
           const SizedBox(width: AppDimens.spaceMd),
-          Expanded(child: _buildDetalhes(context)),
+          Expanded(
+            child: _DetalhesGuia(guiaValidada: guiaValidada),
+          ),
         ],
       ),
     );
   }
+}
 
-  Widget _buildIndicadorStatus() {
-    final bool temErro = guiaValidada.temErro;
+class _ChipStatus extends StatelessWidget {
+  const _ChipStatus({required this.temErro});
+
+  final bool temErro;
+
+  @override
+  Widget build(BuildContext context) {
+    final Color corBase = temErro ? AppColors.error : AppColors.success;
+    final Color corFundo =
+        temErro ? AppColors.errorBackground : AppColors.successBackground;
+
     return Tooltip(
       message: temErro ? AppStrings.statusErro : AppStrings.statusValido,
-      child: Icon(
-        temErro ? Icons.error_outline : Icons.check_circle_outline,
-        color: temErro ? AppColors.error : AppColors.success,
-        size: AppDimens.minTouchTarget / 2,
+      child: Container(
+        width: 36,
+        height: 36,
+        decoration: BoxDecoration(
+          color: corFundo,
+          shape: BoxShape.circle,
+        ),
+        child: Icon(
+          temErro ? Icons.error_outline : Icons.check_circle_outline,
+          size: 20,
+          color: corBase,
+        ),
       ),
     );
   }
+}
 
-  Widget _buildDetalhes(BuildContext context) {
+class _DetalhesGuia extends StatelessWidget {
+  const _DetalhesGuia({required this.guiaValidada});
+
+  final GuiaValidada guiaValidada;
+
+  @override
+  Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Wrap(
-          spacing: AppDimens.spaceMd,
+          spacing: AppDimens.spaceLg,
+          runSpacing: AppDimens.spaceXs,
           children: [
-            _buildCampo(
-              context,
-              AppStrings.rotuloNumeroGuia,
-              guiaValidada.numeroGuiaPrestador,
+            _CampoValor(
+              rotulo: AppStrings.rotuloNumeroGuia,
+              valor: guiaValidada.numeroGuiaPrestador,
             ),
-            _buildCampo(
-              context,
-              AppStrings.rotuloNumeroCarteira,
-              guiaValidada.numeroCarteira ?? '-',
+            _CampoValor(
+              rotulo: AppStrings.rotuloNumeroCarteira,
+              valor: guiaValidada.numeroCarteira ?? '-',
             ),
           ],
         ),
         if (guiaValidada.temErro) ...[
-          const SizedBox(height: AppDimens.spaceXs),
+          const SizedBox(height: AppDimens.spaceSm + 2),
           ...guiaValidada.erros.map(
-            (erro) => Text(
-              '• ${erro.mensagem}',
-              style: const TextStyle(color: AppColors.error, fontSize: 13),
+            (erro) => Padding(
+              padding: const EdgeInsets.only(bottom: AppDimens.spaceXs),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AppDimens.spaceMd - 2,
+                  vertical: AppDimens.spaceXs + 2,
+                ),
+                decoration: BoxDecoration(
+                  color: AppColors.errorBackground,
+                  borderRadius: BorderRadius.circular(AppDimens.radiusSm),
+                ),
+                child: Text(
+                  '• ${erro.mensagem}',
+                  style: const TextStyle(
+                    color: AppColors.errorDark,
+                    fontSize: 13.5,
+                    height: 1.35,
+                  ),
+                ),
+              ),
             ),
           ),
         ],
       ],
     );
   }
+}
 
-  Widget _buildCampo(BuildContext context, String rotulo, String valor) {
+class _CampoValor extends StatelessWidget {
+  const _CampoValor({required this.rotulo, required this.valor});
+
+  final String rotulo;
+  final String valor;
+
+  @override
+  Widget build(BuildContext context) {
     return RichText(
       text: TextSpan(
-        style: Theme.of(context).textTheme.bodyMedium,
+        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
         children: [
           TextSpan(
             text: '$rotulo: ',
-            style: const TextStyle(fontWeight: FontWeight.w600),
+            style: const TextStyle(
+              fontWeight: FontWeight.w700,
+              color: AppColors.textPrimary,
+            ),
           ),
-          TextSpan(text: valor),
+          TextSpan(
+            text: valor,
+            style: const TextStyle(color: AppColors.textSecondary),
+          ),
         ],
       ),
     );

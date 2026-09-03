@@ -23,16 +23,16 @@ class ValidadorController extends ChangeNotifier {
   Uint8List? _bytesArquivo;
   List<GuiaValidada> _resultado = const [];
   String? _mensagemErro;
-  bool _somenteErros = false;
 
   StatusValidador get status => _status;
   String? get nomeArquivo => _nomeArquivo;
   String? get mensagemErro => _mensagemErro;
-  bool get somenteErros => _somenteErros;
+  int? get tamanhoArquivoBytes => _bytesArquivo?.length;
 
-  List<GuiaValidada> get resultadoFiltrado => _somenteErros
-      ? _resultado.where((guiaValidada) => guiaValidada.temErro).toList()
-      : _resultado;
+  /// A interface mostra apenas as guias com erro — o usuário valida o lote
+  /// para encontrar problemas, não para revisar o que passou.
+  List<GuiaValidada> get guiasComErro =>
+      _resultado.where((guia) => guia.temErro).toList();
 
   int get totalGuias => _resultado.length;
   int get totalGuiasComErro =>
@@ -47,11 +47,6 @@ class ValidadorController extends ChangeNotifier {
     _status = StatusValidador.arquivoPronto;
     _mensagemErro = null;
     _resultado = const [];
-    notifyListeners();
-  }
-
-  void alternarSomenteErros(bool valor) {
-    _somenteErros = valor;
     notifyListeners();
   }
 
