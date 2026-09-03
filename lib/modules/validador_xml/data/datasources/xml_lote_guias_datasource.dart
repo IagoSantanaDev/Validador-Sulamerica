@@ -13,6 +13,7 @@ class XmlLoteGuiasDatasource {
   static const String _tagNumeroGuiaPrestador = 'numeroGuiaPrestador';
   static const String _tagDadosBeneficiario = 'dadosBeneficiario';
   static const String _tagNumeroCarteira = 'numeroCarteira';
+  static const String _tagSenha = 'senha';
 
   /// Extrai todas as ocorrências de guiaSP-SADT do conteúdo XML informado,
   /// na ordem original do documento.
@@ -57,10 +58,12 @@ class XmlLoteGuiasDatasource {
       guiaElement,
       const [_tagDadosBeneficiario, _tagNumeroCarteira],
     );
+    final String? senha = _textoDeElementoDescendente(guiaElement, _tagSenha);
 
     return GuiaTiss(
       numeroGuiaPrestador: numeroGuia,
       numeroCarteira: numeroCarteira,
+      senha: senha,
     );
   }
 
@@ -84,5 +87,14 @@ class XmlLoteGuiasDatasource {
 
     final String texto = atual.innerText.trim();
     return texto.isEmpty ? null : texto;
+  }
+
+  String? _textoDeElementoDescendente(XmlElement raiz, String nomeLocal) {
+    for (final XmlElement elemento
+        in raiz.findAllElements(nomeLocal, namespace: '*')) {
+      final String texto = elemento.innerText.trim();
+      if (texto.isNotEmpty) return texto;
+    }
+    return null;
   }
 }

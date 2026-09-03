@@ -1,10 +1,15 @@
 import 'package:flutter/material.dart';
 
+import 'globals/constants/app_config.dart';
 import 'globals/constants/app_strings.dart';
+import 'globals/service_locator.dart';
 import 'globals/themes/app_theme.dart';
+import 'modules/validador_xml/data/services/validador_xml_service_locator.dart';
 import 'modules/validador_xml/presentation/pages/validador_page.dart';
 
 void main() {
+  configurarDependenciasGlobais(baseUrlPadrao: AppConfig.baseUrlApi);
+  configurarDependenciasValidadorXml(getIt);
   runApp(const ValidadorApp());
 }
 

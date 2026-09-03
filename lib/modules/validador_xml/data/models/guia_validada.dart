@@ -14,4 +14,5 @@ class GuiaValidada {
   bool get temErro => erros.isNotEmpty;
   String get numeroGuiaPrestador => guia.numeroGuiaPrestador;
   String? get numeroCarteira => guia.numeroCarteira;
+  String? get senha => guia.senha;
 }
