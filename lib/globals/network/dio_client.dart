@@ -128,7 +128,8 @@ class DioClient {
     return switch (erro.type) {
       DioExceptionType.connectionTimeout ||
       DioExceptionType.sendTimeout ||
-      DioExceptionType.receiveTimeout =>
+      DioExceptionType.receiveTimeout ||
+      DioExceptionType.transformTimeout =>
         const RequisicaoExpiradaException(),
       DioExceptionType.connectionError => const SemConexaoException(),
       DioExceptionType.cancel => const RequisicaoCanceladaException(),

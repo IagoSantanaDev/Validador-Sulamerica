@@ -89,7 +89,7 @@ void main() {
       expect(resultado.single.erros.single.campo, 'senha');
       expect(
         resultado.single.erros.single.mensagem,
-        contains('não informado'),
+        contains('não informada'),
       );
     });
 

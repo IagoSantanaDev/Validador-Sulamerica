@@ -1,10 +1,11 @@
 /// Configurações de ambiente do app.
 ///
-/// baseUrlApi é um placeholder para uma futura API própria — o fluxo
-/// atual com a SulAmérica usa SulAmericaService, que tem sua própria
-/// baseUrl fixa (o portal Lumis), independente desta.
+/// [baseUrlApi] aponta para o **backend intermediário** (proxy do portal
+/// SulAmérica), em `backend/` do repositório. O app NÃO chama o portal
+/// diretamente — o proxy resolve CORS e mantém a sessão (JSESSIONID).
+/// Em produção, troque para a URL publicada do backend (sempre HTTPS).
 class AppConfig {
   const AppConfig._();
 
-  static const String baseUrlApi = 'https://api.sulamerica.exemplo.com';
+  static const String baseUrlApi = 'http://localhost:8080';
 }

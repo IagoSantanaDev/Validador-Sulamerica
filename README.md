@@ -1,8 +1,10 @@
 # Validador de Guias TISS — SulAmérica
 
 Projeto Flutter Web para validar previamente um lote de guias TISS
-(`guiaSP-SADT`) antes do envio à SulAmérica. Nesta fase ainda não há
-integração com o site — o foco é a interface e o motor de regras.
+(`guiaSP-SADT`) antes do envio à SulAmérica. Nesta fase, a interface e o
+motor de regras estão prontos; a integração real com o portal passa por uma
+**API intermediária** em `backend/` (contorna CORS e mantém a sessão do
+portal no servidor).
 
 ## Como rodar
 
@@ -103,3 +105,28 @@ com outra). Linhas com o mesmo `numeroGuiaPrestador` são reordenadas para
 ficarem sequenciais e recebem uma cor de fundo alternada, formando uma
 sequência visual sem juntar tudo em uma única linha. Há um filtro
 "Mostrar somente erros" e um resumo com total de guias e total com erro.
+
+## Backend intermediário (proxy para o portal)
+
+A integração real (login, consulta de beneficiário e autorização VPP) **não
+pode ser feita direto do navegador**: validamos empiricamente que o portal não
+envia `Access-Control-Allow-Origin` (CORS bloqueia a leitura) e que os cookies
+de sessão são `SameSite=Strict`/`HttpOnly` (não trafegam cross-site). Além
+disso, o endpoint `ajax-controller.jsp` de autorização VPP exige sessão
+autenticada (sem login, responde 401).
+
+A solução fica em `backend/` (Dart + shelf + dio/cookie_jar):
+`POST /api/login`, `POST /api/beneficiario`, `GET /api/autorizacao?numeroVpp=`.
+Veja `backend/README.md` para execução, variáveis de ambiente e detalhes.
+
+Descobertas que afetam qualquer cliente HTTP (inclusive o `SulAmericaService`
+do app — ainda precisa de ajustes):
+
+- **GET inicial obrigatório**: o POST de login direto (sem visitar a página
+  antes) retorna **403** — o F5 ASM exige o cookie `NSC_*` semeado no GET;
+  o GET sem headers de navegador (`Accept`, `Accept-Language`,
+  `Upgrade-Insecure-Requests`) também é barrado (500).
+- **302 pós-submit**: o login autentica com 302 → `/prestador/`; a consulta
+  de beneficiário responde 302 → `elegibilidade-resultado.htm`. O redirect
+  precisa ser seguido via GET (com a sessão) para obter a página final.
+- O `backend/` já implementa GET inicial + follow de redirect nas duas rotas.

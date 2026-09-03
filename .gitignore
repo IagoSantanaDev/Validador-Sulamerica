@@ -8,3 +8,8 @@ build/
 .vscode/
 pubspec.lock
 web/*.js.map
+.bg-shell/
+.gsd/
+debug/
+.artifacts/
+backend/

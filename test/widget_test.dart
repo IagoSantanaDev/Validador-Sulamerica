@@ -42,7 +42,7 @@ void main() {
       ),
     );
 
-    expect(find.text('Guia: 111'), findsOneWidget);
+    expect(find.text('Guia: 111', findRichText: true), findsOneWidget);
     expect(find.text('• senha não informada'), findsOneWidget);
     expect(find.byIcon(Icons.error_outline), findsOneWidget);
   });
