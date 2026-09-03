@@ -1,42 +1,48 @@
 import 'dart:convert';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 
+import '../../data/datasources/xml_lote_guias_datasource.dart';
 import '../../data/datasources/xml_lote_guias_exceptions.dart';
 import '../../data/models/guia_validada.dart';
+import '../../data/models/informacoes_lote.dart';
 import '../../data/repositories/validador_guias_repository.dart';
 import '../../data/repositories/validador_guias_repository_impl.dart';
 
 enum StatusValidador { semArquivo, arquivoPronto, validando, concluido, erro }
 
-/// Controller de apresentação para a tela de validação de guias.
-/// Não conhece Widgets: apenas estado e fluxo, delegando a regra de
-/// negócio para o [ValidadorGuiasRepository].
 class ValidadorController extends ChangeNotifier {
   ValidadorController({ValidadorGuiasRepository? repository})
       : _repository = repository ?? ValidadorGuiasRepositoryImpl();
 
   final ValidadorGuiasRepository _repository;
+  final XmlLoteGuiasDatasource _datasource = const XmlLoteGuiasDatasource();
 
   StatusValidador _status = StatusValidador.semArquivo;
   String? _nomeArquivo;
   Uint8List? _bytesArquivo;
   List<GuiaValidada> _resultado = const [];
   String? _mensagemErro;
+  InformacoesLote _informacoes = InformacoesLote.vazio;
+  String? _hashMd5;
+  Duration _tempoProcessamento = Duration.zero;
 
   StatusValidador get status => _status;
   String? get nomeArquivo => _nomeArquivo;
   String? get mensagemErro => _mensagemErro;
   int? get tamanhoArquivoBytes => _bytesArquivo?.length;
 
-  /// A interface mostra apenas as guias com erro — o usuário valida o lote
-  /// para encontrar problemas, não para revisar o que passou.
   List<GuiaValidada> get guiasComErro =>
       _resultado.where((guia) => guia.temErro).toList();
 
   int get totalGuias => _resultado.length;
   int get totalGuiasComErro =>
-      _resultado.where((guiaValidada) => guiaValidada.temErro).length;
+      _resultado.where((guia) => guia.temErro).length;
+
+  InformacoesLote get informacoes => _informacoes;
+  String? get hashMd5 => _hashMd5;
+  Duration get tempoProcessamento => _tempoProcessamento;
 
   void definirArquivo({
     required String nomeArquivo,
@@ -47,6 +53,8 @@ class ValidadorController extends ChangeNotifier {
     _status = StatusValidador.arquivoPronto;
     _mensagemErro = null;
     _resultado = const [];
+    _informacoes = InformacoesLote.vazio;
+    _hashMd5 = md5.convert(bytes).toString();
     notifyListeners();
   }
 
@@ -58,14 +66,16 @@ class ValidadorController extends ChangeNotifier {
     _mensagemErro = null;
     notifyListeners();
 
+    final Stopwatch cronometro = Stopwatch()..start();
     try {
       final String conteudoXml = _decodificarXml(bytes);
+      final InformacoesLote informacoes =
+          _datasource.extrairInformacoesDoLote(conteudoXml);
       final List<GuiaValidada> resultadoBruto =
           await Future(() => _repository.validarLote(conteudoXml));
 
-      // Guias com o mesmo numeroGuiaPrestador ficam sequenciais, sem
-      // embaralhar a ordem relativa das demais (ordenação estável).
       _resultado = _ordenarPorNumeroGuia(resultadoBruto);
+      _informacoes = informacoes;
       _status = StatusValidador.concluido;
     } on XmlMalFormadoException catch (erro) {
       _resultado = const [];
@@ -79,23 +89,25 @@ class ValidadorController extends ChangeNotifier {
       _resultado = const [];
       _status = StatusValidador.erro;
       _mensagemErro = 'Erro inesperado ao validar o arquivo: $erro';
+    } finally {
+      cronometro.stop();
+      _tempoProcessamento = cronometro.elapsed;
     }
-
     notifyListeners();
   }
 
-  void reiniciar() {
+  void novoArquivo() {
     _status = StatusValidador.semArquivo;
     _nomeArquivo = null;
     _bytesArquivo = null;
     _resultado = const [];
     _mensagemErro = null;
+    _informacoes = InformacoesLote.vazio;
+    _hashMd5 = null;
+    _tempoProcessamento = Duration.zero;
     notifyListeners();
   }
 
-  /// TISS costuma declarar ISO-8859-1. Tenta UTF-8 primeiro (caso comum de
-  /// conteúdo apenas ASCII) e cai para Latin-1 quando houver acentuação
-  /// fora da faixa UTF-8 válida.
   String _decodificarXml(Uint8List bytes) {
     try {
       return utf8.decode(bytes);
@@ -109,13 +121,11 @@ class ValidadorController extends ChangeNotifier {
       lista.length,
       (indice) => MapEntry(indice, lista[indice]),
     );
-
     indexado.sort((a, b) {
       final int comparacaoGuia =
           a.value.numeroGuiaPrestador.compareTo(b.value.numeroGuiaPrestador);
       return comparacaoGuia != 0 ? comparacaoGuia : a.key.compareTo(b.key);
     });
-
     return indexado.map((entrada) => entrada.value).toList();
   }
 }

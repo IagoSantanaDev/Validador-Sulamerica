@@ -5,11 +5,6 @@ import 'interceptors/logging_interceptor.dart';
 import 'network_constants.dart';
 import 'result.dart';
 
-/// Cliente HTTP único do app, construído sobre o Dio.
-///
-/// Centraliza baseUrl, timeouts e interceptors, e mapeia toda
-/// [DioException] em [AppException] — os datasources nunca lidam com
-/// exceção de rede diretamente, apenas com [Result].
 class DioClient {
   DioClient({
     required String baseUrl,
@@ -22,17 +17,11 @@ class DioClient {
       receiveTimeout: NetworkConstants.receiveTimeout,
       sendTimeout: NetworkConstants.sendTimeout,
     );
-    _dio.interceptors.addAll([
-      LoggingInterceptor(),
-      ...interceptoresExtras,
-    ]);
+    _dio.interceptors.addAll([LoggingInterceptor(), ...interceptoresExtras]);
   }
 
   final Dio _dio;
 
-  /// Acesso à instância crua do Dio, para casos avançados (ex.: registrar
-  /// um interceptor de autenticação após o login). Uso comum deve passar
-  /// pelos métodos get/post/put/delete/patch abaixo.
   Dio get instancia => _dio;
 
   Future<Result<T>> get<T>(
@@ -149,7 +138,6 @@ class DioClient {
     if (statusCode == 404) {
       return const RecursoNaoEncontradoException();
     }
-
     return ErroServidorException(
       statusCode: statusCode,
       mensagem: 'O servidor retornou um erro (status $statusCode).',

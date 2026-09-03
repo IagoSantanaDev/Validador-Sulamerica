@@ -1,37 +1,23 @@
 import 'package:dio/dio.dart';
-import 'package:logger/logger.dart';
 
-/// Loga apenas método, URL e status — nunca headers de autenticação nem
-/// corpo da requisição/resposta, para não vazar dados sensíveis em log.
 class LoggingInterceptor extends Interceptor {
-  LoggingInterceptor({Logger? logger}) : _logger = logger ?? Logger();
-
-  final Logger _logger;
-
   @override
-  void onRequest(
-    RequestOptions options,
-    RequestInterceptorHandler handler,
-  ) {
-    _logger.i('→ ${options.method} ${options.uri}');
-    handler.next(options);
-  }
-
-  @override
-  void onResponse(
-    Response<dynamic> response,
-    ResponseInterceptorHandler handler,
-  ) {
-    _logger.i('← ${response.statusCode} ${response.requestOptions.uri}');
+  void onResponse(Response response, ResponseInterceptorHandler handler) {
+    _logar(response.requestOptions, response.statusCode);
     handler.next(response);
   }
 
   @override
   void onError(DioException err, ErrorInterceptorHandler handler) {
-    _logger.e(
-      '✕ ${err.requestOptions.method} ${err.requestOptions.uri} '
-      '(${err.type.name})',
-    );
+    _logar(err.requestOptions, err.response?.statusCode);
     handler.next(err);
+  }
+
+  void _logar(RequestOptions options, int? status) {
+    final String metodo = options.method.padRight(6);
+    final String base = options.baseUrl;
+    final String caminho = options.path;
+    // ignore: avoid_print
+    print('$metodo $base$caminho -> $status');
   }
 }

@@ -2,7 +2,6 @@ import '../../models/erro_validacao.dart';
 import '../../models/guia_tiss.dart';
 import 'regra_validacao.dart';
 
-/// A senha VPP deve existir, começar com 5 e ter no máximo dez caracteres.
 class RegraSenhaPrefixo extends RegraValidacao {
   const RegraSenhaPrefixo();
 
@@ -18,21 +17,18 @@ class RegraSenhaPrefixo extends RegraValidacao {
         mensagem: 'senha não informada',
       );
     }
-
     if (!senha.startsWith(_prefixoObrigatorio)) {
       return const ErroValidacao(
         campo: 'senha',
         mensagem: 'senha deve começar com 5',
       );
     }
-
     if (senha.length > _tamanhoMaximo) {
       return const ErroValidacao(
         campo: 'senha',
         mensagem: 'senha deve ter no máximo 10 caracteres',
       );
     }
-
     return null;
   }
 }

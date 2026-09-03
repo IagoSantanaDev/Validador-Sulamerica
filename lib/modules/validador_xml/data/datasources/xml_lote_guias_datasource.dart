@@ -1,30 +1,18 @@
 import 'package:xml/xml.dart';
 
 import '../models/guia_tiss.dart';
+import '../models/informacoes_lote.dart';
 import 'xml_lote_guias_exceptions.dart';
 
-/// Isola a leitura e o parsing do XML de lote de guias TISS.
-/// Nenhuma regra de negócio deve viver aqui — apenas extração de dados.
+/// Parsing do XML de lote de guias TISS (apenas extração, sem regra de
+/// negócio). `namespace: '*'` casa tags qualificadas com o prefixo ans:.
 class XmlLoteGuiasDatasource {
   const XmlLoteGuiasDatasource();
 
-  static const String _tagGuiaSpSadt = 'guiaSP-SADT';
-  static const String _tagCabecalhoGuia = 'cabecalhoGuia';
-  static const String _tagNumeroGuiaPrestador = 'numeroGuiaPrestador';
-  static const String _tagDadosBeneficiario = 'dadosBeneficiario';
-  static const String _tagNumeroCarteira = 'numeroCarteira';
-  static const String _tagSenha = 'senha';
-
-  /// Extrai todas as ocorrências de guiaSP-SADT do conteúdo XML informado,
-  /// na ordem original do documento.
-  ///
-  /// namespace: '*' é usado porque o TISS sempre qualifica as tags com o
-  /// prefixo ans:, e queremos casar pelo nome local independente disso.
   List<GuiaTiss> extrairGuias(String conteudoXml) {
     final XmlDocument documento = _parsear(conteudoXml);
-
     final List<XmlElement> elementosGuia = documento
-        .findAllElements(_tagGuiaSpSadt, namespace: '*')
+        .findAllElements('guiaSP-SADT', namespace: '*')
         .toList();
 
     if (elementosGuia.isEmpty) {
@@ -32,8 +20,44 @@ class XmlLoteGuiasDatasource {
         'Nenhuma guia guiaSP-SADT foi encontrada no lote.',
       );
     }
-
     return elementosGuia.map(_converterParaGuiaTiss).toList();
+  }
+
+  InformacoesLote extrairInformacoesDoLote(String conteudoXml) {
+    try {
+      final XmlDocument documento = _parsear(conteudoXml);
+      final List<XmlElement> guias = documento
+          .findAllElements('guiaSP-SADT', namespace: '*')
+          .toList();
+
+      return InformacoesLote(
+        versao: _textoPrimeiro(documento, const ['versaoPadrao']),
+        tipoTransacao: _textoPrimeiro(
+          documento,
+          const ['identificacaoTransacao', 'tipoTransacao'],
+        ),
+        prestadorCnpjCpf: _textoPrimeiro(documento, const ['origem', 'CNPJ']) ??
+            _textoPrimeiro(documento, const ['origem', 'CPF']),
+        operadoraRegistroANS:
+            _textoPrimeiro(documento, const ['destino', 'registroANS']),
+        numeroLote: _textoPrimeiro(documento, const ['numeroLote']),
+        tipoGuia: guias.isEmpty
+            ? null
+            : _textoDoFilhoAninhado(
+                guias.first,
+                const ['cabecalhoGuia', 'tipoGuia'],
+              ),
+        qtdGuias: guias.isEmpty ? null : guias.length,
+        valorTotalInformado: guias.isEmpty
+            ? null
+            : _textoDoFilhoAninhado(
+                guias.first,
+                const ['valorTotalGuia'],
+              ),
+      );
+    } catch (_) {
+      return InformacoesLote.vazio;
+    }
   }
 
   XmlDocument _parsear(String conteudoXml) {
@@ -50,29 +74,31 @@ class XmlLoteGuiasDatasource {
   GuiaTiss _converterParaGuiaTiss(XmlElement guiaElement) {
     final String numeroGuia = _textoDoFilhoAninhado(
           guiaElement,
-          const [_tagCabecalhoGuia, _tagNumeroGuiaPrestador],
+          const ['cabecalhoGuia', 'numeroGuiaPrestador'],
         ) ??
         '';
 
-    final String? numeroCarteira = _textoDoFilhoAninhado(
-      guiaElement,
-      const [_tagDadosBeneficiario, _tagNumeroCarteira],
-    );
-    final String? senha = _textoDeElementoDescendente(guiaElement, _tagSenha);
-
     return GuiaTiss(
       numeroGuiaPrestador: numeroGuia,
-      numeroCarteira: numeroCarteira,
-      senha: senha,
+      numeroCarteira: _textoDoFilhoAninhado(
+        guiaElement,
+        const ['dadosBeneficiario', 'numeroCarteira'],
+      ),
+      senha: _textoDeElementoDescendente(guiaElement, 'senha'),
     );
   }
 
-  /// Navega por uma cadeia de tags filhas diretas (por nome local) e
-  /// retorna o texto do último elemento encontrado, ou null se algum
-  /// nível do caminho não existir.
+  String? _textoPrimeiro(XmlDocument documento, List<String> caminho) {
+    for (final XmlElement raiz
+        in documento.findAllElements(caminho.first, namespace: '*')) {
+      final String? valor = _textoDoFilhoAninhado(raiz, caminho.sublist(1));
+      if (valor != null && valor.isNotEmpty) return valor;
+    }
+    return null;
+  }
+
   String? _textoDoFilhoAninhado(XmlElement raiz, List<String> caminho) {
     XmlElement atual = raiz;
-
     for (final String tag in caminho) {
       XmlElement? proximo;
       for (final XmlElement filho in atual.childElements) {
@@ -84,7 +110,6 @@ class XmlLoteGuiasDatasource {
       if (proximo == null) return null;
       atual = proximo;
     }
-
     final String texto = atual.innerText.trim();
     return texto.isEmpty ? null : texto;
   }

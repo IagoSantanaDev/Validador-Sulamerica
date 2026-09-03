@@ -1,7 +1,6 @@
 import 'erro_validacao.dart';
 import 'guia_tiss.dart';
 
-/// Resultado da aplicação das regras de validação sobre uma [GuiaTiss].
 class GuiaValidada {
   const GuiaValidada({
     required this.guia,

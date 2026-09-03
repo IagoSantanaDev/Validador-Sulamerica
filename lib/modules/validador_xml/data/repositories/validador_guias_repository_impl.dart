@@ -11,7 +11,6 @@ class ValidadorGuiasRepositoryImpl implements ValidadorGuiasRepository {
     XmlLoteGuiasDatasource? datasource,
     List<RegraValidacao>? regras,
   })  : _datasource = datasource ?? const XmlLoteGuiasDatasource(),
-        // Novas regras entram aqui, sem tocar nas existentes (OCP).
         _regras = regras ?? const [RegraSenhaPrefixo()];
 
   final XmlLoteGuiasDatasource _datasource;
@@ -28,7 +27,6 @@ class ValidadorGuiasRepositoryImpl implements ValidadorGuiasRepository {
         .map((regra) => regra.validar(guia))
         .whereType<ErroValidacao>()
         .toList();
-
     return GuiaValidada(guia: guia, erros: erros);
   }
 }
