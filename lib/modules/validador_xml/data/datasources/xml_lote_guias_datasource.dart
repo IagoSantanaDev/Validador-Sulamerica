@@ -31,33 +31,56 @@ class XmlLoteGuiasDatasource {
           .toList();
 
       return InformacoesLote(
-        versao: _textoPrimeiro(documento, const ['versaoPadrao']),
+        versao: _textoPrimeiro(documento, const ['Padrao']) ??
+            _textoPrimeiro(documento, const ['versaoPadrao']),
         tipoTransacao: _textoPrimeiro(
           documento,
           const ['identificacaoTransacao', 'tipoTransacao'],
         ),
-        prestadorCnpjCpf: _textoPrimeiro(documento, const ['origem', 'CNPJ']) ??
-            _textoPrimeiro(documento, const ['origem', 'CPF']),
+        prestadorCnpjCpf:
+            _textoPrimeiro(documento, const ['identificacaoPrestador', 'CNPJ']) ??
+                _textoPrimeiro(
+                  documento,
+                  const ['identificacaoPrestador', 'CPF'],
+                ) ??
+                _textoPrimeiro(documento, const ['origem', 'CNPJ']) ??
+                _textoPrimeiro(documento, const ['origem', 'CPF']),
         operadoraRegistroANS:
             _textoPrimeiro(documento, const ['destino', 'registroANS']),
         numeroLote: _textoPrimeiro(documento, const ['numeroLote']),
-        tipoGuia: guias.isEmpty
-            ? null
-            : _textoDoFilhoAninhado(
-                guias.first,
-                const ['cabecalhoGuia', 'tipoGuia'],
-              ),
         qtdGuias: guias.isEmpty ? null : guias.length,
-        valorTotalInformado: guias.isEmpty
-            ? null
-            : _textoDoFilhoAninhado(
-                guias.first,
-                const ['valorTotalGuia'],
-              ),
+        valorTotalInformado: _somarValorTotalGeral(documento) ??
+            (guias.isEmpty
+                ? null
+                : _textoDoFilhoAninhado(
+                    guias.first,
+                    const ['valorTotalGuia'],
+                  )),
       );
     } catch (_) {
       return InformacoesLote.vazio;
     }
+  }
+
+  /// Soma todos os `<ans:valorTotalGeral>` do lote. Retorna null quando não
+  /// há nenhum valor numérico válido.
+  String? _somarValorTotalGeral(XmlDocument documento) {
+    final List<XmlElement> totais = documento
+        .findAllElements('valorTotalGeral', namespace: '*')
+        .toList();
+    if (totais.isEmpty) return null;
+
+    double soma = 0;
+    var algumValido = false;
+    for (final XmlElement total in totais) {
+      final double? valor = double.tryParse(total.innerText.trim());
+      if (valor != null) {
+        soma += valor;
+        algumValido = true;
+      }
+    }
+    if (!algumValido) return null;
+    return soma.toStringAsFixed(2);
   }
 
   XmlDocument _parsear(String conteudoXml) {

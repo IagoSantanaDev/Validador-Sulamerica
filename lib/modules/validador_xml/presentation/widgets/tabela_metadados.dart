@@ -44,7 +44,6 @@ class TabelaMetadados extends StatelessWidget {
         AppStrings.metadadoNumeroLote,
         informacoes.numeroLote ?? AppStrings.valorIndisponivel,
       ),
-      (AppStrings.metadadoTipoGuia, informacoes.tipoGuia ?? AppStrings.valorIndisponivel),
       (
         AppStrings.metadadoQtdGuias,
         informacoes.qtdGuias?.toString() ?? AppStrings.valorIndisponivel,

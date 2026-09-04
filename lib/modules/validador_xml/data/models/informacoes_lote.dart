@@ -6,7 +6,6 @@ class InformacoesLote {
     this.prestadorCnpjCpf,
     this.operadoraRegistroANS,
     this.numeroLote,
-    this.tipoGuia,
     this.qtdGuias,
     this.valorTotalInformado,
   });
@@ -17,7 +16,6 @@ class InformacoesLote {
   final String? prestadorCnpjCpf;
   final String? operadoraRegistroANS;
   final String? numeroLote;
-  final String? tipoGuia;
   final int? qtdGuias;
   final String? valorTotalInformado;
 
