@@ -32,13 +32,13 @@ class SulAmericaBackendService {
     );
   }
 
-  Future<Result<Map<String, dynamic>>> autorizacaoVpp({
+  Future<Result<Map<String, dynamic>>> consultarSenha({
     required String token,
-    required String numeroVpp,
+    required String senha,
   }) {
     return _dio.get<Map<String, dynamic>>(
-      '/api/autorizacao',
-      parametrosConsulta: {'token': token, 'numeroVpp': numeroVpp},
+      '/api/senha',
+      parametrosConsulta: { 'token': token, 'senha': senha},
       parser: (dados) => (dados as Map).cast<String, dynamic>(),
     );
   }

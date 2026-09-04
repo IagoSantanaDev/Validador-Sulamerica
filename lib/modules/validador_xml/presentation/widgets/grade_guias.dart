@@ -92,7 +92,7 @@ TipoErroGuia _tipoDeConsulta(ConsultaGuia consulta) {
       descricao.contains('credenciais')) {
     return TipoErroGuia.credenciais;
   }
-  return consulta.tipo == TipoConsultaGuia.autorizacaoVpp
+  return consulta.tipo == TipoConsultaGuia.senha
       ? TipoErroGuia.senha
       : TipoErroGuia.carteira;
 }

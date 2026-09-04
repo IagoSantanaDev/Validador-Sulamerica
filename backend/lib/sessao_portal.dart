@@ -392,8 +392,8 @@ class SessaoPortal {
   }
 
 
-  Future<Map<String, dynamic>?> consultarAutorizacaoVpp({
-    required String numeroVpp,
+  Future<Map<String, dynamic>?> consultarSenha({
+    required String senha,
   }) async {
     if (!_autenticada) {
       _ultimoStatusFalha = _statusFalhaSessao;
@@ -428,7 +428,7 @@ class SessaoPortal {
           'data-inicial': '',
           'data-final': '',
           'status-solicitacao': '',
-          'numero-vpp': numeroVpp,
+          'numero-vpp': senha,
           'codigo-prestador': _codigoPrestador,
           'codigo-solicitacao': '',
           'tipo-solicitacao.codigo': '',

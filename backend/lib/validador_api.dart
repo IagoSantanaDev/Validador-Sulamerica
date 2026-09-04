@@ -41,7 +41,7 @@ class ValidadorApi {
   late final Router _rotas = Router()
     ..post('/api/login', _login)
     ..post('/api/beneficiario', _beneficiario)
-    ..get('/api/autorizacao', _autorizacao)
+    ..get('/api/senha', _senha)
     ..post('/api/consultas', _consultas)
     ..get('/api/status', _status)
     ..all('/<ignored|.*>', _naoEncontrado);
@@ -149,18 +149,18 @@ class ValidadorApi {
     });
   }
 
-  Future<Response> _autorizacao(Request request) async {
+  Future<Response> _senha(Request request) async {
     final String? token = request.url.queryParameters['token'];
-    final String? numeroVpp = request.url.queryParameters['numeroVpp'];
+    final String? senha = request.url.queryParameters['senha'];
     final SessaoPortal? sessao = token == null ? null : _sessoes[token];
 
     if (sessao == null) {
       return _erro('Token de sessao invalido ou ausente.', 401);
     }
-    if (numeroVpp == null || numeroVpp.isEmpty) {
-      return _erro('Parametro numeroVpp e obrigatorio.', 400);
+    if (senha == null || senha.isEmpty) {
+      return _erro('Parametro senha e obrigatorio.', 400);
     }
-    if (!_senhaValidaParaVpp(numeroVpp)) {
+    if (!_senhaValida(senha)) {
       return _erro(
         'Senha invalida: deve ter exatamente 10 digitos comecando com 5.',
         400,
@@ -168,14 +168,14 @@ class ValidadorApi {
     }
 
     final Map<String, dynamic>? dados = await sessao
-        .consultarAutorizacaoVpp(numeroVpp: numeroVpp);
+        .consultarSenha(senha: senha);
     if (dados == null) {
       return _erro('Falha na consulta ao portal SulAmerica.', 502);
     }
 
     // Resposta compacta: o cliente só precisa saber se há autorização e a
     // descricao do status — o JSON cru do portal não é devolvido.
-    final String? descricao = _extrairStatusVpp(dados);
+    final String? descricao = _extrairStatusSenha(dados);
     return _json({
       'status': 'ok',
       'encontrada': descricao != null,
@@ -248,7 +248,7 @@ class ValidadorApi {
   /// Teto de consultas de senha simultâneas POR SESSÃO (GET leve, sem estado
   /// de form); distribuí-las entre as sessões evita concentrar as consultas
   /// na sessão base.
-  static const int _limiteVppPorSessao = 3;
+  static const int _limiteSenhaPorSessao = 3;
 
   /// Executa as consultas: elegibilidade é sempre serial POR SESSÃO (o form
   /// do portal tem estado); com muitas carteiras abre sessões extras (logins
@@ -262,7 +262,7 @@ class ValidadorApi {
       for (final dynamic c in consultas)
         if ((c as Map)['tipo'] == 'elegibilidade') c,
     ];
-    final List<dynamic> vpps = [
+    final List<dynamic> senhas = [
       for (final dynamic c in consultas)
         if ((c as Map)['tipo'] != 'elegibilidade') c,
     ];
@@ -282,13 +282,13 @@ class ValidadorApi {
 
     final List<List<dynamic>> particoesEleg =
         List.generate(sessoes.length, (_) => <dynamic>[]);
-    final List<List<dynamic>> particoesVpp =
+    final List<List<dynamic>> particoesSenha =
         List.generate(sessoes.length, (_) => <dynamic>[]);
     for (int i = 0; i < elegibilidades.length; i++) {
       particoesEleg[i % sessoes.length].add(elegibilidades[i]);
     }
-    for (int i = 0; i < vpps.length; i++) {
-      particoesVpp[i % sessoes.length].add(vpps[i]);
+    for (int i = 0; i < senhas.length; i++) {
+      particoesSenha[i % sessoes.length].add(senhas[i]);
     }
 
     final List<Future<List<Map<String, dynamic>>>> trabalhos = [];
@@ -297,7 +297,7 @@ class ValidadorApi {
         _processarSessao(
           sessao: sessoes[i],
           fatiaElegibilidade: particoesEleg[i],
-          fatiaVpps: particoesVpp[i],
+          fatiaSenhas: particoesSenha[i],
           credenciais: credenciais,
         ),
       );
@@ -336,23 +336,23 @@ class ValidadorApi {
   }
 
   /// Uma sessão: elegibilidade da fatia uma a uma (serial, preserva o form);
-  /// as consultas de senha da fatia rodam em paralelo até [_limiteVppPorSessao].
+  /// as consultas de senha da fatia rodam em paralelo até [_limiteSenhaPorSessao].
   Future<List<Map<String, dynamic>>> _processarSessao({
     required SessaoPortal sessao,
     required List<dynamic> fatiaElegibilidade,
-    required List<dynamic> fatiaVpps,
+    required List<dynamic> fatiaSenhas,
     required _CredenciaisPortal? credenciais,
   }) async {
     final List<Map<String, dynamic>> resultados = [];
     for (final dynamic item in fatiaElegibilidade) {
       resultados.add(await _executarConsulta(sessao, item, credenciais));
     }
-    if (fatiaVpps.isNotEmpty) {
+    if (fatiaSenhas.isNotEmpty) {
       resultados.addAll(
         await _processarEmParalelo(
-          fatiaVpps,
+          fatiaSenhas,
           sessao,
-          _limiteVppPorSessao,
+          _limiteSenhaPorSessao,
           credenciais,
         ),
       );
@@ -449,8 +449,8 @@ class ValidadorApi {
       };
     }
 
-    if (tipo == 'autorizacaoVpp') {
-      if (!_senhaValidaParaVpp(chave)) {
+    if (tipo == 'senha') {
+      if (!_senhaValida(chave)) {
         return {
           'chave': chave,
           'tipo': tipo,
@@ -461,7 +461,7 @@ class ValidadorApi {
       final Map<String, dynamic>? dados = await _consultarComRecuperacao(
         sessao: sessao,
         credenciais: credenciais,
-        consulta: () => sessao.consultarAutorizacaoVpp(numeroVpp: chave),
+        consulta: () => sessao.consultarSenha(senha: chave),
       );
       if (dados == null) {
         return {
@@ -475,7 +475,7 @@ class ValidadorApi {
         'chave': chave,
         'tipo': tipo,
         'sucesso': true,
-        'statusVpp': _extrairStatusVpp(dados),
+        'statusSenha': _extrairStatusSenha(dados),
       };
     }
 
@@ -528,7 +528,7 @@ class ValidadorApi {
 
   /// Descricao do status da autorização (ex.: "Autorizado", "Negado") a
   /// partir do JSON do portal; null quando não há registro com status.
-  String? _extrairStatusVpp(Map<String, dynamic> dados) {
+  String? _extrairStatusSenha(Map<String, dynamic> dados) {
     final dynamic registros = dados['registros'];
     if (registros is! List || registros.isEmpty) return null;
     for (final dynamic registro in registros) {
@@ -610,7 +610,7 @@ class ValidadorApi {
   static bool _carteiraValida(String carteira) =>
       carteira.length == 20 && RegExp(r'^\d+$').hasMatch(carteira);
 
-  static bool _senhaValidaParaVpp(String senha) =>
+  static bool _senhaValida(String senha) =>
       senha.length == 10 && senha.startsWith('5');
 
   Future<_LeituraJson> _lerJson(Request request) async {

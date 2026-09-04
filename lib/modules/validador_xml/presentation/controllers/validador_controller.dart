@@ -108,7 +108,7 @@ class ValidadorController extends ChangeNotifier {
   /// consultada uma única vez (resultado idêntico no mesmo instante). O cache
   /// é limpo a cada validação — não envelhece dados entre lotes.
   final Map<String, ConsultaGuia> _cacheElegibilidade = {};
-  final Map<String, ConsultaGuia> _cacheAutorizacao = {};
+  final Map<String, ConsultaGuia> _cacheSenha = {};
 
   StatusValidador _status = StatusValidador.semArquivo;
   String? _nomeArquivo;
@@ -225,11 +225,11 @@ class ValidadorController extends ChangeNotifier {
       final String? senha = guia.senha;
       final String? carteira = guia.numeroCarteira;
       final List<ConsultaGuia> errosLocais = [];
-      if (senha != null && senha.isNotEmpty && !_senhaValidaParaVpp(senha)) {
+      if (senha != null && senha.isNotEmpty && !_senhaValida(senha)) {
         errosLocais.add(ConsultaGuia(
-          tipo: TipoConsultaGuia.autorizacaoVpp,
+          tipo: TipoConsultaGuia.senha,
           sucesso: false,
-          descricao: '${AppStrings.erroVppSenhaInvalida} ($senha)',
+          descricao: '${AppStrings.erroSenhaInvalida} ($senha)',
         ),);
       }
       if (carteira != null &&
@@ -245,7 +245,7 @@ class ValidadorController extends ChangeNotifier {
         base[i] = GuiaValidada(
           guia: guia.guia,
           erros:
-              senha != null && senha.isNotEmpty && !_senhaValidaParaVpp(senha)
+              senha != null && senha.isNotEmpty && !_senhaValida(senha)
                   ? guia.erros.where((e) => e.campo != 'senha').toList()
                   : guia.erros,
           consultas: errosLocais,
@@ -321,9 +321,9 @@ class ValidadorController extends ChangeNotifier {
       ),);
     }
     final String? senha = guia.senha;
-    if (senha != null && _senhaValidaParaVpp(senha)) {
+    if (senha != null && _senhaValida(senha)) {
       itens.add(ConsultaLoteItem(
-        tipo: TipoConsultaGuia.autorizacaoVpp,
+        tipo: TipoConsultaGuia.senha,
         chave: senha,
       ),);
     }
@@ -347,7 +347,7 @@ class ValidadorController extends ChangeNotifier {
         sucessoConsulta: r.sucesso,
       );
     }
-    return _consultaVpp(r.statusVpp, senha: r.chave);
+    return _consultaSenha(r.statusSenha, senha: r.chave);
   }
 
   /// Erro próprio para elegibilidade: SIM = ok; NÃO = erro; sem indicador =
@@ -392,7 +392,7 @@ class ValidadorController extends ChangeNotifier {
     List<GuiaValidada> guias,
   ) async {
     _cacheElegibilidade.clear();
-    _cacheAutorizacao.clear();
+    _cacheSenha.clear();
     final List<GuiaValidada> comConsultas = [];
     for (final GuiaValidada guia in guias) {
       GuiaValidada atual = guia;
@@ -400,7 +400,7 @@ class ValidadorController extends ChangeNotifier {
         final ConsultaGuia consulta =
             item.tipo == TipoConsultaGuia.elegibilidade
                 ? await _consultarElegibilidadeItem(service, token, item.chave)
-                : await _consultarAutorizacaoItem(service, token, item.chave);
+                : await _consultarSenhaItem(service, token, item.chave);
         atual = _anexarConsulta(atual, consulta);
       }
       comConsultas.add(atual);
@@ -408,7 +408,7 @@ class ValidadorController extends ChangeNotifier {
     return comConsultas;
   }
 
-  static bool _senhaValidaParaVpp(String senha) =>
+  static bool _senhaValida(String senha) =>
       senha.length == RegraSenhaPrefixo.tamanhoExato &&
       senha.startsWith(RegraSenhaPrefixo.prefixoObrigatorio);
 
@@ -436,27 +436,27 @@ class ValidadorController extends ChangeNotifier {
     return consulta;
   }
 
-  Future<ConsultaGuia> _consultarAutorizacaoItem(
+  Future<ConsultaGuia> _consultarSenhaItem(
     SulAmericaBackendService service,
     String token,
     String senha,
   ) async {
-    final ConsultaGuia? naCache = _cacheAutorizacao[senha];
+    final ConsultaGuia? naCache = _cacheSenha[senha];
     if (naCache != null) return naCache;
 
     final Result<Map<String, dynamic>> resultado =
-        await service.autorizacaoVpp(token: token, numeroVpp: senha);
+        await service.consultarSenha(token: token, senha: senha);
 
     final ConsultaGuia consulta = resultado.fold<ConsultaGuia>(
       onSuccess: (dados) =>
-          _consultaVpp(dados['descricao'] as String?, senha: senha),
+          _consultaSenha(dados['descricao'] as String?, senha: senha),
       onFailure: (erro) => ConsultaGuia(
-        tipo: TipoConsultaGuia.autorizacaoVpp,
+        tipo: TipoConsultaGuia.senha,
         sucesso: false,
         descricao: 'Consulta de senha falhou: $erro',
       ),
     );
-    _cacheAutorizacao[senha] = consulta;
+    _cacheSenha[senha] = consulta;
     return consulta;
   }
 
@@ -498,10 +498,10 @@ class ValidadorController extends ChangeNotifier {
   /// formato válido mas SEM status no portal = "Senha não encontrada no
   /// portal" — diferente de formato inválido (Senha inválida), tratado na
   /// pré-validação.
-  ConsultaGuia _consultaVpp(String? descricao, {required String senha}) {
+  ConsultaGuia _consultaSenha(String? descricao, {required String senha}) {
     final bool autorizada = _descricaoAutorizada(descricao);
     return ConsultaGuia(
-      tipo: TipoConsultaGuia.autorizacaoVpp,
+      tipo: TipoConsultaGuia.senha,
       sucesso: autorizada,
       descricao: autorizada
           ? 'Senha: ok'

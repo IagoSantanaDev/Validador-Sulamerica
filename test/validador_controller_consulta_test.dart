@@ -64,7 +64,7 @@ class _FakeBatchAdapter implements HttpClientAdapter {
                 'chave': c['chave'],
                 'tipo': c['tipo'],
                 'sucesso': true,
-                'statusVpp': statusAutorizacao,
+                'statusSenha': statusAutorizacao,
               },
         ];
         return _resposta(200, {'status': 'ok', 'resultados': resultados});
@@ -148,7 +148,7 @@ const GuiaTiss _guiaSemSenha = GuiaTiss(
   senha: null,
 );
 
-const GuiaTiss _guiaSenhaVppValida = GuiaTiss(
+const GuiaTiss _guiaSenhaValida = GuiaTiss(
   numeroGuiaPrestador: '222',
   numeroCarteira: '55788888482319470020',
   senha: '5056430843',
@@ -206,7 +206,7 @@ void main() {
               ],
             ),
             GuiaValidada(
-              guia: _guiaSenhaVppValida,
+              guia: _guiaSenhaValida,
               erros: [],
             ),
           ],
@@ -273,14 +273,14 @@ void main() {
         _controllerComGateway(
           adapter: adapter,
           retornoValidacao: const [
-            GuiaValidada(guia: _guiaSenhaVppValida, erros: []),
+            GuiaValidada(guia: _guiaSenhaValida, erros: []),
           ],
         ),
       );
 
       expect(controller.status, StatusValidador.concluido);
       final ConsultaGuia consulta = controller.guias.single.consultas
-          .firstWhere((c) => c.tipo == TipoConsultaGuia.autorizacaoVpp);
+          .firstWhere((c) => c.tipo == TipoConsultaGuia.senha);
       expect(consulta.sucesso, isTrue);
       expect(consulta.descricao, 'Senha: ok');
     });
@@ -294,7 +294,7 @@ void main() {
         _controllerComGateway(
           adapter: adapter,
           retornoValidacao: const [
-            GuiaValidada(guia: _guiaSenhaVppValida, erros: []),
+            GuiaValidada(guia: _guiaSenhaValida, erros: []),
           ],
         ),
       );
@@ -386,7 +386,7 @@ void main() {
         _controllerComGateway(
           adapter: adapter,
           retornoValidacao: const [
-            GuiaValidada(guia: _guiaSenhaVppValida, erros: []),
+            GuiaValidada(guia: _guiaSenhaValida, erros: []),
           ],
         ),
       );
