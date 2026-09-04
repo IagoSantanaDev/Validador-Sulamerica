@@ -2,22 +2,43 @@ import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
+import 'package:get_it/get_it.dart';
 
+import '../../../../globals/constants/app_config.dart';
+import '../../../../globals/network/result.dart';
 import '../../data/datasources/xml_lote_guias_datasource.dart';
 import '../../data/datasources/xml_lote_guias_exceptions.dart';
+import '../../data/models/consulta_guia.dart';
 import '../../data/models/guia_validada.dart';
 import '../../data/models/informacoes_lote.dart';
+import '../../data/models/resultado_consulta_beneficiario.dart';
 import '../../data/repositories/validador_guias_repository.dart';
 import '../../data/repositories/validador_guias_repository_impl.dart';
+import '../../data/services/sul_america_backend_service.dart';
 
 enum StatusValidador { semArquivo, arquivoPronto, validando, concluido, erro }
 
 class ValidadorController extends ChangeNotifier {
-  ValidadorController({ValidadorGuiasRepository? repository})
-      : _repository = repository ?? ValidadorGuiasRepositoryImpl();
+  ValidadorController({
+    ValidadorGuiasRepository? repository,
+    SulAmericaBackendService? service,
+    String? codigoPrestador,
+    String? usuarioPrestador,
+    String? senhaPrestador,
+  })  : _repository = repository ?? ValidadorGuiasRepositoryImpl(),
+        _service = service ?? _servicePadrao(),
+        _codigoPrestador = codigoPrestador ?? AppConfig.portalCode,
+        _usuarioPrestador = usuarioPrestador ?? AppConfig.portalUser,
+        _senhaPrestador = senhaPrestador ?? AppConfig.portalSenha;
 
   final ValidadorGuiasRepository _repository;
   final XmlLoteGuiasDatasource _datasource = const XmlLoteGuiasDatasource();
+  final SulAmericaBackendService? _service;
+  final String? _codigoPrestador;
+  final String? _usuarioPrestador;
+  final String? _senhaPrestador;
+
+  String? _tokenSessao;
 
   StatusValidador _status = StatusValidador.semArquivo;
   String? _nomeArquivo;
@@ -36,6 +57,9 @@ class ValidadorController extends ChangeNotifier {
   List<GuiaValidada> get guiasComErro =>
       _resultado.where((guia) => guia.temErro).toList();
 
+  /// Todas as guias validadas (com ou sem erro), já ordenadas.
+  List<GuiaValidada> get guias => _resultado;
+
   int get totalGuias => _resultado.length;
   int get totalGuiasComErro =>
       _resultado.where((guia) => guia.temErro).length;
@@ -43,6 +67,14 @@ class ValidadorController extends ChangeNotifier {
   InformacoesLote get informacoes => _informacoes;
   String? get hashMd5 => _hashMd5;
   Duration get tempoProcessamento => _tempoProcessamento;
+
+  static SulAmericaBackendService? _servicePadrao() {
+    try {
+      return GetIt.instance.get<SulAmericaBackendService>();
+    } catch (_) {
+      return null;
+    }
+  }
 
   void definirArquivo({
     required String nomeArquivo,
@@ -73,8 +105,10 @@ class ValidadorController extends ChangeNotifier {
           _datasource.extrairInformacoesDoLote(conteudoXml);
       final List<GuiaValidada> resultadoBruto =
           await Future(() => _repository.validarLote(conteudoXml));
+      final List<GuiaValidada> comConsultas =
+          await _consultarGuias(resultadoBruto);
 
-      _resultado = _ordenarPorNumeroGuia(resultadoBruto);
+      _resultado = _ordenarPorNumeroGuia(comConsultas);
       _informacoes = informacoes;
       _status = StatusValidador.concluido;
     } on XmlMalFormadoException catch (erro) {
@@ -107,6 +141,128 @@ class ValidadorController extends ChangeNotifier {
     _tempoProcessamento = Duration.zero;
     notifyListeners();
   }
+
+  /// Para cada guia do lote, consulta o portal via backend intermediário:
+  /// sem senha → elegibilidade (consulta do beneficiário); senha iniciada em
+  /// 5 com 10 caracteres → autorização VPP. Sem credenciais configuradas,
+  /// a validação permanece apenas local.
+  Future<List<GuiaValidada>> _consultarGuias(
+    List<GuiaValidada> guias,
+  ) async {
+    final SulAmericaBackendService? service = _service;
+    if (service == null || guias.isEmpty) return guias;
+
+    final String? token = await _obterTokenSessao(service);
+    if (token == null) return guias;
+
+    final List<GuiaValidada> comConsultas = [];
+    for (final GuiaValidada guia in guias) {
+      comConsultas.add(await _consultarGuia(service, token, guia));
+    }
+    return comConsultas;
+  }
+
+  Future<String?> _obterTokenSessao(SulAmericaBackendService service) async {
+    if (_tokenSessao != null) return _tokenSessao;
+    final String? code = _codigoPrestador;
+    final String? user = _usuarioPrestador;
+    final String? senha = _senhaPrestador;
+    if (code == null ||
+        code.isEmpty ||
+        user == null ||
+        user.isEmpty ||
+        senha == null ||
+        senha.isEmpty) {
+      return null;
+    }
+
+    final Result<String> resultado = await service.login(
+      code: code,
+      user: user,
+      senha: senha,
+    );
+    return resultado.fold<String?>(
+      onSuccess: (token) {
+        _tokenSessao = token;
+        return token;
+      },
+      onFailure: (_) => null,
+    );
+  }
+
+  Future<GuiaValidada> _consultarGuia(
+    SulAmericaBackendService service,
+    String token,
+    GuiaValidada guia,
+  ) async {
+    final String? senha = guia.senha;
+    if (senha == null || senha.isEmpty) {
+      return _consultarElegibilidade(service, token, guia);
+    }
+    if (_senhaValidaParaVpp(senha)) {
+      return _consultarAutorizacaoVpp(service, token, guia);
+    }
+    return guia;
+  }
+
+  static bool _senhaValidaParaVpp(String senha) =>
+      senha.length == 10 && senha.startsWith('5');
+
+  Future<GuiaValidada> _consultarElegibilidade(
+    SulAmericaBackendService service,
+    String token,
+    GuiaValidada guia,
+  ) async {
+    final String? carteira = guia.numeroCarteira;
+    if (carteira == null || carteira.isEmpty) return guia;
+
+    final Result<ResultadoConsultaBeneficiario> resultado =
+        await service.consultarBeneficiario(token: token, carteira: carteira);
+
+    final ConsultaGuia consulta = resultado.fold<ConsultaGuia>(
+      onSuccess: (res) => ConsultaGuia(
+        tipo: TipoConsultaGuia.elegibilidade,
+        sucesso: true,
+        descricao: switch (res.elegivel) {
+          true => 'Elegível: SIM',
+          false => 'Elegível: NÃO',
+          null => 'Carteira não encontrada',
+        },
+      ),
+      onFailure: (erro) => ConsultaGuia(
+        tipo: TipoConsultaGuia.elegibilidade,
+        sucesso: false,
+        descricao: 'Consulta de elegibilidade falhou: $erro',
+      ),
+    );
+    return _anexarConsulta(guia, consulta);
+  }
+
+  Future<GuiaValidada> _consultarAutorizacaoVpp(
+    SulAmericaBackendService service,
+    String token,
+    GuiaValidada guia,
+  ) async {
+    final Result<Map<String, dynamic>> resultado =
+        await service.autorizacaoVpp(token: token, numeroVpp: guia.senha!);
+
+    final ConsultaGuia consulta = resultado.fold<ConsultaGuia>(
+      onSuccess: (_) => const ConsultaGuia(
+        tipo: TipoConsultaGuia.autorizacaoVpp,
+        sucesso: true,
+        descricao: 'Autorização VPP: ok',
+      ),
+      onFailure: (erro) => ConsultaGuia(
+        tipo: TipoConsultaGuia.autorizacaoVpp,
+        sucesso: false,
+        descricao: 'Consulta de autorização VPP falhou: $erro',
+      ),
+    );
+    return _anexarConsulta(guia, consulta);
+  }
+
+  GuiaValidada _anexarConsulta(GuiaValidada guia, ConsultaGuia consulta) =>
+      GuiaValidada(guia: guia.guia, erros: guia.erros, consulta: consulta);
 
   String _decodificarXml(Uint8List bytes) {
     try {
