@@ -1,7 +1,9 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:cookie_jar/cookie_jar.dart';
 import 'package:dio/dio.dart';
+import 'package:dio/io.dart';
 import 'package:dio_cookie_manager/dio_cookie_manager.dart';
 import 'package:logger/logger.dart';
 
@@ -44,7 +46,50 @@ class SessaoPortal {
       // autenticada e confirmar a sessao.
       followRedirects: false,
     );
+    // Workaround F5/CDN: o portal envia cadeia com cert self-signed que o
+    // root store do container rejeita (CERTIFICATE_VERIFY_FAILED). O
+    // badCertificateCallback do HttpClient tolera a cadeia e o
+    // validateCertificate avalia o certificado final — ambos restritos ao
+    // host do portal; qualquer outro destino mantém a verificação padrão.
+    // Só aplica quando o Dio não foi injetado.
+    if (dio == null) {
+      _dio.httpClientAdapter = IOHttpClientAdapter(
+        createHttpClient: () {
+          final HttpClient cliente = HttpClient();
+          cliente.badCertificateCallback = aceitarCertificadoDoPortal;
+          return cliente;
+        },
+        validateCertificate: _validarCertificadoDoPortal,
+      );
+    }
     _dio.interceptors.add(CookieManager(_cookieJar));
+  }
+
+  static const String hostPortal = 'saude.sulamericaseguros.com.br';
+
+  /// Aceita o certificado somente quando o host é o próprio portal (caso
+  /// F5/CDN com cadeia não confiável pela CA pública). Qualquer outro host
+  /// permanece com a validação padrão.
+  static bool aceitarCertificadoDoPortal(
+    X509Certificate? certificate,
+    String host,
+    int port,
+  ) =>
+      host == hostPortal;
+
+  /// `validateCertificate` do adapter: chamado apenas quando a validação CA
+  /// falhou; registra e aceita o cert do portal (uso exclusivo de integração).
+  bool _validarCertificadoDoPortal(
+    X509Certificate? certificate,
+    String host,
+    int port,
+  ) {
+    if (!aceitarCertificadoDoPortal(certificate, host, port)) return false;
+    _logger.w(
+      'TLS do portal nao verificado pela CA publica (cadeia com self-signed); '
+      'aceitando certificado apresentado por $host para a integracao.',
+    );
+    return true;
   }
 
   static const String _userAgent =
