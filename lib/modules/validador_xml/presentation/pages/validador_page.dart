@@ -88,12 +88,9 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
   }
 
   Widget _buildConteudo(BuildContext context, ValidadorController c) {
-    final bool? apiDisponivel = c.apiDisponivel;
-    if (apiDisponivel == false) {
-      return _painelApi(c, indisponivel: true);
-    }
-    if (apiDisponivel == null) {
-      return _painelApi(c, indisponivel: false);
+    final EstadoConexao conexao = c.estadoConexao;
+    if (conexao != EstadoConexao.pronto) {
+      return _painelConexao(c, conexao);
     }
 
     if (c.status == StatusValidador.concluido) {
@@ -161,37 +158,75 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
     );
   }
 
-  /// Gate de conectividade: o site só funciona com a API intermediária
-  /// acessível (ping em /api/status).
-  Widget _painelApi(
-    ValidadorController c, {
-    required bool indisponivel,
-  }) {
+  /// Gate de conexão: o site só funciona quando a API está acessível E o
+  /// login no portal foi feito — qualquer falha bloqueia a validação e
+  /// mostra o motivo exato (API_URL, credenciais ausentes ou inválidas).
+  Widget _painelConexao(ValidadorController c, EstadoConexao conexao) {
+    final (IconData icone, Color cor, Color corFundo, String titulo,
+            String mensagem, String? detalhe) =
+        switch (conexao) {
+      EstadoConexao.verificando => (
+          Icons.cloud_sync,
+          AppColors.primary,
+          AppColors.surfaceMuted,
+          AppStrings.apiVerificandoTitulo,
+          AppStrings.apiVerificandoMensagem,
+          null,
+        ),
+      EstadoConexao.apiIndisponivel => (
+          Icons.cloud_off,
+          AppColors.error,
+          AppColors.errorBackground,
+          AppStrings.apiIndisponivelTitulo,
+          AppStrings.apiIndisponivelMensagem,
+          AppStrings.apiIndisponivelDetalhe,
+        ),
+      EstadoConexao.credenciaisAusentes => (
+          Icons.key_off,
+          AppColors.error,
+          AppColors.errorBackground,
+          AppStrings.apiCredenciaisAusentesTitulo,
+          AppStrings.apiCredenciaisAusentesMensagem,
+          AppStrings.apiCredenciaisDetalhe,
+        ),
+      EstadoConexao.credenciaisInvalidas => (
+          Icons.lock_outline,
+          AppColors.error,
+          AppColors.errorBackground,
+          AppStrings.apiLoginFalhouTitulo,
+          AppStrings.apiLoginFalhouMensagem,
+          AppStrings.apiLoginFalhouDetalhe,
+        ),
+      EstadoConexao.pronto => (
+          Icons.cloud_done,
+          AppColors.success,
+          AppColors.successBackground,
+          '',
+          '',
+          null,
+        ),
+    };
+
     return Center(
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: AppDimens.larguraMaximaHome),
+        constraints:
+            const BoxConstraints(maxWidth: AppDimens.larguraMaximaHome),
         child: Padding(
           padding: const EdgeInsets.all(AppDimens.spaceXl),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               PainelStatus(
-                icone: indisponivel ? Icons.cloud_off : Icons.cloud_sync,
-                cor: indisponivel ? AppColors.error : AppColors.warning,
-                corFundo: indisponivel
-                    ? AppColors.errorBackground
-                    : AppColors.successBackground,
-                titulo: indisponivel
-                    ? AppStrings.apiIndisponivelTitulo
-                    : AppStrings.apiVerificandoTitulo,
-                mensagem: indisponivel
-                    ? AppStrings.apiIndisponivelMensagem
-                    : AppStrings.apiVerificandoMensagem,
+                icone: icone,
+                cor: cor,
+                corFundo: corFundo,
+                titulo: titulo,
+                mensagem: mensagem,
               ),
-              if (indisponivel) ...[
+              if (detalhe != null) ...[
                 const SizedBox(height: AppDimens.spaceSm),
-                const TextoApp.detalhe(
-                  AppStrings.apiIndisponivelDetalhe,
+                TextoApp.detalhe(
+                  detalhe,
                   cor: AppColors.textMuted,
                   alinhamento: TextAlign.center,
                 ),

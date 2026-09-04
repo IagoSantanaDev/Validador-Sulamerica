@@ -19,6 +19,16 @@ import '../../data/services/sul_america_backend_service.dart';
 
 enum StatusValidador { semArquivo, arquivoPronto, validando, concluido, erro }
 
+/// Pré-requisitos de conexão antes de liberar o site: API acessível + login
+/// no portal SulAmérica.
+enum EstadoConexao {
+  verificando,
+  apiIndisponivel,
+  credenciaisAusentes,
+  credenciaisInvalidas,
+  pronto,
+}
+
 class ValidadorController extends ChangeNotifier {
   ValidadorController({
     ValidadorGuiasRepository? repository,
@@ -41,24 +51,56 @@ class ValidadorController extends ChangeNotifier {
 
   String? _tokenSessao;
 
-  /// Conectividade com a API intermediária: null = checando, false = bloqueia
-  /// o uso do site (só funciona com a API acessível).
-  bool? _apiDisponivel;
+  /// Pré-requisito de conexão: o site só funciona com a API acessível e com
+  /// login no portal (sem isso, validação local fica bloqueada).
+  EstadoConexao _estadoConexao = EstadoConexao.verificando;
 
-  bool? get apiDisponivel => _apiDisponivel;
+  EstadoConexao get estadoConexao => _estadoConexao;
 
-  /// Pinga em /api/status para liberar (ou bloquear) o site.
+  /// Pinge em /api/status e autentica no portal; bloqueia o site quando a
+  /// API está fora ou as credenciais estão ausentes/inválidas.
   Future<void> verificarDisponibilidadeApi() async {
     final SulAmericaBackendService? service = _service;
-    _apiDisponivel = null;
+    _estadoConexao = EstadoConexao.verificando;
     notifyListeners();
     if (service == null) {
-      _apiDisponivel = false;
+      _estadoConexao = EstadoConexao.apiIndisponivel;
       notifyListeners();
       return;
     }
-    final Result<Map<String, dynamic>> resultado = await service.status();
-    _apiDisponivel = resultado is Success<Map<String, dynamic>>;
+
+    final Result<Map<String, dynamic>> status = await service.status();
+    if (status is! Success<Map<String, dynamic>>) {
+      _estadoConexao = EstadoConexao.apiIndisponivel;
+      notifyListeners();
+      return;
+    }
+
+    final String? code = _codigoPrestador;
+    final String? user = _usuarioPrestador;
+    final String? senha = _senhaPrestador;
+    if (code == null ||
+        code.isEmpty ||
+        user == null ||
+        user.isEmpty ||
+        senha == null ||
+        senha.isEmpty) {
+      _estadoConexao = EstadoConexao.credenciaisAusentes;
+      notifyListeners();
+      return;
+    }
+
+    final Result<String> login = await service.login(
+      code: code,
+      user: user,
+      senha: senha,
+    );
+    if (login is Success<String>) {
+      _tokenSessao = login.valor;
+      _estadoConexao = EstadoConexao.pronto;
+    } else {
+      _estadoConexao = EstadoConexao.credenciaisInvalidas;
+    }
     notifyListeners();
   }
 
