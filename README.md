@@ -129,4 +129,4 @@ do app — ainda precisa de ajustes):
 - **302 pós-submit**: o login autentica com 302 → `/prestador/`; a consulta
   de beneficiário responde 302 → `elegibilidade-resultado.htm`. O redirect
   precisa ser seguido via GET (com a sessão) para obter a página final.
-- O `backend/` já implementa GET inicial + follow de redirect nas duas rotas.
+- O `backend/` já implementa GET inicial + follow de redirect nas duas rotas
