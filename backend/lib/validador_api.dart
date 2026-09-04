@@ -245,9 +245,9 @@ class ValidadorApi {
   /// A partir deste volume de elegibilidades vale criar sessões extras.
   static const int _minElegibilidadeParaMultiplasSessoes = 10;
 
-  /// Teto de consultas de senha simultâneas POR SESSÃO (GET sem estado de form,
-  /// leve). Distribuir também as consultas de senha entre as sessões evita concentrar os
-  /// 100 consultas de senha na sessão base.
+  /// Teto de consultas de senha simultâneas POR SESSÃO (GET leve, sem estado
+  /// de form); distribuí-las entre as sessões evita concentrar as consultas
+  /// na sessão base.
   static const int _limiteVppPorSessao = 3;
 
   /// Executa as consultas: elegibilidade é sempre serial POR SESSÃO (o form
@@ -267,7 +267,6 @@ class ValidadorApi {
         if ((c as Map)['tipo'] != 'elegibilidade') c,
     ];
 
-    // Reúne as sessões (base + extras autenticadas) com logins EM PARALELO.
     final List<SessaoPortal> sessoes = [sessaoBase];
     if (credenciais != null &&
         elegibilidades.length >= _minElegibilidadeParaMultiplasSessoes) {
@@ -281,8 +280,6 @@ class ValidadorApi {
       }
     }
 
-    // Distribui elegibilidades (serial por sessão) e consultas de senha (pool por sessão)
-    // em round-robin por todas as sessões.
     final List<List<dynamic>> particoesEleg =
         List.generate(sessoes.length, (_) => <dynamic>[]);
     final List<List<dynamic>> particoesVpp =
@@ -524,7 +521,6 @@ class ValidadorApi {
     return consulta();
   }
 
-  /// Mensagem final do item conforme a causa: sessão rejeitada pede novo
   /// "primeiro.ultimo" da chave (não vaza dados sensíveis em log).
   String _mascararChave(String chave) => chave.length <= 5
       ? chave

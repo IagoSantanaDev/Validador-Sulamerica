@@ -311,8 +311,6 @@ class ValidadorController extends ChangeNotifier {
   static bool _carteiraValida(String carteira) =>
       carteira.length == 20 && RegExp(r'^\d+$').hasMatch(carteira);
 
-  /// Consultas aplicáveis a uma guia: elegibilidade pela carteira (sempre que
-  /// válida) + consulta de senha (quando a senha é válida).
   List<ConsultaLoteItem> _itensDeConsulta(GuiaValidada guia) {
     final List<ConsultaLoteItem> itens = [];
     final String? carteira = guia.numeroCarteira;

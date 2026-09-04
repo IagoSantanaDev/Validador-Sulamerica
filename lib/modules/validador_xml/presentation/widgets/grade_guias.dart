@@ -85,8 +85,6 @@ TipoErroGuia? tipoErroDeLinha(LinhaGradeGuia linha) {
   return null;
 }
 
-/// Classifica uma consulta que falhou: consulta de senha → Senha; elegibilidade → Carteira
-/// (não elegível, carteira não encontrada, número inválido...).
 TipoErroGuia _tipoDeConsulta(ConsultaGuia consulta) {
   final String descricao = consulta.descricao;
   if (descricao.contains('autenticar') ||
