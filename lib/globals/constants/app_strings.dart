@@ -1,20 +1,68 @@
-/// Strings estáticas da UI centralizadas, facilitando manutenção e futura
-/// internacionalização.
 class AppStrings {
   const AppStrings._();
 
-  static const String tituloApp = 'Validador de Guias TISS';
-  static const String tituloPagina = 'Validador XML · SulAmérica';
-  static const String instrucaoDropZone =
-      'Arraste o arquivo XML aqui ou clique para selecionar';
-  static const String extensaoAceita = 'Somente arquivos .xml';
-  static const String botaoValidar = 'Validar arquivo';
-  static const String mensagemValidando = 'Validando guias...';
+  static const String tituloApp = 'Validador TISS';
+  static const String valorIndisponivel = '—';
   static const String mensagemArquivoInvalidoExtensao =
       'Selecione um arquivo com extensão .xml';
-  static const String filtroMostrarSomenteErros = 'Mostrar somente erros';
-  static const String rotuloNumeroGuia = 'Guia';
-  static const String rotuloNumeroCarteira = 'Carteira';
-  static const String statusValido = 'Válida';
-  static const String statusErro = 'Com erro';
+
+  static const String jumbotronLegenda =
+      'Validação online de arquivos XML no padrão TISS da ANS.';
+  static const String dropZoneTexto =
+      'Clique aqui para selecionar o arquivo ou arraste ele para cá para iniciar a validação.';
+  static const String uploadEnviandoArquivo = 'Enviando arquivo';
+
+  static const String resultadoTitulo = 'Resultado da Validação';
+  static const String processadoEmPrefix = 'Processado em ';
+  static const String processadoEmSufix = ' segundos';
+  static const String validarOutroArquivo = 'Validar outro arquivo';
+  static const String validacoesPorGuia = 'Validações por guia';
+
+  static const String metadadoNome = 'Nome';
+  static const String metadadoTamanho = 'Tamanho';
+  static const String metadadoVersao = 'Versão';
+  static const String metadadoTipoTransacao = 'Tipo de Transação';
+  static const String metadadoHash = 'Hash';
+  static const String metadadoPrestador = 'Prestador';
+  static const String metadadoOperadora = 'Operadora';
+  static const String metadadoNumeroLote = 'Nº do Lote';
+  static const String metadadoQtdGuias = 'Qtd Guias';
+  static const String metadadoValorTotalInformado = 'Valor Total Informado';
+
+  static const String semErrosTitulo = 'Nenhum erro encontrado';
+  static const String semErrosDetalhe =
+      'Todas as guias do lote passaram nas regras de validação.';
+  static const String falhaValidacaoTitulo = 'Não foi possível validar';
+
+  static const String rotuloGuia = 'Guia';
+  static const String rotuloCarteira = 'Carteira';
+  static const String rotuloSenha = 'Senha';
+  static const String rotuloBeneficiario = 'Beneficiário';
+  static const String rotuloElegibilidade = 'Elegibilidade';
+  static const String rotuloAutorizacaoVpp = 'Autorização VPP';
+  static const String dialogoFechar = 'Fechar';
+
+  static const String apiVerificandoTitulo = 'Conectando à API';
+  static const String apiVerificandoMensagem =
+      'Verificando conexão e autenticando no portal...';
+  static const String apiIndisponivelTitulo = 'API indisponível';
+  static const String apiIndisponivelMensagem =
+      'Não foi possível conectar ao servidor intermediário.';
+  static const String apiIndisponivelDetalhe =
+      'Confira se a variável API_URL está configurada no build '
+      '(ex.: API_URL=https://seu-backend.onrender.com).';
+  static const String apiCredenciaisAusentesTitulo = 'Credenciais não configuradas';
+  static const String apiCredenciaisAusentesMensagem =
+      'PORTAL_CODE, PORTAL_USER e PORTAL_SENHA não estão definidos '
+      'no build da aplicação.';
+  static const String apiCredenciaisDetalhe =
+      'Defina PORTAL_CODE, PORTAL_USER e PORTAL_SENHA nas variáveis de '
+      'ambiente do build (Cloudflare Pages → Environment variables).';
+  static const String apiLoginFalhouTitulo = 'Falha no login no portal';
+  static const String apiLoginFalhouMensagem =
+      'As credenciais foram rejeitadas pelo portal. Confira '
+      'PORTAL_CODE, PORTAL_USER e PORTAL_SENHA.';
+  static const String apiLoginFalhouDetalhe =
+      'Confira os valores das variáveis PORTAL_* e tente novamente.';
+  static const String apiTentarNovamente = 'Tentar novamente';
 }

@@ -1,0 +1,22 @@
+name: validador_backend
+description: >
+  API intermediaria (proxy) entre o Validador de Guias TISS (Flutter Web) e o
+  portal da SulAmerica (Lumis DOUI). Contorna CORS e gerencia a sessao do
+  portal (cookies JSESSIONID/lum*/NSC) no servidor.
+publish_to: 'none'
+version: 0.1.0
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  cookie_jar: ^4.0.8
+  dio: ^5.7.0
+  dio_cookie_manager: ^3.2.0
+  logger: ^2.4.0
+  shelf: ^1.4.2
+  shelf_router: ^1.1.4
+
+dev_dependencies:
+  lints: ^5.1.1
+  test: ^1.25.0

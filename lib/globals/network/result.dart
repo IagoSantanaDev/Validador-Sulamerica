@@ -1,36 +1,40 @@
 import 'app_exception.dart';
 
-/// Result pattern: toda chamada de rede retorna um [Result], nunca lança
-/// exceção para o chamador nem retorna null para sinalizar falha.
 sealed class Result<T> {
   const Result();
 
-  const factory Result.success(T valor) = Success<T>;
-  const factory Result.failure(AppException erro) = Failure<T>;
+  static Success<T> success<T>(T valor) => Success(valor);
 
-  bool get isSuccess => this is Success<T>;
-  bool get isFailure => this is Failure<T>;
+  static Failure<T> failure<T>(AppException erro) => Failure(erro);
 
   R fold<R>({
-    required R Function(T valor) onSuccess,
+    required R Function(T sucesso) onSuccess,
     required R Function(AppException erro) onFailure,
-  }) {
-    final Result<T> resultado = this;
-    return switch (resultado) {
-      Success<T>(valor: final valor) => onSuccess(valor),
-      Failure<T>(erro: final erro) => onFailure(erro),
-    };
-  }
+  });
 }
 
 class Success<T> extends Result<T> {
   const Success(this.valor);
 
   final T valor;
+
+  @override
+  R fold<R>({
+    required R Function(T sucesso) onSuccess,
+    required R Function(AppException erro) onFailure,
+  }) =>
+      onSuccess(valor);
 }
 
 class Failure<T> extends Result<T> {
   const Failure(this.erro);
 
   final AppException erro;
+
+  @override
+  R fold<R>({
+    required R Function(T sucesso) onSuccess,
+    required R Function(AppException erro) onFailure,
+  }) =>
+      onFailure(erro);
 }

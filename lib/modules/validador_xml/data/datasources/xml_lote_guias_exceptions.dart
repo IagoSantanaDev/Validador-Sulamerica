@@ -1,6 +1,5 @@
-/// Lançada quando o conteúdo do arquivo não é um XML bem formado.
-class XmlMalFormadoException implements Exception {
-  const XmlMalFormadoException(this.mensagem);
+class NenhumaGuiaEncontradaException implements Exception {
+  const NenhumaGuiaEncontradaException(this.mensagem);
 
   final String mensagem;
 
@@ -8,9 +7,8 @@ class XmlMalFormadoException implements Exception {
   String toString() => mensagem;
 }
 
-/// Lançada quando o XML é válido, mas não contém nenhuma guia guiaSP-SADT.
-class NenhumaGuiaEncontradaException implements Exception {
-  const NenhumaGuiaEncontradaException(this.mensagem);
+class XmlMalFormadoException implements Exception {
+  const XmlMalFormadoException(this.mensagem);
 
   final String mensagem;
 
