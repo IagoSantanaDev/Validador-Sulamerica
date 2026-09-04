@@ -255,7 +255,18 @@ void main() {
         () async {
       final _FakeGatewayAdapter adapter = _FakeGatewayAdapter({
         '/api/login': (200, {'token': 'tok123'}),
-        '/api/autorizacao': (200, {'ok': true}),
+        '/api/autorizacao': (
+          200,
+          {
+            'paginacao': {'total_registros': 1},
+            'registros': [
+              {
+                'numero_solicitacao': '239675343',
+                'status_solicitacao': {'descricao': 'Autorizado'},
+              },
+            ],
+          },
+        ),
       });
 
       const GuiaTiss guiaVppB = GuiaTiss(
@@ -282,6 +293,40 @@ void main() {
       for (final GuiaValidada guia in controller.guias) {
         expect(guia.consulta?.descricao, 'Autorização VPP: ok');
       }
+    });
+
+    test('autorização VPP não autorizada (Negado) é marcada como falha',
+        () async {
+      final _FakeGatewayAdapter adapter = _FakeGatewayAdapter({
+        '/api/login': (200, {'token': 'tok123'}),
+        '/api/autorizacao': (
+          200,
+          {
+            'paginacao': {'total_registros': 1},
+            'registros': [
+              {
+                'numero_solicitacao': '239675343',
+                'status_solicitacao': {'descricao': 'Negado'},
+              },
+            ],
+          },
+        ),
+      });
+
+      final ValidadorController controller = await _validar(
+        _controllerComGateway(
+          adapter: adapter,
+          retornoValidacao: const [
+            GuiaValidada(guia: _guiaSenhaVppValida, erros: []),
+          ],
+        ),
+      );
+
+      expect(controller.status, StatusValidador.concluido);
+      final ConsultaGuia? consulta = controller.guias.single.consulta;
+      expect(consulta, isNotNull);
+      expect(consulta!.sucesso, isFalse);
+      expect(consulta.descricao, 'Autorização VPP: Negado');
     });
 
     test('sem credenciais do prestador nenhuma chamada é feita', () async {

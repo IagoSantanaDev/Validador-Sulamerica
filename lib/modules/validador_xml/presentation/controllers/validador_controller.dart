@@ -271,11 +271,17 @@ class ValidadorController extends ChangeNotifier {
         await service.autorizacaoVpp(token: token, numeroVpp: senha);
 
     final ConsultaGuia consulta = resultado.fold<ConsultaGuia>(
-      onSuccess: (_) => const ConsultaGuia(
-        tipo: TipoConsultaGuia.autorizacaoVpp,
-        sucesso: true,
-        descricao: 'Autorização VPP: ok',
-      ),
+      onSuccess: (dados) {
+        final String status = _statusAutorizacaoVpp(dados);
+        final bool autorizada = status.toLowerCase().startsWith('autorizad');
+        return ConsultaGuia(
+          tipo: TipoConsultaGuia.autorizacaoVpp,
+          sucesso: autorizada,
+          descricao: autorizada
+              ? 'Autorização VPP: ok'
+              : 'Autorização VPP: $status',
+        );
+      },
       onFailure: (erro) => ConsultaGuia(
         tipo: TipoConsultaGuia.autorizacaoVpp,
         sucesso: false,
@@ -284,6 +290,25 @@ class ValidadorController extends ChangeNotifier {
     );
     _cacheAutorizacao[senha] = consulta;
     return _anexarConsulta(guia, consulta);
+  }
+
+  /// Extrai a descrição do status da autorização VPP retornada pelo portal
+  /// (ex.: "Autorizado", "Negado", "Em análise"). Considera autorizada
+  /// apenas quando há registro com descrição começando em "autorizad".
+  String _statusAutorizacaoVpp(Map<String, dynamic> dados) {
+    final dynamic registros = dados['registros'];
+    if (registros is! List || registros.isEmpty) {
+      return 'nenhuma solicitação encontrada';
+    }
+    for (final dynamic registro in registros) {
+      final dynamic status = registro is Map
+          ? registro['status_solicitacao']
+          : null;
+      final dynamic descricao =
+          status is Map ? status['descricao'] : null;
+      if (descricao is String && descricao.isNotEmpty) return descricao;
+    }
+    return 'sem status informado';
   }
 
   GuiaValidada _anexarConsulta(GuiaValidada guia, ConsultaGuia consulta) =>
