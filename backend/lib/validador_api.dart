@@ -430,10 +430,7 @@ class ValidadorApi {
           'chave': chave,
           'tipo': tipo,
           'sucesso': false,
-          'erro': _erroDeFalhaPortal(
-            sessao,
-            'Falha na consulta ao portal SulAmerica.',
-          ),
+          'erro': 'Falha na consulta ao portal SulAmerica.',
         };
       }
       final bool? elegivel = extrairElegivel(html);
@@ -474,10 +471,7 @@ class ValidadorApi {
           'chave': chave,
           'tipo': tipo,
           'sucesso': false,
-          'erro': _erroDeFalhaPortal(
-            sessao,
-            'Falha na consulta de autorizacao VPP.',
-          ),
+          'erro': 'Falha na consulta de autorizacao VPP.',
         };
       }
       return {
@@ -531,17 +525,6 @@ class ValidadorApi {
   }
 
   /// Mensagem final do item conforme a causa: sessão rejeitada pede novo
-  /// login; demais falhas mantêm a mensagem comum de portal indisponível.
-  String _erroDeFalhaPortal(
-    SessaoPortal sessao,
-    String mensagemFalhaComum,
-  ) {
-    final int? status = sessao.ultimoStatusFalha;
-    return ehFalhaDeSessaoPortal(status)
-        ? 'Sessao no portal expirada. Refaça o login.'
-        : mensagemFalhaComum;
-  }
-
   /// "primeiro.ultimo" da chave (não vaza dados sensíveis em log).
   String _mascararChave(String chave) => chave.length <= 5
       ? chave
