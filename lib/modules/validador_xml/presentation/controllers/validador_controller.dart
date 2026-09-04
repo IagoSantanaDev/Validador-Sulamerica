@@ -10,6 +10,7 @@ import '../../../../globals/network/result.dart';
 import '../../data/datasources/xml_lote_guias_datasource.dart';
 import '../../data/datasources/xml_lote_guias_exceptions.dart';
 import '../../data/models/consulta_guia.dart';
+import '../../data/repositories/regras/regra_senha_prefixo.dart';
 import '../../data/models/consulta_lote.dart';
 import '../../data/models/guia_validada.dart';
 import '../../data/models/informacoes_lote.dart';
@@ -410,7 +411,8 @@ class ValidadorController extends ChangeNotifier {
   }
 
   static bool _senhaValidaParaVpp(String senha) =>
-      senha.length == 10 && senha.startsWith('5');
+      senha.length == RegraSenhaPrefixo.tamanhoExato &&
+      senha.startsWith(RegraSenhaPrefixo.prefixoObrigatorio);
 
   Future<ConsultaGuia> _consultarElegibilidadeItem(
     SulAmericaBackendService service,

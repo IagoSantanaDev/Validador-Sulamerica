@@ -99,21 +99,6 @@ TipoErroGuia _tipoDeConsulta(ConsultaGuia consulta) {
       : TipoErroGuia.carteira;
 }
 
-TipoErroGuia? tipoErroDe(GuiaValidada guia) {
-  for (final ConsultaGuia consulta in guia.consultas) {
-    if (!consulta.sucesso) {
-      return _tipoDeConsulta(consulta);
-    }
-  }
-  if (guia.erros.any((e) => e.campo == 'senha')) {
-    return TipoErroGuia.senha;
-  }
-  if (guia.erros.any((e) => e.campo == 'numeroCarteira')) {
-    return TipoErroGuia.carteira;
-  }
-  return null;
-}
-
 String rotuloTipoErro(TipoErroGuia tipo) => switch (tipo) {
       TipoErroGuia.senha => AppStrings.filtroSenha,
       TipoErroGuia.carteira => AppStrings.filtroCarteira,

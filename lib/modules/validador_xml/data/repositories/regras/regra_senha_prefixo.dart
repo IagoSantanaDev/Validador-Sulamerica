@@ -5,8 +5,10 @@ import 'regra_validacao.dart';
 class RegraSenhaPrefixo extends RegraValidacao {
   const RegraSenhaPrefixo();
 
-  static const String _prefixoObrigatorio = '5';
-  static const int _tamanhoMaximo = 10;
+  /// Regra única da senha VPP exibida ao cliente: começa com 5 e tem
+  /// exatamente 10 dígitos (fonte para o front validar antes da API).
+  static const String prefixoObrigatorio = '5';
+  static const int tamanhoExato = 10;
 
   @override
   ErroValidacao? validar(GuiaTiss guia) {
@@ -17,16 +19,16 @@ class RegraSenhaPrefixo extends RegraValidacao {
         mensagem: 'Senha não informada',
       );
     }
-    if (!senha.startsWith(_prefixoObrigatorio)) {
+    if (!senha.startsWith(prefixoObrigatorio)) {
       return const ErroValidacao(
         campo: 'senha',
         mensagem: 'senha deve começar com 5',
       );
     }
-    if (senha.length > _tamanhoMaximo) {
+    if (senha.length != tamanhoExato) {
       return const ErroValidacao(
         campo: 'senha',
-        mensagem: 'senha deve ter no máximo 10 caracteres',
+        mensagem: 'senha deve ter exatamente 10 caracteres',
       );
     }
     return null;
