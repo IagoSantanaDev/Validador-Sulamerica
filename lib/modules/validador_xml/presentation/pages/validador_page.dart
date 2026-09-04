@@ -14,7 +14,6 @@ import '../controllers/validador_controller.dart';
 import '../widgets/barra_progresso_envio.dart';
 import '../widgets/cabecalho_resultado.dart';
 import '../widgets/drop_zone_site.dart';
-import '../widgets/footer_site.dart';
 import '../widgets/item_validacao.dart';
 import '../widgets/navbar_site.dart';
 import '../widgets/rodape_resultado.dart';
@@ -66,14 +65,13 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
 
     return Column(
       children: [
-        const NavbarSite(),
+        NavbarSite(onTituloTap: _voltarParaHome),
         Expanded(
           child: AnimatedSwitcher(
             duration: const Duration(milliseconds: 200),
             child: _buildConteudo(context, controller),
           ),
         ),
-        const FooterSite(),
       ],
     );
   }
@@ -83,16 +81,28 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
       return _buildResultado(context, c);
     }
 
+    if (c.status == StatusValidador.arquivoPronto ||
+        c.status == StatusValidador.validando) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.only(top: AppDimens.spaceXs),
+          child: BarraProgressoEnvio(
+            nomeArquivo: c.nomeArquivo ?? '',
+          ),
+        ),
+      );
+    }
+
     return SingleChildScrollView(
       child: Center(
-        child: CardSurface(
-          padding: const EdgeInsets.symmetric(
-            horizontal: AppDimens.spaceXl,
-            vertical: AppDimens.spaceXxl,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(
+            maxWidth: AppDimens.larguraMaximaHome,
           ),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(
-              maxWidth: AppDimens.larguraMaximaHome,
+          child: Padding(
+            padding: const EdgeInsets.only(
+              top: AppDimens.spaceSm,
+              bottom: AppDimens.spaceXxl,
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.center,
@@ -112,15 +122,6 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
                             bytes: bytes,
                           ),
                 ),
-                const SizedBox(height: AppDimens.spaceMd),
-                if (c.status == StatusValidador.validando ||
-                    c.status == StatusValidador.arquivoPronto)
-                  Padding(
-                    padding: const EdgeInsets.only(top: AppDimens.spaceMd),
-                    child: BarraProgressoEnvio(
-                      nomeArquivo: c.nomeArquivo ?? '',
-                    ),
-                  ),
                 if (c.status == StatusValidador.erro &&
                     c.mensagemErro != null)
                   Padding(
@@ -183,7 +184,7 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
                       children: [
                         const _TituloLista(),
                         for (int i = 0; i < guias.length; i++)
-                          ItemValidacao(indice: i + 1, guia: guias[i]),
+                          ItemValidacao(guia: guias[i]),
                       ],
                     ),
                   ),
@@ -212,6 +213,14 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
         .map((b) => b.toRadixString(16).padLeft(2, '0'))
         .join();
     return hex;
+  }
+
+  void _voltarParaHome() {
+    setState(() {
+      _ultimoValidadoNome = null;
+      _identificador = null;
+    });
+    context.read<ValidadorController>().novoArquivo();
   }
 }
 

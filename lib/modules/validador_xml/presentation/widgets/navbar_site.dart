@@ -7,25 +7,42 @@ import '../../../../globals/widgets/icone_favicon.dart';
 import '../../../../globals/widgets/textos.dart';
 
 class NavbarSite extends StatelessWidget {
-  const NavbarSite({super.key});
+  const NavbarSite({super.key, this.onTituloTap});
+
+  /// Acionado ao clicar no ícone/texto da navbar (voltar para a página
+  /// principal). Quando nulo, o cabeçalho não é clicável.
+  final VoidCallback? onTituloTap;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      height: AppDimens.navbarHeight,
+    return Material(
       color: AppColors.navbar,
-      padding: const EdgeInsets.symmetric(horizontal: AppDimens.spaceLg),
-      child: const Row(
-        children: [
-          IconeFavicon(tamanho: AppDimens.navbarIconSize),
-          SizedBox(width: AppDimens.spaceSm),
-          TextoApp.destaque(
-            AppStrings.tituloApp,
-            cor: Colors.white,
+      child: SizedBox(
+        width: double.infinity,
+        height: AppDimens.navbarHeight,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: AppDimens.spaceLg),
+          child: Row(
+            children: [
+              InkWell(
+                onTap: onTituloTap,
+                borderRadius: BorderRadius.circular(AppDimens.radiusSm),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconeFavicon(tamanho: AppDimens.navbarIconSize),
+                    SizedBox(width: AppDimens.spaceSm),
+                    TextoApp.destaque(
+                      AppStrings.tituloApp,
+                      cor: Colors.white,
+                    ),
+                  ],
+                ),
+              ),
+              const Spacer(),
+            ],
           ),
-          Spacer(),
-        ],
+        ),
       ),
     );
   }

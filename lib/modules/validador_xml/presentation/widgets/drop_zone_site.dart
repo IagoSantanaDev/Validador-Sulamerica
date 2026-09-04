@@ -25,7 +25,7 @@ class _DropZoneSiteState extends State<DropZoneSite> {
   static const String _extensaoValida = '.xml';
 
   late final DropzoneViewController _controller;
-  bool _emHover = false;
+  bool _arrastandoArquivo = false;
 
   @override
   Widget build(BuildContext context) {
@@ -33,73 +33,84 @@ class _DropZoneSiteState extends State<DropZoneSite> {
       child: FractionallySizedBox(
         widthFactor: AppDimens.dropZoneMaxWidth,
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: AppDimens.dropZoneLarguraMax),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 120),
-            padding: const EdgeInsets.symmetric(
-              horizontal: AppDimens.spaceLg,
-              vertical: AppDimens.spaceXl,
-            ),
-            decoration: BoxDecoration(
-              color: Colors.transparent,
-              borderRadius: BorderRadius.circular(AppDimens.radiusMd),
-              border: Border.all(
-                color: _emHover ? AppColors.primary : AppColors.border,
-                width: AppDimens.dropZoneBorda,
-              ),
-            ),
-            child: Stack(
-              children: [
-                DropzoneView(
-                  onCreated: (controller) => _controller = controller,
-                  onHover: () => setState(() => _emHover = true),
-                  onLeave: () => setState(() => _emHover = false),
-                  onDropFile: _processarArquivo,
+          constraints:
+              const BoxConstraints(maxWidth: AppDimens.dropZoneLarguraMax),
+          child: SizedBox(
+            height: AppDimens.dropZoneAltura,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 120),
+              decoration: BoxDecoration(
+                color: _arrastandoArquivo
+                    ? AppColors.track
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(AppDimens.radiusMd),
+                border: Border.all(
+                  color: AppColors.border,
+                  width: AppDimens.dropZoneBorda,
                 ),
-                Positioned.fill(
-                  child: Material(
-                    color: Colors.transparent,
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(AppDimens.radiusMd),
-                      onTap: _selecionarPorClique,
-                      child: Opacity(
-                        opacity: _emHover ? 1 : AppDimens.dropZoneOpacidade,
-                        child: const Padding(
-                          padding: EdgeInsets.symmetric(
-                            vertical: AppDimens.spaceLg,
-                          ),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                Icons.cloud_upload,
-                                size: AppDimens.dropZoneIcone,
-                                color: AppColors.textLight,
-                              ),
-                              SizedBox(height: AppDimens.spaceMd),
-                              TextoApp.corpo(
-                                AppStrings.dropZoneTextoLinha1,
-                                cor: AppColors.textLight,
-                                alinhamento: TextAlign.center,
-                              ),
-                              TextoApp.corpo(
-                                AppStrings.dropZoneTextoLinha2,
-                                cor: AppColors.textLight,
-                                alinhamento: TextAlign.center,
-                              ),
-                            ],
-                          ),
+              ),
+              child: Stack(
+                children: [
+                  Positioned.fill(
+                    child: DropzoneView(
+                      onCreated: (controller) => _controller = controller,
+                      onHover: () => _definirArrasto(true),
+                      onLeave: () => _definirArrasto(false),
+                      onDropFile: (arquivo) {
+                        _definirArrasto(false);
+                        _processarArquivo(arquivo);
+                      },
+                    ),
+                  ),
+                  Positioned.fill(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppDimens.spaceLg,
+                        vertical: AppDimens.spaceXl,
+                      ),
+                      child: MouseRegion(
+                        cursor: SystemMouseCursors.click,
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: _selecionarPorClique,
+                          child: _arrastandoArquivo
+                              ? const Icon(
+                                  Icons.upload_file,
+                                  size: AppDimens.dropZoneIconeArrasto,
+                                  color: AppColors.textMuted,
+                                )
+                              : const Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      Icons.cloud_upload,
+                                      size: AppDimens.dropZoneIcone,
+                                      color: AppColors.textLight,
+                                    ),
+                                    SizedBox(height: AppDimens.spaceMd),
+                                    TextoApp.corpo(
+                                      AppStrings.dropZoneTexto,
+                                      cor: AppColors.textLight,
+                                      alinhamento: TextAlign.center,
+                                    ),
+                                  ],
+                                ),
                         ),
                       ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
       ),
     );
+  }
+
+  void _definirArrasto(bool valor) {
+    if (_arrastandoArquivo == valor) return;
+    setState(() => _arrastandoArquivo = valor);
   }
 
   Future<void> _selecionarPorClique() async {
@@ -125,6 +136,6 @@ class _DropZoneSiteState extends State<DropZoneSite> {
 
   void _mostrarSnack(String mensagem) {
     ScaffoldMessenger.maybeOf(context)
-        ?.showSnackBar(SnackBar(content: Text(mensagem)));
+        ?.showSnackBar(SnackBar(content: SelectableText(mensagem)));
   }
 }

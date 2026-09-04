@@ -8,10 +8,8 @@ class AppStrings {
 
   static const String jumbotronLegenda =
       'Validação online de arquivos XML no padrão TISS da ANS.';
-  static const String dropZoneTextoLinha1 =
-      'Clique aqui para selecionar o arquivo';
-  static const String dropZoneTextoLinha2 =
-      'ou arraste ele pra cá para iniciar a validação.';
+  static const String dropZoneTexto =
+      'Clique aqui para selecionar o arquivo ou arraste ele para cá para iniciar a validação.';
   static const String uploadEnviandoArquivo = 'Enviando arquivo';
 
   static const String resultadoTitulo = 'Resultado da Validação';
@@ -19,8 +17,6 @@ class AppStrings {
   static const String processadoEmSufix = ' segundos';
   static const String validarOutroArquivo = 'Validar outro arquivo';
   static const String validacoesPorGuia = 'Validações por guia';
-
-  static const String entenderPorque = '(clique aqui para entender o porquê)';
 
   static const String metadadoNome = 'Nome';
   static const String metadadoTamanho = 'Tamanho';
@@ -30,21 +26,11 @@ class AppStrings {
   static const String metadadoPrestador = 'Prestador';
   static const String metadadoOperadora = 'Operadora';
   static const String metadadoNumeroLote = 'Nº do Lote';
-  static const String metadadoTipoGuia = 'Tipo de Guia';
   static const String metadadoQtdGuias = 'Qtd Guias';
   static const String metadadoValorTotalInformado = 'Valor Total Informado';
-
-  static const String footerCopyright =
-      'Copyright © 2022 — Plataforma Tecnologia em Sistemas';
 
   static const String semErrosTitulo = 'Nenhum erro encontrado';
   static const String semErrosDetalhe =
       'Todas as guias do lote passaram nas regras de validação.';
   static const String falhaValidacaoTitulo = 'Não foi possível validar';
-
-  static const String dialogoEntenda = 'Por que esse erro?';
-  static const String dialogoFechar = 'Fechar';
-
-  static const String rotuloNumeroGuia = 'Guia';
-  static const String rotuloNumeroCarteira = 'Carteira';
 }

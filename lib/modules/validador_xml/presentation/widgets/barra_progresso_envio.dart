@@ -30,7 +30,7 @@ class BarraProgressoEnvio extends StatelessWidget {
                   height: AppDimens.progressoAltura,
                   child: Stack(
                     children: [
-                      Container(color: AppColors.footer),
+                      Container(color: AppColors.track),
                       Positioned.fill(
                         child: Align(
                           alignment: Alignment.centerLeft,
