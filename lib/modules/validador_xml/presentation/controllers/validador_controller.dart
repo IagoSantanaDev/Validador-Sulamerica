@@ -126,9 +126,8 @@ class ValidadorController extends ChangeNotifier {
   int? get tamanhoArquivoBytes => _bytesArquivo?.length;
 
   /// Guias com qualquer problema: erro local OU falha de consulta ao portal.
-  List<GuiaValidada> get guiasComErro => _resultado
-      .where((g) => g.temErro || (g.consulta != null && !g.consulta!.sucesso))
-      .toList();
+  List<GuiaValidada> get guiasComErro =>
+      _resultado.where((g) => g.temErro || g.temFalhaConsulta).toList();
 
   /// Todas as guias validadas (com ou sem erro), já ordenadas.
   List<GuiaValidada> get guias => _resultado;
@@ -215,9 +214,8 @@ class ValidadorController extends ChangeNotifier {
   }
 
   /// Consulta o portal (via /api/consultas em lote) para as guias do lote:
-  /// sem senha → elegibilidade (carteira); senha iniciada em 5 com 10
-  /// caracteres → autorização VPP. Falhas estruturais (credenciais/login,
-  /// carteira inválida) viram erros visíveis na guia em vez de silêncio.
+  /// elegibilidade pela carteira SEMPRE que ela for válida; autorização VPP
+  /// quando a senha for válida. Falhas estruturais viram erros na guia.
   Future<List<GuiaValidada>> _consultarGuias(
     List<GuiaValidada> guias,
   ) async {
@@ -225,58 +223,52 @@ class ValidadorController extends ChangeNotifier {
     if (service == null || guias.isEmpty) return guias;
 
     // Erros locais detectáveis antes de chamar a API: senha fora do padrão
-    // (não começa com 5 / não tem 10 caracteres) e carteira sem 20 dígitos
-    // viram erros próprios na guia, sem consultar o portal.
+    // (não começa com 5 / 10 caracteres) e carteira sem 20 dígitos viram
+    // erros próprios (a elegibilidade/carteira ainda vale pelos itens).
     final List<GuiaValidada> base = List.of(guias);
     for (int i = 0; i < base.length; i++) {
       final GuiaValidada guia = base[i];
-      if (guia.senha case final String senha when !_senhaValidaParaVpp(senha)) {
-        // "Senha inválida" já cobre não começar com 5 / não ter 10
-        // caracteres: remove os erros locais de senha para a guia exibir
-        // uma única linha, sem duplicidade.
-        base[i] = GuiaValidada(
-          guia: guia.guia,
-          erros: guia.erros.where((e) => e.campo != 'senha').toList(),
-          consulta: const ConsultaGuia(
-            tipo: TipoConsultaGuia.autorizacaoVpp,
-            sucesso: false,
-            descricao: AppStrings.erroVppSenhaInvalida,
-          ),
-        );
-        continue;
-      }
+      final String? senha = guia.senha;
       final String? carteira = guia.numeroCarteira;
-      if ((guia.senha == null || guia.senha!.isEmpty) &&
-          carteira != null &&
+      final List<ConsultaGuia> errosLocais = [];
+      if (senha != null && senha.isNotEmpty && !_senhaValidaParaVpp(senha)) {
+        errosLocais.add(const ConsultaGuia(
+          tipo: TipoConsultaGuia.autorizacaoVpp,
+          sucesso: false,
+          descricao: AppStrings.erroVppSenhaInvalida,
+        ),);
+      }
+      if (carteira != null &&
           carteira.isNotEmpty &&
           !_carteiraValida(carteira)) {
-        base[i] = _anexarConsulta(
-          guia,
-          const ConsultaGuia(
-            tipo: TipoConsultaGuia.elegibilidade,
-            sucesso: false,
-            descricao: AppStrings.erroCarteiraInvalida,
-          ),
-        );
-        continue;
+        errosLocais.add(const ConsultaGuia(
+          tipo: TipoConsultaGuia.elegibilidade,
+          sucesso: false,
+          descricao: AppStrings.erroCarteiraInvalida,
+        ),);
       }
-      if (guia.consulta case final ConsultaGuia consulta
-          when !consulta.sucesso) {
-        // já marcada localmente (acima)
-        continue;
+      if (errosLocais.isNotEmpty) {
+        // "Senha inválida" substitui os erros locais de senha (linha única).
+        base[i] = GuiaValidada(
+          guia: guia.guia,
+          erros:
+              senha != null && senha.isNotEmpty && !_senhaValidaParaVpp(senha)
+                  ? guia.erros.where((e) => e.campo != 'senha').toList()
+                  : guia.erros,
+          consultas: errosLocais,
+        );
       }
     }
 
-    // Itens de consulta únicos (dedupe tipo+chave) para enviar ao lote;
-    // montando antes do login para evitar sessão sem consultas úteis.
+    // Itens de consulta únicos (até 2 por guia: carteira + senha válida).
     final List<ConsultaLoteItem> itens = [];
     final Set<String> chavesVistas = {};
     for (final GuiaValidada guia in base) {
-      final ConsultaLoteItem? item = _itemDeConsulta(guia);
-      if (item == null) continue;
-      final String chaveUnica = '${item.tipo.name}|${item.chave}';
-      if (chavesVistas.add(chaveUnica)) {
-        itens.add(item);
+      for (final ConsultaLoteItem item in _itensDeConsulta(guia)) {
+        final String chaveUnica = '${item.tipo.name}|${item.chave}';
+        if (chavesVistas.add(chaveUnica)) {
+          itens.add(item);
+        }
       }
     }
     if (itens.isEmpty) return base;
@@ -290,8 +282,7 @@ class ValidadorController extends ChangeNotifier {
         descricao: motivoErro ?? AppStrings.erroCredenciaisAusentes,
       );
       return [
-        for (final GuiaValidada guia in base)
-          guia.consulta == null ? _anexarConsulta(guia, erro) : guia,
+        for (final GuiaValidada guia in base) _anexarConsulta(guia, erro),
       ];
     }
 
@@ -303,17 +294,17 @@ class ValidadorController extends ChangeNotifier {
       onSuccess: (resultados) {
         final Map<String, ConsultaGuia> porChave = {
           for (final ResultadoConsultaLote r in resultados)
-            r.chave: _consultaDesdeBatch(r),
+            '${r.tipo.name}|${r.chave}': _consultaDesdeBatch(r),
         };
-        // Aplica o resultado a TODAS as guias com a mesma chave (o lote
-        // enviou chaves únicas, mas várias guias podem compartilhá-las).
+        // Aplica os resultados por item (elegibilidade e/ou VPP) a cada guia.
         final List<GuiaValidada> acumulado = List.of(base);
         for (int indice = 0; indice < base.length; indice++) {
-          final ConsultaLoteItem? item = _itemDeConsulta(base[indice]);
-          if (item == null) continue;
-          final ConsultaGuia? consulta = porChave[item.chave];
-          if (consulta == null) continue;
-          acumulado[indice] = _anexarConsulta(acumulado[indice], consulta);
+          for (final ConsultaLoteItem item in _itensDeConsulta(base[indice])) {
+            final ConsultaGuia? consulta =
+                porChave['${item.tipo.name}|${item.chave}'];
+            if (consulta == null) continue;
+            acumulado[indice] = _anexarConsulta(acumulado[indice], consulta);
+          }
         }
         return acumulado;
       },
@@ -330,28 +321,25 @@ class ValidadorController extends ChangeNotifier {
   static bool _carteiraValida(String carteira) =>
       carteira.length == 20 && RegExp(r'^\d+$').hasMatch(carteira);
 
-  /// Decide a consulta aplicável a uma guia (elegibilidade sem senha; VPP
-  /// para senha válida); nula quando a guia não deve ser consultada.
-  ConsultaLoteItem? _itemDeConsulta(GuiaValidada guia) {
-    final String? senha = guia.senha;
-    if (senha == null || senha.isEmpty) {
-      final String? carteira = guia.numeroCarteira;
-      // Carteira inválida não vai ao lote; o erro já foi anexado antes.
-      if (carteira == null || carteira.isEmpty || !_carteiraValida(carteira)) {
-        return null;
-      }
-      return ConsultaLoteItem(
+  /// Consultas aplicáveis a uma guia: elegibilidade pela carteira (sempre que
+  /// válida) + autorização VPP (quando a senha é válida).
+  List<ConsultaLoteItem> _itensDeConsulta(GuiaValidada guia) {
+    final List<ConsultaLoteItem> itens = [];
+    final String? carteira = guia.numeroCarteira;
+    if (carteira != null && carteira.isNotEmpty && _carteiraValida(carteira)) {
+      itens.add(ConsultaLoteItem(
         tipo: TipoConsultaGuia.elegibilidade,
         chave: carteira,
-      );
+      ),);
     }
-    if (_senhaValidaParaVpp(senha)) {
-      return ConsultaLoteItem(
+    final String? senha = guia.senha;
+    if (senha != null && _senhaValidaParaVpp(senha)) {
+      itens.add(ConsultaLoteItem(
         tipo: TipoConsultaGuia.autorizacaoVpp,
         chave: senha,
-      );
+      ),);
     }
-    return null;
+    return itens;
   }
 
   ConsultaGuia _consultaDesdeBatch(ResultadoConsultaLote r) {
@@ -413,9 +401,68 @@ class ValidadorController extends ChangeNotifier {
     _cacheAutorizacao.clear();
     final List<GuiaValidada> comConsultas = [];
     for (final GuiaValidada guia in guias) {
-      comConsultas.add(await _consultarGuia(service, token, guia));
+      GuiaValidada atual = guia;
+      for (final ConsultaLoteItem item in _itensDeConsulta(atual)) {
+        final ConsultaGuia consulta =
+            item.tipo == TipoConsultaGuia.elegibilidade
+                ? await _consultarElegibilidadeItem(service, token, item.chave)
+                : await _consultarAutorizacaoItem(service, token, item.chave);
+        atual = _anexarConsulta(atual, consulta);
+      }
+      comConsultas.add(atual);
     }
     return comConsultas;
+  }
+
+  static bool _senhaValidaParaVpp(String senha) =>
+      senha.length == 10 && senha.startsWith('5');
+
+  Future<ConsultaGuia> _consultarElegibilidadeItem(
+    SulAmericaBackendService service,
+    String token,
+    String carteira,
+  ) async {
+    final ConsultaGuia? naCache = _cacheElegibilidade[carteira];
+    if (naCache != null) return naCache;
+
+    final Result<ResultadoConsultaBeneficiario> resultado =
+        await service.consultarBeneficiario(token: token, carteira: carteira);
+
+    final ConsultaGuia consulta = resultado.fold<ConsultaGuia>(
+      onSuccess: (res) => _consultaElegibilidade(res.elegivel),
+      onFailure: (erro) => ConsultaGuia(
+        tipo: TipoConsultaGuia.elegibilidade,
+        sucesso: false,
+        descricao: 'Consulta de elegibilidade falhou: $erro',
+      ),
+    );
+    _cacheElegibilidade[carteira] = consulta;
+    return consulta;
+  }
+
+  Future<ConsultaGuia> _consultarAutorizacaoItem(
+    SulAmericaBackendService service,
+    String token,
+    String senha,
+  ) async {
+    final ConsultaGuia? naCache = _cacheAutorizacao[senha];
+    if (naCache != null) return naCache;
+
+    final Result<Map<String, dynamic>> resultado =
+        await service.autorizacaoVpp(token: token, numeroVpp: senha);
+
+    final ConsultaGuia consulta = resultado.fold<ConsultaGuia>(
+      // O backend devolve resposta compacta (descricao do status) — sem o
+      // JSON cru do portal.
+      onSuccess: (dados) => _consultaVpp(dados['descricao'] as String?),
+      onFailure: (erro) => ConsultaGuia(
+        tipo: TipoConsultaGuia.autorizacaoVpp,
+        sucesso: false,
+        descricao: 'Consulta de autorização VPP falhou: $erro',
+      ),
+    );
+    _cacheAutorizacao[senha] = consulta;
+    return consulta;
   }
 
   /// Retorna (token, motivoDeErro): token nulo com motivo quando a sessão
@@ -451,81 +498,6 @@ class ValidadorController extends ChangeNotifier {
     );
   }
 
-  Future<GuiaValidada> _consultarGuia(
-    SulAmericaBackendService service,
-    String token,
-    GuiaValidada guia,
-  ) async {
-    final String? senha = guia.senha;
-    if (senha == null || senha.isEmpty) {
-      return _consultarElegibilidade(service, token, guia);
-    }
-    if (_senhaValidaParaVpp(senha)) {
-      return _consultarAutorizacaoVpp(service, token, guia);
-    }
-    return guia;
-  }
-
-  static bool _senhaValidaParaVpp(String senha) =>
-      senha.length == 10 && senha.startsWith('5');
-
-  Future<GuiaValidada> _consultarElegibilidade(
-    SulAmericaBackendService service,
-    String token,
-    GuiaValidada guia,
-  ) async {
-    final String? carteira = guia.numeroCarteira;
-    if (carteira == null || carteira.isEmpty) return guia;
-
-    final ConsultaGuia? naCache = _cacheElegibilidade[carteira];
-    if (naCache != null) {
-      return _anexarConsulta(guia, naCache);
-    }
-
-    final Result<ResultadoConsultaBeneficiario> resultado =
-        await service.consultarBeneficiario(token: token, carteira: carteira);
-
-    final ConsultaGuia consulta = resultado.fold<ConsultaGuia>(
-      onSuccess: (res) => _consultaElegibilidade(res.elegivel),
-      onFailure: (erro) => ConsultaGuia(
-        tipo: TipoConsultaGuia.elegibilidade,
-        sucesso: false,
-        descricao: 'Consulta de elegibilidade falhou: $erro',
-      ),
-    );
-    _cacheElegibilidade[carteira] = consulta;
-    return _anexarConsulta(guia, consulta);
-  }
-
-  Future<GuiaValidada> _consultarAutorizacaoVpp(
-    SulAmericaBackendService service,
-    String token,
-    GuiaValidada guia,
-  ) async {
-    final String senha = guia.senha!;
-
-    final ConsultaGuia? naCache = _cacheAutorizacao[senha];
-    if (naCache != null) {
-      return _anexarConsulta(guia, naCache);
-    }
-
-    final Result<Map<String, dynamic>> resultado =
-        await service.autorizacaoVpp(token: token, numeroVpp: senha);
-
-    final ConsultaGuia consulta = resultado.fold<ConsultaGuia>(
-      // O backend devolve resposta compacta (descricao do status) — sem o
-      // JSON cru do portal.
-      onSuccess: (dados) => _consultaVpp(dados['descricao'] as String?),
-      onFailure: (erro) => ConsultaGuia(
-        tipo: TipoConsultaGuia.autorizacaoVpp,
-        sucesso: false,
-        descricao: 'Consulta de autorização VPP falhou: $erro',
-      ),
-    );
-    _cacheAutorizacao[senha] = consulta;
-    return _anexarConsulta(guia, consulta);
-  }
-
   /// Monta o resultado da autorização VPP a partir da descrição do status do
   /// portal. Autorizada quando a descrição CONTÉM a palavra "autorizado"
   /// (case-insensitive) — cobre "Autorizado", "Autorizada", "Autorizado
@@ -549,7 +521,11 @@ class ValidadorController extends ChangeNotifier {
       descricao != null && descricao.toLowerCase().contains('autorizado');
 
   GuiaValidada _anexarConsulta(GuiaValidada guia, ConsultaGuia consulta) =>
-      GuiaValidada(guia: guia.guia, erros: guia.erros, consulta: consulta);
+      GuiaValidada(
+        guia: guia.guia,
+        erros: guia.erros,
+        consultas: [...guia.consultas, consulta],
+      );
 
   String _decodificarXml(Uint8List bytes) {
     try {

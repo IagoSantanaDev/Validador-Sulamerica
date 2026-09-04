@@ -21,15 +21,16 @@ void main() {
       ),
       ErroValidacao(campo: 'senha', mensagem: 'senha não informada'),
     ],
-    consulta: ConsultaGuia(
-      sucesso: false,
-      descricao: 'Carteira não encontrada',
-    ),
+    consultas: [
+      ConsultaGuia(
+        sucesso: false,
+        descricao: 'Carteira não encontrada',
+      ),
+    ],
   );
 
   group('linhasDeGuia - expansão da grade', () {
-    test('cada erro local vira uma linha própria e a consulta outra linha',
-        () {
+    test('cada erro local vira uma linha própria e a consulta outra linha', () {
       final List<LinhaGradeGuia> linhas = linhasDeGuia(guiaMulti);
 
       expect(linhas, hasLength(3));
@@ -66,11 +67,13 @@ void main() {
         erros: [
           ErroValidacao(campo: 'senha', mensagem: 'senha não informada'),
         ],
-        consulta: ConsultaGuia(
-          tipo: TipoConsultaGuia.elegibilidade,
-          sucesso: true,
-          descricao: 'Elegível: SIM',
-        ),
+        consultas: [
+          ConsultaGuia(
+            tipo: TipoConsultaGuia.elegibilidade,
+            sucesso: true,
+            descricao: 'Elegível: SIM',
+          ),
+        ],
       );
 
       final List<LinhaGradeGuia> linhas = linhasDeGuia(elegivelSim);
@@ -121,10 +124,12 @@ void main() {
       const GuiaValidada guiaConsulta = GuiaValidada(
         guia: guia,
         erros: [],
-        consulta: ConsultaGuia(
-          sucesso: false,
-          descricao: 'Beneficiário não elegível',
-        ),
+        consultas: [
+          ConsultaGuia(
+            sucesso: false,
+            descricao: 'Beneficiário não elegível',
+          ),
+        ],
       );
       final LinhaGradeGuia linha = linhasDeGuia(guiaConsulta).single;
 
@@ -135,10 +140,12 @@ void main() {
       const GuiaValidada guiaCarteira = GuiaValidada(
         guia: guia,
         erros: [],
-        consulta: ConsultaGuia(
-          sucesso: false,
-          descricao: 'Carteira não encontrada',
-        ),
+        consultas: [
+          ConsultaGuia(
+            sucesso: false,
+            descricao: 'Carteira não encontrada',
+          ),
+        ],
       );
       final LinhaGradeGuia linha = linhasDeGuia(guiaCarteira).single;
 

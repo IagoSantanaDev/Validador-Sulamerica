@@ -24,17 +24,18 @@ class LinhaGradeGuia {
 bool _ehSenhaNaoInformada(String detalhe) =>
     detalhe.toLowerCase().contains('senha não informada');
 
-/// Expande uma guia problemática em linhas: um erro local por linha e, quando
-/// a consulta ao portal FALHOU, uma linha adicional com o motivo. Consultas
-/// bem-sucedidas (Elegível: SIM, Autorização VPP: ok) NÃO viram linha de erro
-/// — ficam no popup. A linha de "Senha não informada" é sempre a última.
+/// Expande uma guia problemática em linhas: um erro local por linha e, para
+/// cada CONSULTA que falhou (elegibilidade NÃO, senha inválida, autorização
+/// negada...), uma linha adicional com o motivo. Consultas bem-sucedidas
+/// (Elegível: SIM, Autorização VPP: ok) NÃO viram linha — ficam no popup.
+/// A linha de "Senha não informada" é sempre a última.
 List<LinhaGradeGuia> linhasDeGuia(GuiaValidada guia) {
   final List<LinhaGradeGuia> linhas = [
     for (final erro in guia.erros)
       LinhaGradeGuia(guia: guia, detalhe: erro.mensagem),
-    if (guia.consulta case final ConsultaGuia consulta
-        when !consulta.sucesso)
-      LinhaGradeGuia(guia: guia, detalhe: consulta.descricao),
+    for (final ConsultaGuia consulta in guia.consultas)
+      if (!consulta.sucesso)
+        LinhaGradeGuia(guia: guia, detalhe: consulta.descricao),
   ];
 
   final int indiceSenha = linhas.indexWhere(
@@ -56,8 +57,7 @@ List<LinhaGradeGuia> agruparPorDetalhe(List<LinhaGradeGuia> linhas) {
     grupos.putIfAbsent(linha.detalhe, () => []).add(linha);
   }
   final List<LinhaGradeGuia> ordenado = [];
-  for (final MapEntry<String, List<LinhaGradeGuia>> entrada
-      in grupos.entries) {
+  for (final MapEntry<String, List<LinhaGradeGuia>> entrada in grupos.entries) {
     if (_ehSenhaNaoInformada(entrada.key)) continue;
     ordenado.addAll(entrada.value);
   }
@@ -72,22 +72,23 @@ List<LinhaGradeGuia> agruparPorDetalhe(List<LinhaGradeGuia> linhas) {
 /// Categoriza UMA LINHA (detalhe) para o filtro: erros locais pelo campo, a
 /// linha da consulta pelo tipo/motivo. Nula quando não categorizável.
 TipoErroGuia? tipoErroDeLinha(LinhaGradeGuia linha) {
-  final ConsultaGuia? consulta = linha.guia.consulta;
   final String detalhe = linha.detalhe;
-  // Linha da consulta (falha): o detalhe é a própria descrição da consulta.
-  if (consulta != null && !consulta.sucesso && detalhe == consulta.descricao) {
-    if (detalhe.contains('autenticar') ||
-        detalhe.contains('Credenciais') ||
-        detalhe.contains('credenciais')) {
-      return TipoErroGuia.credenciais;
-    }
-    if (consulta.tipo == TipoConsultaGuia.elegibilidade) {
-      if (detalhe.contains('Carteira') || detalhe.contains('carteira')) {
-        return TipoErroGuia.carteira;
+  // Linha de consulta (falha): procura a consulta cuja descrição é o detalhe.
+  for (final ConsultaGuia consulta in linha.guia.consultas) {
+    if (!consulta.sucesso && detalhe == consulta.descricao) {
+      if (detalhe.contains('autenticar') ||
+          detalhe.contains('Credenciais') ||
+          detalhe.contains('credenciais')) {
+        return TipoErroGuia.credenciais;
       }
-      return TipoErroGuia.elegibilidade;
+      if (consulta.tipo == TipoConsultaGuia.elegibilidade) {
+        if (detalhe.contains('Carteira') || detalhe.contains('carteira')) {
+          return TipoErroGuia.carteira;
+        }
+        return TipoErroGuia.elegibilidade;
+      }
+      return TipoErroGuia.autorizacao;
     }
-    return TipoErroGuia.autorizacao;
   }
   // Linha de erro local: categoriza pelo campo do erro correspondente.
   for (final erro in linha.guia.erros) {
@@ -101,21 +102,22 @@ TipoErroGuia? tipoErroDeLinha(LinhaGradeGuia linha) {
 /// Categoriza o problema que uma guia representa (erro local ou de consulta).
 /// Nulo quando a guia não tem problema.
 TipoErroGuia? tipoErroDe(GuiaValidada guia) {
-  final ConsultaGuia? consulta = guia.consulta;
-  if (consulta != null && !consulta.sucesso) {
-    final String descricao = consulta.descricao;
-    if (descricao.contains('autenticar') ||
-        descricao.contains('Credenciais') ||
-        descricao.contains('credenciais')) {
-      return TipoErroGuia.credenciais;
-    }
-    if (consulta.tipo == TipoConsultaGuia.elegibilidade) {
-      if (descricao.contains('Carteira') || descricao.contains('carteira')) {
-        return TipoErroGuia.carteira;
+  for (final ConsultaGuia consulta in guia.consultas) {
+    if (!consulta.sucesso) {
+      final String descricao = consulta.descricao;
+      if (descricao.contains('autenticar') ||
+          descricao.contains('Credenciais') ||
+          descricao.contains('credenciais')) {
+        return TipoErroGuia.credenciais;
       }
-      return TipoErroGuia.elegibilidade;
+      if (consulta.tipo == TipoConsultaGuia.elegibilidade) {
+        if (descricao.contains('Carteira') || descricao.contains('carteira')) {
+          return TipoErroGuia.carteira;
+        }
+        return TipoErroGuia.elegibilidade;
+      }
+      return TipoErroGuia.autorizacao;
     }
-    return TipoErroGuia.autorizacao;
   }
   if (guia.erros.any((e) => e.campo == 'senha')) {
     return TipoErroGuia.senha;
@@ -242,10 +244,9 @@ class GradeGuias extends StatelessWidget {
                 rotulo: AppStrings.rotuloSenha,
                 valor: guia.senha ?? AppStrings.valorIndisponivel,
               ),
-              // Resultados de SUCESSO da consulta (Elegível: SIM, Autorização
-              // VPP: ok) — motivos de erro ficam nas linhas da grade.
-              if (guia.consulta case final ConsultaGuia consulta
-                  when consulta.sucesso) ...[
+              // Visão geral: status de CADA consulta (elegibilidade e/ou
+              // autorização), sem semântica de erro — erros ficam na grade.
+              for (final ConsultaGuia consulta in guia.consultas) ...[
                 const SizedBox(height: AppDimens.spaceMd),
                 RotuloValor(
                   rotulo: consulta.tipo == TipoConsultaGuia.elegibilidade

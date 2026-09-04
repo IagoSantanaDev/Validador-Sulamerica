@@ -214,18 +214,21 @@ void main() {
       );
 
       expect(controller.status, StatusValidador.concluido);
-      // Login + uma única chamada de lote; sem chamadas individuais.
+      // Login + uma única chamada de lote; sem chamadas individuais. A guia
+      // sem senha recebe 1 item (elegibilidade); a com senha, 2 (carteira +
+      // VPP).
       expect(adapter.logChamadas, ['/api/login', '/api/consultas']);
-      expect(adapter.consultasRecebidas, hasLength(2));
+      expect(adapter.consultasRecebidas, hasLength(3));
 
+      expect(controller.guiasComErro.first.consultas, hasLength(1));
       expect(
-        controller.guiasComErro.single.consulta?.descricao,
+        controller.guiasComErro.first.consulta?.descricao,
         'Elegível: SIM',
       );
-      expect(
-        controller.guias[1].consulta?.descricao,
-        'Autorização VPP: ok',
-      );
+      final List<String> consultasGuiaSenha =
+          controller.guias[1].consultas.map((c) => c.descricao).toList();
+      expect(consultasGuiaSenha, contains('Elegível: SIM'));
+      expect(consultasGuiaSenha, contains('Autorização VPP: ok'));
     });
 
     test('batch agrupa chaves repetidas em uma única consulta', () async {
@@ -276,9 +279,9 @@ void main() {
       );
 
       expect(controller.status, StatusValidador.concluido);
-      final ConsultaGuia? consulta = controller.guias.single.consulta;
-      expect(consulta, isNotNull);
-      expect(consulta!.sucesso, isTrue);
+      final ConsultaGuia consulta = controller.guias.single.consultas
+          .firstWhere((c) => c.tipo == TipoConsultaGuia.autorizacaoVpp);
+      expect(consulta.sucesso, isTrue);
       expect(consulta.descricao, 'Autorização VPP: ok');
     });
 
@@ -322,15 +325,14 @@ void main() {
       );
 
       expect(controller.status, StatusValidador.concluido);
-      expect(adapter.logChamadas, isEmpty);
-      expect(adapter.consultasRecebidas, isEmpty);
-      final ConsultaGuia? consulta = controller.guiasComErro.single.consulta;
-      expect(consulta, isNotNull);
-      expect(consulta!.sucesso, isFalse);
-      expect(consulta.descricao, 'Senha inválida');
-      // Sem duplicidade: o erro local de senha foi substituído por Senha
-      // inválida (uma única linha na grade).
-      expect(controller.guiasComErro.single.erros, isEmpty);
+      // Senha inválida vira erro local; a carteira válida ainda consulta a
+      // elegibilidade no lote (único item enviado, sem VPP).
+      expect(adapter.logChamadas, ['/api/login', '/api/consultas']);
+      expect(adapter.consultasRecebidas, hasLength(1));
+      final List<String> descricoes =
+          controller.guiasComErro.single.consultas.map((c) => c.descricao).toList();
+      expect(descricoes, contains('Senha inválida'));
+      expect(descricoes, contains('Elegível: SIM'));
     });
 
     test('fallback: sem /api/consultas usa o fluxo individual', () async {
@@ -356,8 +358,7 @@ void main() {
     });
 
     test('elegibilidade NÃO é um erro próprio no frontend', () async {
-      final _FakeBatchAdapter adapter =
-          _FakeBatchAdapter(elegivel: false);
+      final _FakeBatchAdapter adapter = _FakeBatchAdapter(elegivel: false);
 
       final ValidadorController controller = await _validar(
         _controllerComGateway(
