@@ -259,13 +259,11 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
             for (final GuiaValidada g in comProblema)
               if (tipoErroDe(g) == _filtroErro) g,
           ];
-    // Cada detalhe (erro local ou consulta) vira uma linha própria da grade.
-    final List<LinhaGradeGuia> linhas = [
+    // Cada detalhe (erro local ou consulta) vira uma linha própria da grade,
+    // agrupadas por detalhe igual; "senha não informada" fica por último.
+    final List<LinhaGradeGuia> linhas = agruparPorDetalhe([
       for (final GuiaValidada g in guias) ...linhasDeGuia(g),
-    ];
-    final int falhasConsulta = c.guias
-        .where((g) => g.consulta != null && !g.consulta!.sucesso)
-        .length;
+    ]);
     return SingleChildScrollView(
       key: const ValueKey('resultado'),
       child: Center(
@@ -292,17 +290,6 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
                   ),
                 ),
                 const SizedBox(height: AppDimens.spaceLg),
-                if (falhasConsulta > 0) ...[
-                  PainelStatus(
-                    icone: Icons.cloud_off,
-                    cor: AppColors.warning,
-                    corFundo: AppColors.surfaceMuted,
-                    titulo: AppStrings.consultasFalharamTitulo,
-                    mensagem:
-                        '$falhasConsulta ${AppStrings.consultasFalharamDetalhe}',
-                  ),
-                  const SizedBox(height: AppDimens.spaceLg),
-                ],
                 if (comProblema.isEmpty)
                   const PainelStatus(
                     icone: Icons.check_circle_outline,
@@ -346,7 +333,8 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
     );
   }
 
-  /// Chips para filtrar a grade por tipo de erro.
+  /// Chips para filtrar a grade por tipo de erro (sem a categoria
+  /// Credenciais, que é exibida apenas em "Todas").
   Widget _filtroErros() {
     return Wrap(
       spacing: AppDimens.spaceSm,
@@ -358,13 +346,14 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
           onSelected: (_) => setState(() => _filtroErro = null),
         ),
         for (final TipoErroGuia tipo in TipoErroGuia.values)
-          ChoiceChip(
-            label: Text(rotuloTipoErro(tipo)),
-            selected: _filtroErro == tipo,
-            onSelected: (_) => setState(() {
-              _filtroErro = _filtroErro == tipo ? null : tipo;
-            }),
-          ),
+          if (tipo != TipoErroGuia.credenciais)
+            ChoiceChip(
+              label: Text(rotuloTipoErro(tipo)),
+              selected: _filtroErro == tipo,
+              onSelected: (_) => setState(() {
+                _filtroErro = _filtroErro == tipo ? null : tipo;
+              }),
+            ),
       ],
     );
   }

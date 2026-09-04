@@ -59,5 +59,48 @@ void main() {
       expect(linhas, hasLength(1));
       expect(linhas.single.detalhe, 'senha não informada');
     });
+
+    test('consulta bem-sucedida (Elegível: SIM) não vira linha de erro', () {
+      const GuiaValidada elegivelSim = GuiaValidada(
+        guia: guia,
+        erros: [
+          ErroValidacao(campo: 'senha', mensagem: 'senha não informada'),
+        ],
+        consulta: ConsultaGuia(
+          tipo: TipoConsultaGuia.elegibilidade,
+          sucesso: true,
+          descricao: 'Elegível: SIM',
+        ),
+      );
+
+      final List<LinhaGradeGuia> linhas = linhasDeGuia(elegivelSim);
+      expect(linhas, hasLength(1));
+      expect(linhas.single.detalhe, 'senha não informada');
+    });
+  });
+
+  group('agruparPorDetalhe - ordenação da grade', () {
+    test('detalhes iguais ficam agrupados e senha não informada por último',
+        () {
+      final List<LinhaGradeGuia> linhas = agruparPorDetalhe([
+        const LinhaGradeGuia(guia: guiaMulti, detalhe: 'senha não informada'),
+        const LinhaGradeGuia(
+          guia: guiaMulti,
+          detalhe: 'Carteira não encontrada',
+        ),
+        const LinhaGradeGuia(guia: guiaMulti, detalhe: 'senha não informada'),
+        const LinhaGradeGuia(
+          guia: guiaMulti,
+          detalhe: 'Carteira não encontrada',
+        ),
+      ]);
+
+      expect(linhas, hasLength(4));
+      // Blocos por detalhe: carteira primeiro, senha por último.
+      expect(linhas[0].detalhe, 'Carteira não encontrada');
+      expect(linhas[1].detalhe, 'Carteira não encontrada');
+      expect(linhas[2].detalhe, 'senha não informada');
+      expect(linhas[3].detalhe, 'senha não informada');
+    });
   });
 }

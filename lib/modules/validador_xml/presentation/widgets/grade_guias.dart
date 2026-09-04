@@ -21,13 +21,15 @@ class LinhaGradeGuia {
 }
 
 /// Expande uma guia problemática em linhas: um erro local por linha e, quando
-/// há consulta, uma linha adicional com o respectivo motivo. A linha de
-/// "senha não informada" é sempre movida para o final.
+/// a consulta ao portal FALHOU, uma linha adicional com o motivo. Consultas
+/// bem-sucedidas (Elegível: SIM, Autorização VPP: ok) NÃO viram linha de erro
+/// — ficam no popup. A linha de "senha não informada" é sempre a última.
 List<LinhaGradeGuia> linhasDeGuia(GuiaValidada guia) {
   final List<LinhaGradeGuia> linhas = [
     for (final erro in guia.erros)
       LinhaGradeGuia(guia: guia, detalhe: erro.mensagem),
-    if (guia.consulta case final ConsultaGuia consulta)
+    if (guia.consulta case final ConsultaGuia consulta
+        when !consulta.sucesso)
       LinhaGradeGuia(guia: guia, detalhe: consulta.descricao),
   ];
 
@@ -38,6 +40,29 @@ List<LinhaGradeGuia> linhasDeGuia(GuiaValidada guia) {
     linhas.add(linhaSenha);
   }
   return linhas;
+}
+
+/// Agrupa as linhas por detalhe igual (guias com o mesmo detalhe ficam uma
+/// abaixo da outra, na ordem em que apareceram) e garante que o bloco de
+/// "senha não informada" vá para o final da grade.
+List<LinhaGradeGuia> agruparPorDetalhe(List<LinhaGradeGuia> linhas) {
+  final Map<String, List<LinhaGradeGuia>> grupos = {};
+  for (final LinhaGradeGuia linha in linhas) {
+    grupos.putIfAbsent(linha.detalhe, () => []).add(linha);
+  }
+  final List<LinhaGradeGuia> ordenado = [];
+  for (final MapEntry<String, List<LinhaGradeGuia>> entrada
+      in grupos.entries) {
+    if (entrada.key.contains('senha não informada')) continue;
+    ordenado.addAll(entrada.value);
+  }
+  for (final List<LinhaGradeGuia> lista in grupos.values) {
+    if (lista.isNotEmpty &&
+        lista.first.detalhe.contains('senha não informada')) {
+      ordenado.addAll(lista);
+    }
+  }
+  return ordenado;
 }
 
 /// Categoriza o problema que uma guia representa (erro local ou de consulta).
@@ -184,6 +209,18 @@ class GradeGuias extends StatelessWidget {
                 rotulo: AppStrings.rotuloSenha,
                 valor: guia.senha ?? AppStrings.valorIndisponivel,
               ),
+              // Resultados de SUCESSO da consulta (Elegível: SIM, Autorização
+              // VPP: ok) — motivos de erro ficam nas linhas da grade.
+              if (guia.consulta case final ConsultaGuia consulta
+                  when consulta.sucesso) ...[
+                const SizedBox(height: AppDimens.spaceMd),
+                RotuloValor(
+                  rotulo: consulta.tipo == TipoConsultaGuia.elegibilidade
+                      ? AppStrings.rotuloElegibilidade
+                      : AppStrings.rotuloAutorizacaoVpp,
+                  valor: consulta.descricao,
+                ),
+              ],
             ],
           ),
           actions: [

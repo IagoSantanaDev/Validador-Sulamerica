@@ -223,11 +223,24 @@ class ValidadorController extends ChangeNotifier {
     final SulAmericaBackendService? service = _service;
     if (service == null || guias.isEmpty) return guias;
 
-    // Erros locais detectáveis antes de chamar a API: carteira sem 20 dígitos
-    // não vai ao lote; vira erro próprio na guia.
+    // Erros locais detectáveis antes de chamar a API: senha fora do padrão
+    // (não começa com 5 / não tem 10 caracteres) e carteira sem 20 dígitos
+    // viram erros próprios na guia, sem consultar o portal.
     final List<GuiaValidada> base = List.of(guias);
     for (int i = 0; i < base.length; i++) {
       final GuiaValidada guia = base[i];
+      if (guia.senha case final String senha
+          when !_senhaValidaParaVpp(senha)) {
+        base[i] = _anexarConsulta(
+          guia,
+          const ConsultaGuia(
+            tipo: TipoConsultaGuia.autorizacaoVpp,
+            sucesso: false,
+            descricao: AppStrings.erroVppSenhaInvalida,
+          ),
+        );
+        continue;
+      }
       final String? carteira = guia.numeroCarteira;
       if ((guia.senha == null || guia.senha!.isEmpty) &&
           carteira != null &&

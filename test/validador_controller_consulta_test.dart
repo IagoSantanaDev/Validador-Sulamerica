@@ -324,7 +324,10 @@ void main() {
       expect(controller.status, StatusValidador.concluido);
       expect(adapter.logChamadas, isEmpty);
       expect(adapter.consultasRecebidas, isEmpty);
-      expect(controller.guiasComErro.single.consulta, isNull);
+      final ConsultaGuia? consulta = controller.guiasComErro.single.consulta;
+      expect(consulta, isNotNull);
+      expect(consulta!.sucesso, isFalse);
+      expect(consulta.descricao, 'Autorização VPP: senha inválida');
     });
 
     test('fallback: sem /api/consultas usa o fluxo individual', () async {

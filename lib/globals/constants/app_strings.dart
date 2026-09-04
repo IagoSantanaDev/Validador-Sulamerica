@@ -76,10 +76,6 @@ class AppStrings {
   static const String erroCredenciaisAusentes =
       'Credenciais do portal não configuradas (PORTAL_CODE/USER/SENHA).';
 
-  static const String consultasFalharamTitulo = 'Consultas ao portal falharam';
-  static const String consultasFalharamDetalhe =
-      'guia(s) com falha na consulta — clique na linha para ver o detalhe.';
-
   static const String filtroTodos = 'Todas';
   static const String filtroSenha = 'Senha';
   static const String filtroCarteira = 'Carteira';
