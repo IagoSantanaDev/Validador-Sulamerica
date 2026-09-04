@@ -125,15 +125,16 @@ class ValidadorController extends ChangeNotifier {
   String? get mensagemErro => _mensagemErro;
   int? get tamanhoArquivoBytes => _bytesArquivo?.length;
 
-  List<GuiaValidada> get guiasComErro =>
-      _resultado.where((guia) => guia.temErro).toList();
+  /// Guias com qualquer problema: erro local OU falha de consulta ao portal.
+  List<GuiaValidada> get guiasComErro => _resultado
+      .where((g) => g.temErro || (g.consulta != null && !g.consulta!.sucesso))
+      .toList();
 
   /// Todas as guias validadas (com ou sem erro), já ordenadas.
   List<GuiaValidada> get guias => _resultado;
 
   int get totalGuias => _resultado.length;
-  int get totalGuiasComErro =>
-      _resultado.where((guia) => guia.temErro).length;
+  int get totalGuiasComErro => _resultado.where((guia) => guia.temErro).length;
 
   InformacoesLote get informacoes => _informacoes;
   String? get hashMd5 => _hashMd5;
@@ -229,11 +230,14 @@ class ValidadorController extends ChangeNotifier {
     final List<GuiaValidada> base = List.of(guias);
     for (int i = 0; i < base.length; i++) {
       final GuiaValidada guia = base[i];
-      if (guia.senha case final String senha
-          when !_senhaValidaParaVpp(senha)) {
-        base[i] = _anexarConsulta(
-          guia,
-          const ConsultaGuia(
+      if (guia.senha case final String senha when !_senhaValidaParaVpp(senha)) {
+        // "Senha inválida" já cobre não começar com 5 / não ter 10
+        // caracteres: remove os erros locais de senha para a guia exibir
+        // uma única linha, sem duplicidade.
+        base[i] = GuiaValidada(
+          guia: guia.guia,
+          erros: guia.erros.where((e) => e.campo != 'senha').toList(),
+          consulta: const ConsultaGuia(
             tipo: TipoConsultaGuia.autorizacaoVpp,
             sucesso: false,
             descricao: AppStrings.erroVppSenhaInvalida,
@@ -277,7 +281,8 @@ class ValidadorController extends ChangeNotifier {
     }
     if (itens.isEmpty) return base;
 
-    final (String? token, String? motivoErro) = await _obterTokenSessao(service);
+    final (String? token, String? motivoErro) =
+        await _obterTokenSessao(service);
     if (token == null) {
       // Falha de autenticação/credenciais precisa aparecer no front.
       final ConsultaGuia erro = ConsultaGuia(
@@ -380,20 +385,20 @@ class ValidadorController extends ChangeNotifier {
     }
     return switch (elegivel) {
       true => const ConsultaGuia(
-        tipo: TipoConsultaGuia.elegibilidade,
-        sucesso: true,
-        descricao: 'Elegível: SIM',
-      ),
+          tipo: TipoConsultaGuia.elegibilidade,
+          sucesso: true,
+          descricao: 'Elegível: SIM',
+        ),
       false => const ConsultaGuia(
-        tipo: TipoConsultaGuia.elegibilidade,
-        sucesso: false,
-        descricao: AppStrings.erroNaoElegivel,
-      ),
+          tipo: TipoConsultaGuia.elegibilidade,
+          sucesso: false,
+          descricao: AppStrings.erroNaoElegivel,
+        ),
       null => const ConsultaGuia(
-        tipo: TipoConsultaGuia.elegibilidade,
-        sucesso: false,
-        descricao: AppStrings.erroCarteiraNaoEncontrada,
-      ),
+          tipo: TipoConsultaGuia.elegibilidade,
+          sucesso: false,
+          descricao: AppStrings.erroCarteiraNaoEncontrada,
+        ),
     };
   }
 
@@ -510,8 +515,7 @@ class ValidadorController extends ChangeNotifier {
     final ConsultaGuia consulta = resultado.fold<ConsultaGuia>(
       // O backend devolve resposta compacta (descricao do status) — sem o
       // JSON cru do portal.
-      onSuccess: (dados) =>
-          _consultaVpp(dados['descricao'] as String?),          
+      onSuccess: (dados) => _consultaVpp(dados['descricao'] as String?),
       onFailure: (erro) => ConsultaGuia(
         tipo: TipoConsultaGuia.autorizacaoVpp,
         sucesso: false,

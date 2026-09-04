@@ -328,6 +328,9 @@ void main() {
       expect(consulta, isNotNull);
       expect(consulta!.sucesso, isFalse);
       expect(consulta.descricao, 'Senha inválida');
+      // Sem duplicidade: o erro local de senha foi substituído por Senha
+      // inválida (uma única linha na grade).
+      expect(controller.guiasComErro.single.erros, isEmpty);
     });
 
     test('fallback: sem /api/consultas usa o fluxo individual', () async {
