@@ -12,6 +12,7 @@ class TextoApp extends StatelessWidget {
     this.cor,
     this.alinhamento,
     this.peso,
+    this.selecionavel = true,
   });
 
   const TextoApp.titulo(
@@ -20,6 +21,7 @@ class TextoApp extends StatelessWidget {
     Color? cor,
     TextAlign? alinhamento,
     FontWeight? peso,
+    bool selecionavel = true,
   }) : this._(
           texto,
           TextoEstilo.titulo,
@@ -27,6 +29,7 @@ class TextoApp extends StatelessWidget {
           cor: cor,
           alinhamento: alinhamento,
           peso: peso,
+          selecionavel: selecionavel,
         );
 
   const TextoApp.tituloMedio(
@@ -35,6 +38,7 @@ class TextoApp extends StatelessWidget {
     Color? cor,
     TextAlign? alinhamento,
     FontWeight? peso,
+    bool selecionavel = true,
   }) : this._(
           texto,
           TextoEstilo.tituloMedio,
@@ -42,6 +46,7 @@ class TextoApp extends StatelessWidget {
           cor: cor,
           alinhamento: alinhamento,
           peso: peso,
+          selecionavel: selecionavel,
         );
 
   const TextoApp.corpo(
@@ -50,6 +55,7 @@ class TextoApp extends StatelessWidget {
     Color? cor,
     TextAlign? alinhamento,
     FontWeight? peso,
+    bool selecionavel = true,
   }) : this._(
           texto,
           TextoEstilo.corpo,
@@ -57,6 +63,7 @@ class TextoApp extends StatelessWidget {
           cor: cor,
           alinhamento: alinhamento,
           peso: peso,
+          selecionavel: selecionavel,
         );
 
   const TextoApp.detalhe(
@@ -65,6 +72,7 @@ class TextoApp extends StatelessWidget {
     Color? cor,
     TextAlign? alinhamento,
     FontWeight? peso,
+    bool selecionavel = true,
   }) : this._(
           texto,
           TextoEstilo.detalhe,
@@ -72,6 +80,7 @@ class TextoApp extends StatelessWidget {
           cor: cor,
           alinhamento: alinhamento,
           peso: peso,
+          selecionavel: selecionavel,
         );
 
   const TextoApp.destaque(
@@ -80,6 +89,7 @@ class TextoApp extends StatelessWidget {
     Color? cor,
     TextAlign? alinhamento,
     FontWeight? peso,
+    bool selecionavel = true,
   }) : this._(
           texto,
           TextoEstilo.destaque,
@@ -87,6 +97,7 @@ class TextoApp extends StatelessWidget {
           cor: cor,
           alinhamento: alinhamento,
           peso: peso,
+          selecionavel: selecionavel,
         );
 
   final String texto;
@@ -95,13 +106,18 @@ class TextoApp extends StatelessWidget {
   final TextAlign? alinhamento;
   final FontWeight? peso;
 
+  /// Quando true, o texto é selecionável/copiável (SelectableText). Em áreas
+  /// clicáveis (navbar, dropzone, linhas da grade) use false, pois o texto
+  /// selecionável captura o clique e mostra o cursor de texto (I-beam).
+  final bool selecionavel;
+
   @override
   Widget build(BuildContext context) {
-    return SelectableText(
-      texto,
-      textAlign: alinhamento,
-      style: _aplicar(_estilo, cor: cor, peso: peso),
-    );
+    final TextStyle estilo = _aplicar(_estilo, cor: cor, peso: peso);
+    if (!selecionavel) {
+      return Text(texto, textAlign: alinhamento, style: estilo);
+    }
+    return SelectableText(texto, textAlign: alinhamento, style: estilo);
   }
 
   static TextStyle estiloDe(TextoEstilo estilo) =>

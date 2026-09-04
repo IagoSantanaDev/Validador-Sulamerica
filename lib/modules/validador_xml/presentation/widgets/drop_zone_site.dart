@@ -92,6 +92,7 @@ class _DropZoneSiteState extends State<DropZoneSite> {
                                       AppStrings.dropZoneTexto,
                                       cor: AppColors.textLight,
                                       alinhamento: TextAlign.center,
+                                      selecionavel: false,
                                     ),
                                   ],
                                 ),

@@ -72,18 +72,18 @@ class GradeGuias extends StatelessWidget {
         _Celula(
           hover: hover,
           tap: () => _mostrarInformacoes(context, guia),
-          child: SelectableText(
+          child: TextoApp.corpo(
             guia.numeroGuiaPrestador,
-            style: TextoApp.estiloDe(TextoEstilo.corpo)
-                .copyWith(fontWeight: FontWeight.w700),
+            peso: FontWeight.w700,
+            selecionavel: false,
           ),
         ),
         _Celula(
           hover: hover,
           tap: () => _mostrarInformacoes(context, guia),
-          child: SelectableText(
+          child: TextoApp.corpo(
             guia.erros.isNotEmpty ? guia.erros.first.mensagem : '',
-            style: TextoApp.estiloDe(TextoEstilo.corpo).copyWith(height: 1.5),
+            selecionavel: false,
           ),
         ),
       ],
@@ -160,12 +160,11 @@ class _Celula extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final Widget conteudo = child ??
-        SelectableText(
+        TextoApp.detalhe(
           texto!,
-          style: TextoApp.estiloDe(TextoEstilo.detalhe).copyWith(
-            fontWeight: cabecalho ? FontWeight.w700 : FontWeight.w400,
-            color: cabecalho ? AppColors.textMuted : null,
-          ),
+          peso: cabecalho ? FontWeight.w700 : FontWeight.w400,
+          cor: cabecalho ? AppColors.textMuted : null,
+          selecionavel: false,
         );
 
     if (tap == null || hover == null) {

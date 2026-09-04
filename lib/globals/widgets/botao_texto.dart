@@ -14,7 +14,7 @@ class BotaoTexto extends StatelessWidget {
   Widget build(BuildContext context) {
     return TextButton(
       onPressed: onPressed,
-      child: SelectableText(rotulo),
+      child: Text(rotulo),
     );
   }
 }

@@ -35,6 +35,7 @@ class NavbarSite extends StatelessWidget {
                     TextoApp.destaque(
                       AppStrings.tituloApp,
                       cor: Colors.white,
+                      selecionavel: false,
                     ),
                   ],
                 ),
