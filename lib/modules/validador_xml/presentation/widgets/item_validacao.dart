@@ -2,20 +2,13 @@ import 'package:flutter/material.dart';
 
 import '../../../../globals/constants/app_colors.dart';
 import '../../../../globals/constants/app_dimens.dart';
-import '../../../../globals/constants/app_strings.dart';
-import '../../../../globals/widgets/botao_texto.dart';
-import '../../../../globals/widgets/rotulo_valor.dart';
 import '../../../../globals/widgets/textos.dart';
+import '../../data/models/consulta_guia.dart';
 import '../../data/models/guia_validada.dart';
 
 class ItemValidacao extends StatelessWidget {
-  const ItemValidacao({
-    super.key,
-    required this.indice,
-    required this.guia,
-  });
+  const ItemValidacao({super.key, required this.guia});
 
-  final int indice;
   final GuiaValidada guia;
 
   @override
@@ -23,104 +16,73 @@ class ItemValidacao extends StatelessWidget {
     final String mensagem =
         guia.erros.isNotEmpty ? guia.erros.first.mensagem : '';
 
-    return InkWell(
-      onTap: () => _mostrarDetalhe(context),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(
-          horizontal: AppDimens.spaceMd,
-          vertical: AppDimens.itemPaddingV,
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _NumeroBadge(numero: indice),
-            const SizedBox(width: AppDimens.itemEspaco),
-            const Padding(
-              padding: EdgeInsets.only(top: AppDimens.itemIconeTop),
-              child: Icon(
-                Icons.warning_amber_rounded,
-                size: AppDimens.itemIcone,
-                color: AppColors.warning,
-              ),
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppDimens.spaceMd,
+        vertical: AppDimens.itemPaddingV,
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Padding(
+            padding: EdgeInsets.only(top: AppDimens.itemIconeTop),
+            child: Icon(
+              Icons.cancel,
+              size: AppDimens.itemIcone,
+              color: AppColors.error,
             ),
-            const SizedBox(width: AppDimens.spaceSm),
-            Expanded(
-              child: Text.rich(
-                TextSpan(
-                  text: mensagem,
+          ),
+          const SizedBox(width: AppDimens.spaceSm),
+          _NumeroGuia(numero: guia.numeroGuiaPrestador),
+          const SizedBox(width: AppDimens.itemEspaco),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SelectableText(
+                  mensagem,
                   style: TextoApp.estiloDe(TextoEstilo.corpo)
                       .copyWith(height: 1.5),
-                  children: [
-                    TextSpan(
-                      text: AppStrings.entenderPorque,
-                      style: TextoApp.estiloDe(TextoEstilo.detalhe),
+                ),
+                if (guia.consulta case final ConsultaGuia consulta)
+                  Padding(
+                    padding: const EdgeInsets.only(top: AppDimens.spaceXs),
+                    child: TextoApp.detalhe(
+                      consulta.descricao,
+                      cor: consulta.sucesso
+                          ? AppColors.success
+                          : AppColors.error,
+                      peso: FontWeight.w600,
                     ),
-                  ],
-                ),
-              ),
+                  ),
+              ],
             ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _mostrarDetalhe(BuildContext context) {
-    showDialog<void>(
-      context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          title: const TextoApp.tituloMedio(AppStrings.dialogoEntenda),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              RotuloValor(
-                rotulo: AppStrings.rotuloNumeroGuia,
-                valor: guia.numeroGuiaPrestador,
-              ),
-              const SizedBox(height: AppDimens.spaceSm),
-              RotuloValor(
-                rotulo: AppStrings.rotuloNumeroCarteira,
-                valor: guia.numeroCarteira ?? AppStrings.valorIndisponivel,
-              ),
-              const SizedBox(height: AppDimens.spaceMd),
-              for (final erro in guia.erros)
-                Padding(
-                  padding: const EdgeInsets.only(top: AppDimens.spaceXs),
-                  child: TextoApp.corpo('${erro.campo}: ${erro.mensagem}'),
-                ),
-            ],
           ),
-          actions: [
-            BotaoTexto(
-              rotulo: AppStrings.dialogoFechar,
-              onPressed: () => Navigator.of(ctx).pop(),
-            ),
-          ],
-        );
-      },
+        ],
+      ),
     );
   }
 }
 
-class _NumeroBadge extends StatelessWidget {
-  const _NumeroBadge({required this.numero});
+class _NumeroGuia extends StatelessWidget {
+  const _NumeroGuia({required this.numero});
 
-  final int numero;
+  final String numero;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: AppDimens.badgeTamanho,
-      height: AppDimens.badgeTamanho,
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppDimens.spaceMd,
+        vertical: AppDimens.spaceXs,
+      ),
       decoration: const BoxDecoration(
         color: AppColors.primary,
-        shape: BoxShape.circle,
+        borderRadius: BorderRadius.all(Radius.circular(AppDimens.radiusMd)),
       ),
       alignment: Alignment.center,
       child: TextoApp.detalhe(
-        '$numero',
+        numero,
         cor: Colors.white,
         peso: FontWeight.w700,
       ),
