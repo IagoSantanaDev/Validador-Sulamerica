@@ -9,6 +9,7 @@ import '../../../../globals/network/result.dart';
 import '../../data/datasources/xml_lote_guias_datasource.dart';
 import '../../data/datasources/xml_lote_guias_exceptions.dart';
 import '../../data/models/consulta_guia.dart';
+import '../../data/models/consulta_lote.dart';
 import '../../data/models/guia_validada.dart';
 import '../../data/models/informacoes_lote.dart';
 import '../../data/models/resultado_consulta_beneficiario.dart';
@@ -148,24 +149,129 @@ class ValidadorController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Para cada guia do lote, consulta o portal via backend intermediário:
-  /// sem senha → elegibilidade (consulta do beneficiário); senha iniciada em
-  /// 5 com 10 caracteres → autorização VPP. Sem credenciais configuradas,
-  /// a validação permanece apenas local.
+  /// Consulta o portal (via /api/consultas em lote) para as guias do lote:
+  /// sem senha → elegibilidade (carteira); senha iniciada em 5 com 10
+  /// caracteres → autorização VPP. O backend recebe tudo em uma única
+  /// requisição e executa em paralelo. Sem credenciais configuradas, a
+  /// validação permanece apenas local.
   Future<List<GuiaValidada>> _consultarGuias(
     List<GuiaValidada> guias,
   ) async {
     final SulAmericaBackendService? service = _service;
     if (service == null || guias.isEmpty) return guias;
 
-    // Escopo de dedupe: apenas a validação atual. A próxima validação sempre
-    // consulta o portal novamente (dados novos).
-    _cacheElegibilidade.clear();
-    _cacheAutorizacao.clear();
+    // Itens de consulta únicos (dedupe tipo+chave) para enviar ao lote;
+    // montando antes do login para evitar sessão sem consultas úteis.
+    final List<ConsultaLoteItem> itens = [];
+    final Set<String> chavesVistas = {};
+    for (final GuiaValidada guia in guias) {
+      final ConsultaLoteItem? item = _itemDeConsulta(guia);
+      if (item == null) continue;
+      final String chaveUnica = '${item.tipo.name}|${item.chave}';
+      if (chavesVistas.add(chaveUnica)) {
+        itens.add(item);
+      }
+    }
+    if (itens.isEmpty) return guias;
 
     final String? token = await _obterTokenSessao(service);
     if (token == null) return guias;
 
+    final Result<List<ResultadoConsultaLote>> resultado =
+        await service.consultarLote(token: token, consultas: itens);
+
+    final List<GuiaValidada>? comConsultas =
+        resultado.fold<List<GuiaValidada>?>(
+      onSuccess: (resultados) {
+        final Map<String, ConsultaGuia> porChave = {
+          for (final ResultadoConsultaLote r in resultados)
+            r.chave: _consultaDesdeBatch(r),
+        };
+        // Aplica o resultado a TODAS as guias com a mesma chave (o lote
+        // enviou chaves únicas, mas várias guias podem compartilhá-las).
+        final List<GuiaValidada> acumulado = List.of(guias);
+        for (int indice = 0; indice < guias.length; indice++) {
+          final ConsultaLoteItem? item = _itemDeConsulta(guias[indice]);
+          if (item == null) continue;
+          final ConsultaGuia? consulta = porChave[item.chave];
+          if (consulta == null) continue;
+          acumulado[indice] = _anexarConsulta(acumulado[indice], consulta);
+        }
+        return acumulado;
+      },
+      onFailure: (_) => null,
+    );
+
+    if (comConsultas != null) return comConsultas;
+
+    // Fallback: backend sem /api/consultas (deploy antigo) — fluxo
+    // individual, com dedupe intra-lote.
+    return _consultarGuiasIndividualmente(service, token, guias);
+  }
+
+  /// Decide a consulta aplicável a uma guia (elegibilidade sem senha; VPP
+  /// para senha válida); nula quando a guia não deve ser consultada.
+  ConsultaLoteItem? _itemDeConsulta(GuiaValidada guia) {
+    final String? senha = guia.senha;
+    if (senha == null || senha.isEmpty) {
+      final String? carteira = guia.numeroCarteira;
+      if (carteira == null || carteira.isEmpty) return null;
+      return ConsultaLoteItem(
+        tipo: TipoConsultaGuia.elegibilidade,
+        chave: carteira,
+      );
+    }
+    if (_senhaValidaParaVpp(senha)) {
+      return ConsultaLoteItem(
+        tipo: TipoConsultaGuia.autorizacaoVpp,
+        chave: senha,
+      );
+    }
+    return null;
+  }
+
+  ConsultaGuia _consultaDesdeBatch(ResultadoConsultaLote r) {
+    if (!r.sucesso) {
+      return ConsultaGuia(
+        tipo: r.tipo,
+        sucesso: false,
+        descricao: r.tipo == TipoConsultaGuia.elegibilidade
+            ? 'Consulta de elegibilidade falhou: ${r.erro ?? 'sem detalhe'}'
+            : 'Consulta de autorização VPP falhou: ${r.erro ?? 'sem detalhe'}',
+      );
+    }
+    if (r.tipo == TipoConsultaGuia.elegibilidade) {
+      return ConsultaGuia(
+        tipo: TipoConsultaGuia.elegibilidade,
+        sucesso: true,
+        descricao: switch (r.elegivel) {
+          true => 'Elegível: SIM',
+          false => 'Elegível: NÃO',
+          null => 'Carteira não encontrada',
+        },
+      );
+    }
+    final String? status = r.statusVpp;
+    final bool autorizada =
+        status != null && status.toLowerCase().startsWith('autorizad');
+    return ConsultaGuia(
+      tipo: TipoConsultaGuia.autorizacaoVpp,
+      sucesso: autorizada,
+      descricao: autorizada
+          ? 'Autorização VPP: ok'
+          : 'Autorização VPP: ${status ?? 'nenhuma solicitação encontrada'}',
+    );
+  }
+
+  /// Fluxo individual (uma requisição por consulta) usado quando o backend
+  /// ainda não expõe /api/consultas.
+  Future<List<GuiaValidada>> _consultarGuiasIndividualmente(
+    SulAmericaBackendService service,
+    String token,
+    List<GuiaValidada> guias,
+  ) async {
+    _cacheElegibilidade.clear();
+    _cacheAutorizacao.clear();
     final List<GuiaValidada> comConsultas = [];
     for (final GuiaValidada guia in guias) {
       comConsultas.add(await _consultarGuia(service, token, guia));

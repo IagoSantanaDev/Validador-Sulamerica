@@ -1,5 +1,6 @@
 import '../../../../globals/network/dio_client.dart';
 import '../../../../globals/network/result.dart';
+import '../models/consulta_lote.dart';
 import '../models/resultado_consulta_beneficiario.dart';
 
 class SulAmericaBackendService {
@@ -46,6 +47,35 @@ class SulAmericaBackendService {
     return _dio.get<Map<String, dynamic>>(
       '/api/status',
       parser: (dados) => (dados as Map).cast<String, dynamic>(),
+    );
+  }
+
+  /// Consulta em lote: envia todas as solicitações (elegibilidade/VPP) de uma
+  /// única vez ao backend, que executa contra o portal e devolve os resultados.
+  Future<Result<List<ResultadoConsultaLote>>> consultarLote({
+    required String token,
+    required List<ConsultaLoteItem> consultas,
+  }) {
+    return _dio.post<List<ResultadoConsultaLote>>(
+      '/api/consultas',
+      corpo: {
+        'token': token,
+        'consultas': [
+          for (final ConsultaLoteItem item in consultas)
+            {'tipo': item.tipo.name, 'chave': item.chave},
+        ],
+      },
+      parser: (dados) {
+        final dynamic resultados = (dados as Map)['resultados'];
+        if (resultados is! List) return const [];
+        return resultados
+            .map(
+              (r) => ResultadoConsultaLote.fromJson(
+                r as Map<String, dynamic>,
+              ),
+            )
+            .toList();
+      },
     );
   }
 }

@@ -12,12 +12,14 @@ import 'package:validador_xml_sulamerica/modules/validador_xml/data/repositories
 import 'package:validador_xml_sulamerica/modules/validador_xml/data/services/sul_america_backend_service.dart';
 import 'package:validador_xml_sulamerica/modules/validador_xml/presentation/controllers/validador_controller.dart';
 
-/// Adapter de rede falso com respostas por rota — registra as chamadas feitas.
-class _FakeGatewayAdapter implements HttpClientAdapter {
-  _FakeGatewayAdapter(this.respostas);
+/// Adapter de rede falso que responde /api/consultas a partir do CORPO do
+/// request (lote) e registra as chamadas feitas — sem rede real.
+class _FakeBatchAdapter implements HttpClientAdapter {
+  _FakeBatchAdapter({this.statusAutorizacao = 'Autorizado'});
 
-  final Map<String, (int, Map<String, dynamic>)> respostas;
+  final String statusAutorizacao;
   final List<String> logChamadas = [];
+  final List<dynamic> consultasRecebidas = [];
 
   @override
   void close({bool force = false}) {}
@@ -29,9 +31,42 @@ class _FakeGatewayAdapter implements HttpClientAdapter {
     Future<void>? cancelFuture,
   ) async {
     logChamadas.add(options.path);
-    final (int, Map<String, dynamic>)? resposta = respostas[options.path];
-    final (int status, Map<String, dynamic> corpo) =
-        resposta ?? (404, {'status': 'erro'});
+    switch (options.path) {
+      case '/api/login':
+        return _resposta(200, {'token': 'tok123'});
+      case '/api/consultas':
+        final Object? data = options.data;
+        final Map<String, dynamic> corpo = data is String
+            ? jsonDecode(data) as Map<String, dynamic>
+            : (data as Map).cast<String, dynamic>();
+        final List<dynamic> consultas = corpo['consultas'] as List;
+        consultasRecebidas.addAll(consultas);
+        final List<Map<String, dynamic>> resultados = [
+          for (final dynamic c in consultas)
+            if ((c as Map)['tipo'] == 'elegibilidade')
+              {
+                'chave': c['chave'],
+                'tipo': c['tipo'],
+                'sucesso': true,
+                'elegivel': true,
+                'rotuloElegibilidade': 'SIM',
+              }
+            else
+              {
+                'chave': c['chave'],
+                'tipo': c['tipo'],
+                'sucesso': true,
+                'statusVpp': statusAutorizacao,
+              },
+        ];
+        return _resposta(200, {'status': 'ok', 'resultados': resultados});
+      default:
+        // Rota inexistente: dispara o fallback individual nos testes.
+        return _resposta(404, {'status': 'erro', 'mensagem': 'nao encontrado'});
+    }
+  }
+
+  ResponseBody _resposta(int status, Map<String, dynamic> corpo) {
     return ResponseBody.fromBytes(
       utf8.encode(jsonEncode(corpo)),
       status,
@@ -49,6 +84,55 @@ class _FakeValidadorGuiasRepository implements ValidadorGuiasRepository {
 
   @override
   List<GuiaValidada> validarLote(String conteudoXml) => retorno;
+}
+
+/// Adapter para o fluxo individual (backend antigo): atende /api/login,
+/// /api/beneficiario e /api/autorizacao; 404 para o restante.
+class _FakeIndividualAdapter implements HttpClientAdapter {
+  _FakeIndividualAdapter();
+
+  final List<String> logChamadas = [];
+
+  @override
+  void close({bool force = false}) {}
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async {
+    logChamadas.add(options.path);
+    switch (options.path) {
+      case '/api/login':
+        return _resposta(200, {'token': 'tok123'});
+      case '/api/beneficiario':
+        return _resposta(200, {
+          'status': 'ok',
+          'elegivel': true,
+          'rotuloElegibilidade': 'SIM',
+        });
+      case '/api/autorizacao':
+        return _resposta(200, {
+          'paginacao': {'total_registros': 1},
+          'registros': [
+            {'status_solicitacao': {'descricao': 'Autorizado'}},
+          ],
+        });
+      default:
+        return _resposta(404, {'status': 'erro'});
+    }
+  }
+
+  ResponseBody _resposta(int status, Map<String, dynamic> corpo) {
+    return ResponseBody.fromBytes(
+      utf8.encode(jsonEncode(corpo)),
+      status,
+      headers: {
+        Headers.contentTypeHeader: [Headers.jsonContentType],
+      },
+    );
+  }
 }
 
 const GuiaTiss _guiaSemSenha = GuiaTiss(
@@ -70,7 +154,7 @@ const GuiaTiss _guiaSenhaInvalida = GuiaTiss(
 );
 
 ValidadorController _controllerComGateway({
-  required _FakeGatewayAdapter adapter,
+  required HttpClientAdapter adapter,
   required List<GuiaValidada> retornoValidacao,
   String? code = 'prestador-code',
   String? user = 'master',
@@ -99,21 +183,10 @@ Future<ValidadorController> _validar(ValidadorController controller) async {
 }
 
 void main() {
-  group('ValidadorController - consultas ao portal por guia', () {
-    test('guia sem senha aciona consulta de beneficiário (elegibilidade)',
+  group('ValidadorController - consultas ao portal em lote', () {
+    test('guia sem senha aciona elegibilidade via uma única chamada de lote',
         () async {
-      final _FakeGatewayAdapter adapter = _FakeGatewayAdapter({
-        '/api/login': (200, {'token': 'tok123'}),
-        '/api/beneficiario': (
-          200,
-          {
-            'status': 'ok',
-            'elegivel': true,
-            'rotuloElegibilidade': 'SIM',
-            'html': '<html/>',
-          },
-        ),
-      });
+      final _FakeBatchAdapter adapter = _FakeBatchAdapter();
 
       final ValidadorController controller = await _validar(
         _controllerComGateway(
@@ -125,39 +198,66 @@ void main() {
                 ErroValidacao(campo: 'senha', mensagem: 'senha não informada'),
               ],
             ),
+            GuiaValidada(
+              guia: _guiaSenhaVppValida,
+              erros: [],
+            ),
           ],
         ),
       );
 
       expect(controller.status, StatusValidador.concluido);
-      expect(adapter.logChamadas, contains('/api/login'));
-      expect(adapter.logChamadas, contains('/api/beneficiario'));
-      expect(adapter.logChamadas, isNot(contains('/api/autorizacao')));
+      // Login + uma única chamada de lote; sem chamadas individuais.
+      expect(adapter.logChamadas, ['/api/login', '/api/consultas']);
+      expect(adapter.consultasRecebidas, hasLength(2));
 
-      final ConsultaGuia? consulta =
-          controller.guiasComErro.single.consulta;
-      expect(consulta, isNotNull);
-      expect(consulta!.tipo, TipoConsultaGuia.elegibilidade);
-      expect(consulta.sucesso, isTrue);
-      expect(consulta.descricao, 'Elegível: SIM');
+      expect(
+        controller.guiasComErro.single.consulta?.descricao,
+        'Elegível: SIM',
+      );
+      expect(
+        controller.guias[1].consulta?.descricao,
+        'Autorização VPP: ok',
+      );
     });
 
-    test('guia com senha 5 + 10 caracteres aciona autorização VPP', () async {
-      final _FakeGatewayAdapter adapter = _FakeGatewayAdapter({
-        '/api/login': (200, {'token': 'tok123'}),
-        '/api/autorizacao': (
-          200,
-          {
-            'paginacao': {'total_registros': 1},
-            'registros': [
-              {
-                'numero_solicitacao': '239675343',
-                'status_solicitacao': {'descricao': 'Autorizado'},
-              },
-            ],
-          },
+    test('batch agrupa chaves repetidas em uma única consulta', () async {
+      final _FakeBatchAdapter adapter = _FakeBatchAdapter();
+
+      const GuiaTiss segundaComMesmaCarteira = GuiaTiss(
+        numeroGuiaPrestador: '112',
+        numeroCarteira: '42509512809910100031',
+        senha: null,
+      );
+
+      final ValidadorController controller = await _validar(
+        _controllerComGateway(
+          adapter: adapter,
+          retornoValidacao: const [
+            GuiaValidada(
+              guia: _guiaSemSenha,
+              erros: [ErroValidacao(campo: 'senha', mensagem: 'sem senha')],
+            ),
+            GuiaValidada(
+              guia: segundaComMesmaCarteira,
+              erros: [ErroValidacao(campo: 'senha', mensagem: 'sem senha')],
+            ),
+          ],
         ),
-      });
+      );
+
+      expect(controller.status, StatusValidador.concluido);
+      expect(adapter.logChamadas, ['/api/login', '/api/consultas']);
+      expect(adapter.consultasRecebidas, hasLength(1));
+      for (final GuiaValidada guia in controller.guias) {
+        expect(guia.consulta?.descricao, 'Elegível: SIM');
+      }
+    });
+
+    test('autorização VPP não autorizada (Negado) é marcada como falha',
+        () async {
+      final _FakeBatchAdapter adapter =
+          _FakeBatchAdapter(statusAutorizacao: 'Negado');
 
       final ValidadorController controller = await _validar(
         _controllerComGateway(
@@ -169,24 +269,15 @@ void main() {
       );
 
       expect(controller.status, StatusValidador.concluido);
-      expect(adapter.logChamadas, contains('/api/login'));
-      expect(adapter.logChamadas, contains('/api/autorizacao'));
-      expect(adapter.logChamadas, isNot(contains('/api/beneficiario')));
-
-      final ConsultaGuia? consulta = controller.guias
-          .firstWhere((g) => g.numeroGuiaPrestador == '222')
-          .consulta;
+      expect(adapter.logChamadas, ['/api/login', '/api/consultas']);
+      final ConsultaGuia? consulta = controller.guias.single.consulta;
       expect(consulta, isNotNull);
-      expect(consulta!.tipo, TipoConsultaGuia.autorizacaoVpp);
-      expect(consulta.sucesso, isTrue);
-      expect(consulta.descricao, 'Autorização VPP: ok');
+      expect(consulta!.sucesso, isFalse);
+      expect(consulta.descricao, 'Autorização VPP: Negado');
     });
 
-    test('guia com senha inválida não é consultada', () async {
-      final _FakeGatewayAdapter adapter = _FakeGatewayAdapter({
-        '/api/login': (200, {'token': 'tok123'}),
-        '/api/autorizacao': (200, {'ok': true}),
-      });
+    test('guia com senha inválida não gera consultas (nem login)', () async {
+      final _FakeBatchAdapter adapter = _FakeBatchAdapter();
 
       final ValidadorController controller = await _validar(
         _controllerComGateway(
@@ -202,27 +293,14 @@ void main() {
         ),
       );
 
-      expect(adapter.logChamadas, contains('/api/login'));
-      expect(adapter.logChamadas, isNot(contains('/api/autorizacao')));
-      expect(adapter.logChamadas, isNot(contains('/api/beneficiario')));
+      expect(controller.status, StatusValidador.concluido);
+      expect(adapter.logChamadas, isEmpty);
+      expect(adapter.consultasRecebidas, isEmpty);
       expect(controller.guiasComErro.single.consulta, isNull);
     });
 
-    test('dedupe: guias com a mesma carteira geram uma única consulta',
-        () async {
-      final _FakeGatewayAdapter adapter = _FakeGatewayAdapter({
-        '/api/login': (200, {'token': 'tok123'}),
-        '/api/beneficiario': (
-          200,
-          {'status': 'ok', 'elegivel': true, 'rotuloElegibilidade': 'SIM', 'html': '<html/>'},
-        ),
-      });
-
-      const GuiaTiss guiaSemSenhaB = GuiaTiss(
-        numeroGuiaPrestador: '112',
-        numeroCarteira: '42509512809910100031',
-        senha: null,
-      );
+    test('fallback: sem /api/consultas usa o fluxo individual', () async {
+      final _FakeIndividualAdapter adapter = _FakeIndividualAdapter();
 
       final ValidadorController controller = await _validar(
         _controllerComGateway(
@@ -232,107 +310,19 @@ void main() {
               guia: _guiaSemSenha,
               erros: [ErroValidacao(campo: 'senha', mensagem: 'sem senha')],
             ),
-            GuiaValidada(
-              guia: guiaSemSenhaB,
-              erros: [ErroValidacao(campo: 'senha', mensagem: 'sem senha')],
-            ),
           ],
         ),
       );
 
       expect(controller.status, StatusValidador.concluido);
-      expect(
-        adapter.logChamadas.where((p) => p == '/api/beneficiario'),
-        hasLength(1),
-      );
-      expect(controller.guias, hasLength(2));
-      for (final GuiaValidada guia in controller.guias) {
-        expect(guia.consulta?.descricao, 'Elegível: SIM');
-      }
-    });
-
-    test('dedupe: guias com a mesma senha geram uma única autorização',
-        () async {
-      final _FakeGatewayAdapter adapter = _FakeGatewayAdapter({
-        '/api/login': (200, {'token': 'tok123'}),
-        '/api/autorizacao': (
-          200,
-          {
-            'paginacao': {'total_registros': 1},
-            'registros': [
-              {
-                'numero_solicitacao': '239675343',
-                'status_solicitacao': {'descricao': 'Autorizado'},
-              },
-            ],
-          },
-        ),
-      });
-
-      const GuiaTiss guiaVppB = GuiaTiss(
-        numeroGuiaPrestador: '223',
-        numeroCarteira: '55788888482319470020',
-        senha: '5056430843',
-      );
-
-      final ValidadorController controller = await _validar(
-        _controllerComGateway(
-          adapter: adapter,
-          retornoValidacao: const [
-            GuiaValidada(guia: _guiaSenhaVppValida, erros: []),
-            GuiaValidada(guia: guiaVppB, erros: []),
-          ],
-        ),
-      );
-
-      expect(controller.status, StatusValidador.concluido);
-      expect(
-        adapter.logChamadas.where((p) => p == '/api/autorizacao'),
-        hasLength(1),
-      );
-      for (final GuiaValidada guia in controller.guias) {
-        expect(guia.consulta?.descricao, 'Autorização VPP: ok');
-      }
-    });
-
-    test('autorização VPP não autorizada (Negado) é marcada como falha',
-        () async {
-      final _FakeGatewayAdapter adapter = _FakeGatewayAdapter({
-        '/api/login': (200, {'token': 'tok123'}),
-        '/api/autorizacao': (
-          200,
-          {
-            'paginacao': {'total_registros': 1},
-            'registros': [
-              {
-                'numero_solicitacao': '239675343',
-                'status_solicitacao': {'descricao': 'Negado'},
-              },
-            ],
-          },
-        ),
-      });
-
-      final ValidadorController controller = await _validar(
-        _controllerComGateway(
-          adapter: adapter,
-          retornoValidacao: const [
-            GuiaValidada(guia: _guiaSenhaVppValida, erros: []),
-          ],
-        ),
-      );
-
-      expect(controller.status, StatusValidador.concluido);
-      final ConsultaGuia? consulta = controller.guias.single.consulta;
-      expect(consulta, isNotNull);
-      expect(consulta!.sucesso, isFalse);
-      expect(consulta.descricao, 'Autorização VPP: Negado');
+      expect(adapter.logChamadas, contains('/api/login'));
+      expect(adapter.logChamadas, contains('/api/consultas'));
+      expect(adapter.logChamadas, contains('/api/beneficiario'));
+      expect(controller.guias.single.consulta?.descricao, 'Elegível: SIM');
     });
 
     test('sem credenciais do prestador nenhuma chamada é feita', () async {
-      final _FakeGatewayAdapter adapter = _FakeGatewayAdapter({
-        '/api/login': (200, {'token': 'tok123'}),
-      });
+      final _FakeBatchAdapter adapter = _FakeBatchAdapter();
 
       final ValidadorController controller = await _validar(
         _controllerComGateway(
