@@ -145,8 +145,14 @@ class SessaoPortal {
   bool _autenticada = false;
   String _codigoPrestador = '100000015513';
 
+  /// Status HTTP da última falha de consulta; null quando a última consulta
+  /// foi bem-sucedida ou falhou por rede/timeout. Usado para distinguir
+  /// sessão rejeitada (401/403) de falha transitória e renovar o login.
+  static const int _statusFalhaSessao = 401;
+  int? _ultimoStatusFalha;
 
   bool get autenticada => _autenticada;
+  int? get ultimoStatusFalha => _ultimoStatusFalha;
 
   Map<String, String> get _headersNavegador => {
         'User-Agent': _userAgent,
@@ -172,6 +178,7 @@ class SessaoPortal {
     required String user,
     required String senha,
   }) async {
+    _ultimoStatusFalha = null;
     try {
       final Response<String> pagina = await _dio.get<String>(
         _urlLogin,
@@ -308,6 +315,7 @@ class SessaoPortal {
     required String carteirinhaCompleta,
   }) async {
     if (!_autenticada) {
+      _ultimoStatusFalha = _statusFalhaSessao;
       _logger.e('Consulta nao enviada: sessao nao estabelecida.');
       return null;
     }
@@ -336,6 +344,7 @@ class SessaoPortal {
         final String? destino = resposta.headers.value('location');
         if (destino == null) {
           _logger.e('Consulta: 302 sem Location.');
+          _ultimoStatusFalha = resposta.statusCode;
           return null;
         }
         final Uri uri = Uri.parse(destino);
@@ -351,26 +360,33 @@ class SessaoPortal {
         );
         if (pos.statusCode != 200) {
           _logger.e('Consulta: redirect final HTTP ${pos.statusCode}.');
+          _ultimoStatusFalha = pos.statusCode;
           return null;
         }
+        _ultimoStatusFalha = null;
         return pos.data;
       }
 
       if (resposta.statusCode != 200) {
+        _ultimoStatusFalha = resposta.statusCode;
         _logger.e('Consulta de beneficiario: HTTP ${resposta.statusCode}.');
         return null;
       }
+      _ultimoStatusFalha = null;
       return resposta.data;
     } on FormatException catch (erro) {
       _logger.e('Carteirinha invalida: ${erro.message}');
+      _ultimoStatusFalha = null;
       return null;
     } on DioException catch (erro) {
       _logger.e(
         'Falha de rede na consulta de beneficiario: ${erro.message}',
       );
+      _ultimoStatusFalha = null;
       return null;
     } catch (erro) {
       _logger.e('Falha inesperada na consulta: $erro');
+      _ultimoStatusFalha = null;
       return null;
     }
   }
@@ -380,6 +396,7 @@ class SessaoPortal {
     required String numeroVpp,
   }) async {
     if (!_autenticada) {
+      _ultimoStatusFalha = _statusFalhaSessao;
       _logger.e('Autorizacao nao consultada: sessao nao estabelecida.');
       return null;
     }
@@ -427,6 +444,7 @@ class SessaoPortal {
       );
 
       if (resposta.statusCode != 200) {
+        _ultimoStatusFalha = resposta.statusCode;
         _logger.e('Autorizacao VPP: HTTP ${resposta.statusCode}.');
         return null;
       }

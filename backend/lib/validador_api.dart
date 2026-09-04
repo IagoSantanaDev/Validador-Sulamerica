@@ -301,6 +301,7 @@ class ValidadorApi {
           sessao: sessoes[i],
           fatiaElegibilidade: particoesEleg[i],
           fatiaVpps: particoesVpp[i],
+          credenciais: credenciais,
         ),
       );
     }
@@ -343,14 +344,20 @@ class ValidadorApi {
     required SessaoPortal sessao,
     required List<dynamic> fatiaElegibilidade,
     required List<dynamic> fatiaVpps,
+    required _CredenciaisPortal? credenciais,
   }) async {
     final List<Map<String, dynamic>> resultados = [];
     for (final dynamic item in fatiaElegibilidade) {
-      resultados.add(await _executarConsulta(sessao, item));
+      resultados.add(await _executarConsulta(sessao, item, credenciais));
     }
     if (fatiaVpps.isNotEmpty) {
       resultados.addAll(
-        await _processarEmParalelo(fatiaVpps, sessao, _limiteVppPorSessao),
+        await _processarEmParalelo(
+          fatiaVpps,
+          sessao,
+          _limiteVppPorSessao,
+          credenciais,
+        ),
       );
     }
     return resultados;
@@ -362,6 +369,7 @@ class ValidadorApi {
     List<dynamic> consultas,
     SessaoPortal sessao,
     int limite,
+    _CredenciaisPortal? credenciais,
   ) async {
     final List<Map<String, dynamic>?> resultados =
         List<Map<String, dynamic>?>.filled(consultas.length, null);
@@ -371,8 +379,11 @@ class ValidadorApi {
       while (true) {
         final int indice = proximo++;
         if (indice >= consultas.length) return;
-        resultados[indice] =
-            await _executarConsulta(sessao, consultas[indice]);
+        resultados[indice] = await _executarConsulta(
+          sessao,
+          consultas[indice],
+          credenciais,
+        );
       }
     }
 
@@ -386,6 +397,7 @@ class ValidadorApi {
   Future<Map<String, dynamic>> _executarConsulta(
     SessaoPortal sessao,
     dynamic item,
+    _CredenciaisPortal? credenciais,
   ) async {
     final String? tipo = item is Map ? item['tipo'] as String? : null;
     final String? chave = item is Map ? item['chave'] as String? : null;
@@ -407,14 +419,21 @@ class ValidadorApi {
           'erro': 'Carteira deve conter exatamente 20 digitos.',
         };
       }
-      final String? html = await sessao
-          .consultarBeneficiario(carteirinhaCompleta: chave);
+      final String? html = await _consultarComRecuperacao(
+        sessao: sessao,
+        credenciais: credenciais,
+        consulta: () =>
+            sessao.consultarBeneficiario(carteirinhaCompleta: chave),
+      );
       if (html == null) {
         return {
           'chave': chave,
           'tipo': tipo,
           'sucesso': false,
-          'erro': 'Falha na consulta ao portal SulAmerica.',
+          'erro': _erroDeFalhaPortal(
+            sessao,
+            'Falha na consulta ao portal SulAmerica.',
+          ),
         };
       }
       final bool? elegivel = extrairElegivel(html);
@@ -445,14 +464,20 @@ class ValidadorApi {
           'erro': 'Senha invalida: deve ter exatamente 10 digitos comecando com 5.',
         };
       }
-      final Map<String, dynamic>? dados = await sessao
-          .consultarAutorizacaoVpp(numeroVpp: chave);
+      final Map<String, dynamic>? dados = await _consultarComRecuperacao(
+        sessao: sessao,
+        credenciais: credenciais,
+        consulta: () => sessao.consultarAutorizacaoVpp(numeroVpp: chave),
+      );
       if (dados == null) {
         return {
           'chave': chave,
           'tipo': tipo,
           'sucesso': false,
-          'erro': 'Falha na consulta de autorizacao VPP.',
+          'erro': _erroDeFalhaPortal(
+            sessao,
+            'Falha na consulta de autorizacao VPP.',
+          ),
         };
       }
       return {
@@ -469,6 +494,52 @@ class ValidadorApi {
       'sucesso': false,
       'erro': 'Tipo de consulta desconhecido.',
     };
+  }
+
+  /// Recuperação de falha de consulta ao portal: sessão rejeitada (401/403)
+  /// renova o login com as credenciais retidas e repete a consulta 1x;
+  /// falha transitória (rede/timeout/5xx) faz nova tentativa após pausa
+  /// curta. Devolve o resultado da última tentativa (null quando a falha
+  /// persiste ou não há credenciais para renovar).
+  Future<T?> _consultarComRecuperacao<T>({
+    required SessaoPortal sessao,
+    required _CredenciaisPortal? credenciais,
+    required Future<T?> Function() consulta,
+  }) async {
+    final T? resultado = await consulta();
+    if (resultado != null) return resultado;
+
+    final int? status = sessao.ultimoStatusFalha;
+    final bool sessaoRejeitada =
+        ehFalhaDeSessaoPortal(status) || !sessao.autenticada;
+    if (sessaoRejeitada) {
+      if (credenciais == null) return null;
+      _logger.w(
+        'Sessao do portal rejeitada (HTTP $status); renovando login.',
+      );
+      final ResultadoLogin login = await sessao.login(
+        code: credenciais.code,
+        user: credenciais.user,
+        senha: credenciais.senha,
+      );
+      if (!login.autenticada) return null;
+    } else {
+      // Falha transitória: pausa curta antes de repetir (sem martelar o F5).
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+    }
+    return consulta();
+  }
+
+  /// Mensagem final do item conforme a causa: sessão rejeitada pede novo
+  /// login; demais falhas mantêm a mensagem comum de portal indisponível.
+  String _erroDeFalhaPortal(
+    SessaoPortal sessao,
+    String mensagemFalhaComum,
+  ) {
+    final int? status = sessao.ultimoStatusFalha;
+    return ehFalhaDeSessaoPortal(status)
+        ? 'Sessao no portal expirada. Refaça o login.'
+        : mensagemFalhaComum;
   }
 
   /// "primeiro.ultimo" da chave (não vaza dados sensíveis em log).
@@ -671,6 +742,11 @@ class _LeituraJson {
   final Map<String, dynamic>? valor;
   final bool excedeLimite;
 }
+
+/// Classifica a falha de consulta ao portal como rejeição de sessão
+/// (401/403 — F5 ASM ou sessão expirada): esses status merecem renovar o
+/// login; os demais (rede/timeout/5xx) são tratados como transitórios.
+bool ehFalhaDeSessaoPortal(int? status) => status == 401 || status == 403;
 
 /// Credenciais do prestador retidas em memória por token de sessão, usadas
 /// apenas para abrir sessões extras (paralelas) quando um lote tem muitas
