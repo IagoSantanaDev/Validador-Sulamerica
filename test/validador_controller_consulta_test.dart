@@ -114,10 +114,9 @@ class _FakeIndividualAdapter implements HttpClientAdapter {
         });
       case '/api/autorizacao':
         return _resposta(200, {
-          'paginacao': {'total_registros': 1},
-          'registros': [
-            {'status_solicitacao': {'descricao': 'Autorizado'}},
-          ],
+          'status': 'ok',
+          'encontrada': true,
+          'descricao': 'Autorizado',
         });
       default:
         return _resposta(404, {'status': 'erro'});
@@ -252,6 +251,27 @@ void main() {
       for (final GuiaValidada guia in controller.guias) {
         expect(guia.consulta?.descricao, 'Elegível: SIM');
       }
+    });
+
+    test('autorização parcial ("Autorizado parcialmente") conta como ok',
+        () async {
+      final _FakeBatchAdapter adapter =
+          _FakeBatchAdapter(statusAutorizacao: 'Autorizado parcialmente');
+
+      final ValidadorController controller = await _validar(
+        _controllerComGateway(
+          adapter: adapter,
+          retornoValidacao: const [
+            GuiaValidada(guia: _guiaSenhaVppValida, erros: []),
+          ],
+        ),
+      );
+
+      expect(controller.status, StatusValidador.concluido);
+      final ConsultaGuia? consulta = controller.guias.single.consulta;
+      expect(consulta, isNotNull);
+      expect(consulta!.sucesso, isTrue);
+      expect(consulta.descricao, 'Autorização VPP: ok');
     });
 
     test('autorização VPP não autorizada (Negado) é marcada como falha',

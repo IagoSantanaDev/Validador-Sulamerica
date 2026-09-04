@@ -251,16 +251,7 @@ class ValidadorController extends ChangeNotifier {
         },
       );
     }
-    final String? status = r.statusVpp;
-    final bool autorizada =
-        status != null && status.toLowerCase().startsWith('autorizad');
-    return ConsultaGuia(
-      tipo: TipoConsultaGuia.autorizacaoVpp,
-      sucesso: autorizada,
-      descricao: autorizada
-          ? 'Autorização VPP: ok'
-          : 'Autorização VPP: ${status ?? 'nenhuma solicitação encontrada'}',
-    );
+    return _consultaVpp(r.statusVpp);
   }
 
   /// Fluxo individual (uma requisição por consulta) usado quando o backend
@@ -377,17 +368,10 @@ class ValidadorController extends ChangeNotifier {
         await service.autorizacaoVpp(token: token, numeroVpp: senha);
 
     final ConsultaGuia consulta = resultado.fold<ConsultaGuia>(
-      onSuccess: (dados) {
-        final String status = _statusAutorizacaoVpp(dados);
-        final bool autorizada = status.toLowerCase().startsWith('autorizad');
-        return ConsultaGuia(
-          tipo: TipoConsultaGuia.autorizacaoVpp,
-          sucesso: autorizada,
-          descricao: autorizada
-              ? 'Autorização VPP: ok'
-              : 'Autorização VPP: $status',
-        );
-      },
+      // O backend devolve resposta compacta (descricao do status) — sem o
+      // JSON cru do portal.
+      onSuccess: (dados) =>
+          _consultaVpp(dados['descricao'] as String?),          
       onFailure: (erro) => ConsultaGuia(
         tipo: TipoConsultaGuia.autorizacaoVpp,
         sucesso: false,
@@ -398,24 +382,23 @@ class ValidadorController extends ChangeNotifier {
     return _anexarConsulta(guia, consulta);
   }
 
-  /// Extrai a descrição do status da autorização VPP retornada pelo portal
-  /// (ex.: "Autorizado", "Negado", "Em análise"). Considera autorizada
-  /// apenas quando há registro com descrição começando em "autorizad".
-  String _statusAutorizacaoVpp(Map<String, dynamic> dados) {
-    final dynamic registros = dados['registros'];
-    if (registros is! List || registros.isEmpty) {
-      return 'nenhuma solicitação encontrada';
-    }
-    for (final dynamic registro in registros) {
-      final dynamic status = registro is Map
-          ? registro['status_solicitacao']
-          : null;
-      final dynamic descricao =
-          status is Map ? status['descricao'] : null;
-      if (descricao is String && descricao.isNotEmpty) return descricao;
-    }
-    return 'sem status informado';
+  /// Monta o resultado da autorização VPP a partir da descrição do status do
+  /// portal. Autorizada quando a descrição CONTÉM a palavra "autorizado"
+  /// (case-insensitive) — cobre "Autorizado", "Autorizada", "Autorizado
+  /// parcialmente", etc.
+  ConsultaGuia _consultaVpp(String? descricao) {
+    final bool autorizada = _descricaoAutorizada(descricao);
+    return ConsultaGuia(
+      tipo: TipoConsultaGuia.autorizacaoVpp,
+      sucesso: autorizada,
+      descricao: autorizada
+          ? 'Autorização VPP: ok'
+          : 'Autorização VPP: ${descricao ?? 'nenhuma solicitação encontrada'}',
+    );
   }
+
+  static bool _descricaoAutorizada(String? descricao) =>
+      descricao != null && descricao.toLowerCase().contains('autorizado');
 
   GuiaValidada _anexarConsulta(GuiaValidada guia, ConsultaGuia consulta) =>
       GuiaValidada(guia: guia.guia, erros: guia.erros, consulta: consulta);

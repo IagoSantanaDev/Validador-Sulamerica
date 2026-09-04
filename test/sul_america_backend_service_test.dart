@@ -134,17 +134,13 @@ void main() {
       );
     });
 
-    test('autorização VPP devolve o JSON do portal', () async {
+    test('autorização VPP devolve a descrição compacta do backend', () async {
       final servico = _servico(
         statusCode: 200,
         corpo: {
-          'paginacao': {'total_registros': 1},
-          'registros': [
-            {
-              'numero_solicitacao': '239675343',
-              'status_solicitacao': {'descricao': 'Autorizado'},
-            },
-          ],
+          'status': 'ok',
+          'encontrada': true,
+          'descricao': 'Autorizado parcialmente',
         },
       );
 
@@ -155,12 +151,8 @@ void main() {
 
       resultado.fold(
         onSuccess: (dados) {
-          expect(dados['paginacao']['total_registros'], 1);
-          final registros = dados['registros'] as List;
-          expect(
-            (registros.first as Map)['numero_solicitacao'],
-            '239675343',
-          );
+          expect(dados['descricao'], 'Autorizado parcialmente');
+          expect(dados['encontrada'], isTrue);
         },
         onFailure: (erro) => fail('Esperava sucesso, veio: $erro'),
       );
