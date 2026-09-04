@@ -67,14 +67,13 @@ void main() {
       );
     });
 
-    test('consulta de beneficiário parseia elegivel/rotulo/html', () async {
+    test('consulta de beneficiário parseia elegivel/rotulo', () async {
       final servico = _servico(
         statusCode: 200,
         corpo: {
           'status': 'ok',
           'elegivel': true,
           'rotuloElegibilidade': 'SIM',
-          'html': '<html>elegibilidade-resultado</html>',
         },
       );
 
@@ -88,7 +87,6 @@ void main() {
           expect(res.elegivel, isTrue);
           expect(res.rotuloElegibilidade, 'SIM');
           expect(res.temResultadoElegibilidade, isTrue);
-          expect(res.html, contains('elegibilidade-resultado'));
         },
         onFailure: (erro) => fail('Esperava sucesso, veio: $erro'),
       );
@@ -101,7 +99,6 @@ void main() {
           'status': 'ok',
           'elegivel': null,
           'rotuloElegibilidade': null,
-          'html': '<html>Identificação</html>',
         },
       );
 

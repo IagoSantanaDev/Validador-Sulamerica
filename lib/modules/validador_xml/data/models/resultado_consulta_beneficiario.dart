@@ -1,6 +1,5 @@
 class ResultadoConsultaBeneficiario {
   const ResultadoConsultaBeneficiario({
-    required this.html,
     this.elegivel,
     this.rotuloElegibilidade,
   });
@@ -11,11 +10,9 @@ class ResultadoConsultaBeneficiario {
     return ResultadoConsultaBeneficiario(
       elegivel: json['elegivel'] as bool?,
       rotuloElegibilidade: json['rotuloElegibilidade'] as String?,
-      html: json['html'] as String? ?? '',
     );
   }
 
-  final String html;
   final bool? elegivel;
   final String? rotuloElegibilidade;
 

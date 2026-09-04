@@ -108,10 +108,10 @@ class ValidadorApi {
       'status': 'ok',
       // Elegibilidade extraída do elegibilidade-resultado.htm (SIM/NÃO);
       // null quando o portal não renderiza o resultado (carteira não
-      // encontrada).
+      // encontrada). O html original não é devolvido ao cliente: só o
+      // indicador importa e reduz o payload da rede.
       'elegivel': extrairElegivel(html),
       'rotuloElegibilidade': extrairRotuloElegibilidade(html),
-      'html': html,
     });
   }
 
