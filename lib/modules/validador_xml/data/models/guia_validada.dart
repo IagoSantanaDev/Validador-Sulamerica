@@ -13,7 +13,7 @@ class GuiaValidada {
   final List<ErroValidacao> erros;
 
   /// Resultados das consultas ao portal para esta guia (elegibilidade e/ou
-  /// autorização VPP) — a guia pode ter até duas consultas; nula nas guias
+  /// consulta de senha) — a guia pode ter até duas consultas; nula nas guias
   /// não consultadas.
   final List<ConsultaGuia> consultas;
 
@@ -23,7 +23,7 @@ class GuiaValidada {
 
   /// Primeira consulta com falha; se nenhuma falhou, a primeira consulta;
   /// null quando a guia não foi consultada. A visão completa fica em
-  /// [consultas] (elegibilidade + autorização).
+  /// [consultas] (elegibilidade + senha).
   ConsultaGuia? get consulta {
     if (consultas.isEmpty) return null;
     for (final ConsultaGuia c in consultas) {

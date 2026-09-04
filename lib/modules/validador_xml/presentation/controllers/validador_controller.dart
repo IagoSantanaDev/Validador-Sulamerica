@@ -211,7 +211,7 @@ class ValidadorController extends ChangeNotifier {
   }
 
   /// Consulta o portal (via /api/consultas em lote) para as guias do lote:
-  /// elegibilidade pela carteira SEMPRE que ela for válida; autorização VPP
+  /// elegibilidade pela carteira SEMPRE que ela for válida; consulta de senha
   /// quando a senha for válida. Falhas estruturais viram erros na guia.
   Future<List<GuiaValidada>> _consultarGuias(
     List<GuiaValidada> guias,
@@ -312,7 +312,7 @@ class ValidadorController extends ChangeNotifier {
       carteira.length == 20 && RegExp(r'^\d+$').hasMatch(carteira);
 
   /// Consultas aplicáveis a uma guia: elegibilidade pela carteira (sempre que
-  /// válida) + autorização VPP (quando a senha é válida).
+  /// válida) + consulta de senha (quando a senha é válida).
   List<ConsultaLoteItem> _itensDeConsulta(GuiaValidada guia) {
     final List<ConsultaLoteItem> itens = [];
     final String? carteira = guia.numeroCarteira;
@@ -339,7 +339,7 @@ class ValidadorController extends ChangeNotifier {
         sucesso: false,
         descricao: r.tipo == TipoConsultaGuia.elegibilidade
             ? 'Consulta de elegibilidade falhou: ${r.erro ?? 'sem detalhe'}'
-            : 'Consulta de autorização VPP falhou: ${r.erro ?? 'sem detalhe'}',
+            : 'Consulta de senha falhou: ${r.erro ?? 'sem detalhe'}',
       );
     }
     if (r.tipo == TipoConsultaGuia.elegibilidade) {
@@ -455,7 +455,7 @@ class ValidadorController extends ChangeNotifier {
       onFailure: (erro) => ConsultaGuia(
         tipo: TipoConsultaGuia.autorizacaoVpp,
         sucesso: false,
-        descricao: 'Consulta de autorização VPP falhou: $erro',
+        descricao: 'Consulta de senha falhou: $erro',
       ),
     );
     _cacheAutorizacao[senha] = consulta;

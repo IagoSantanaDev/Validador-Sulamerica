@@ -29,7 +29,7 @@ class ResultadoLogin {
 }
 
 /// Cliente do portal Lumis. O login exige GET inicial na pagina (senão o F5
-/// ASM responde 403 sem o cookie NSC_*), e a VPP exige sessão (401 sem login).
+/// ASM responde 403 sem o cookie NSC_*), e a consulta de senha exige sessão (401 sem login).
 class SessaoPortal {
   SessaoPortal({
     Dio? dio,
@@ -397,7 +397,7 @@ class SessaoPortal {
   }) async {
     if (!_autenticada) {
       _ultimoStatusFalha = _statusFalhaSessao;
-      _logger.e('Autorizacao nao consultada: sessao nao estabelecida.');
+      _logger.e('Consulta de senha nao enviada: sessao nao estabelecida.');
       return null;
     }
 
@@ -445,7 +445,7 @@ class SessaoPortal {
 
       if (resposta.statusCode != 200) {
         _ultimoStatusFalha = resposta.statusCode;
-        _logger.e('Autorizacao VPP: HTTP ${resposta.statusCode}.');
+        _logger.e('Consulta de senha: HTTP ${resposta.statusCode}.');
         return null;
       }
 
@@ -454,15 +454,15 @@ class SessaoPortal {
       final String corpo = _decodificarCorpo(resposta.data ?? []);
       final dynamic json = jsonDecode(corpo);
       if (json is! Map<String, dynamic>) {
-        _logger.e('Autorizacao VPP: JSON inesperado no corpo.');
+        _logger.e('Consulta de senha: JSON inesperado no corpo.');
         return null;
       }
       return json;
     } on DioException catch (erro) {
-      _logger.e('Falha de rede na autorizacao VPP: ${erro.message}');
+      _logger.e('Falha de rede na consulta de senha: ${erro.message}');
       return null;
     } catch (erro) {
-      _logger.e('Falha inesperada na autorizacao VPP: $erro');
+      _logger.e('Falha inesperada na consulta de senha: $erro');
       return null;
     }
   }

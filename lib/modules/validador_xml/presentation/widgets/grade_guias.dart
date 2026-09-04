@@ -9,7 +9,7 @@ import '../../../../globals/widgets/textos.dart';
 import '../../data/models/consulta_guia.dart';
 import '../../data/models/guia_validada.dart';
 
-/// Categorias de erro usadas no filtro da grade. Erros de autorização VPP
+/// Categorias de erro usadas no filtro da grade. Erros de consulta de senha
 /// (senha inválida, não encontrada, negada...) pertencem à categoria [senha];
 /// os de elegibilidade (não elegível, carteira não encontrada...) pertencem à
 /// categoria [carteira].
@@ -26,7 +26,7 @@ bool _ehSenhaNaoInformada(String detalhe) =>
     detalhe.toLowerCase().contains('senha não informada');
 
 /// Expande uma guia problemática em linhas: um erro local por linha e, para
-/// cada CONSULTA que falhou (elegibilidade NÃO, senha inválida, autorização
+/// cada CONSULTA que falhou (elegibilidade NÃO, senha inválida, consulta de senha
 /// negada...), uma linha adicional com o motivo. Consultas bem-sucedidas
 /// (Elegível: SIM, Senha: ok) NÃO viram linha — ficam no popup.
 /// A linha de "Senha não informada" é sempre a última.
@@ -85,7 +85,7 @@ TipoErroGuia? tipoErroDeLinha(LinhaGradeGuia linha) {
   return null;
 }
 
-/// Classifica uma consulta que falhou: VPP → Senha; elegibilidade → Carteira
+/// Classifica uma consulta que falhou: consulta de senha → Senha; elegibilidade → Carteira
 /// (não elegível, carteira não encontrada, número inválido...).
 TipoErroGuia _tipoDeConsulta(ConsultaGuia consulta) {
   final String descricao = consulta.descricao;

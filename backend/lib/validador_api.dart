@@ -245,14 +245,14 @@ class ValidadorApi {
   /// A partir deste volume de elegibilidades vale criar sessões extras.
   static const int _minElegibilidadeParaMultiplasSessoes = 10;
 
-  /// Teto de consultas VPP simultâneas POR SESSÃO (GET sem estado de form,
-  /// leve). Distribuir também os VPPs entre as sessões evita concentrar os
-  /// 100 VPPs na sessão base.
+  /// Teto de consultas de senha simultâneas POR SESSÃO (GET sem estado de form,
+  /// leve). Distribuir também as consultas de senha entre as sessões evita concentrar os
+  /// 100 consultas de senha na sessão base.
   static const int _limiteVppPorSessao = 3;
 
   /// Executa as consultas: elegibilidade é sempre serial POR SESSÃO (o form
   /// do portal tem estado); com muitas carteiras abre sessões extras (logins
-  /// em paralelo) e divide elegibilidade e VPPs entre todas as sessões.
+  /// em paralelo) e divide elegibilidade e consultas de senha entre todas as sessões.
   Future<List<Map<String, dynamic>>> _executarConsultas({
     required SessaoPortal sessaoBase,
     required _CredenciaisPortal? credenciais,
@@ -281,7 +281,7 @@ class ValidadorApi {
       }
     }
 
-    // Distribui elegibilidades (serial por sessão) e VPPs (pool por sessão)
+    // Distribui elegibilidades (serial por sessão) e consultas de senha (pool por sessão)
     // em round-robin por todas as sessões.
     final List<List<dynamic>> particoesEleg =
         List.generate(sessoes.length, (_) => <dynamic>[]);
@@ -339,7 +339,7 @@ class ValidadorApi {
   }
 
   /// Uma sessão: elegibilidade da fatia uma a uma (serial, preserva o form);
-  /// os VPPs da fatia rodam em paralelo até [_limiteVppPorSessao].
+  /// as consultas de senha da fatia rodam em paralelo até [_limiteVppPorSessao].
   Future<List<Map<String, dynamic>>> _processarSessao({
     required SessaoPortal sessao,
     required List<dynamic> fatiaElegibilidade,
@@ -610,7 +610,7 @@ class ValidadorApi {
 
 
   /// Fonte única das regras de formato: carteira com exatamente 20 dígitos e
-  /// senha VPP com exatamente 10 dígitos começando com 5 (mesmas do app).
+  /// senha com exatamente 10 dígitos começando com 5 (mesmas do app).
   static bool _carteiraValida(String carteira) =>
       carteira.length == 20 && RegExp(r'^\d+$').hasMatch(carteira);
 
