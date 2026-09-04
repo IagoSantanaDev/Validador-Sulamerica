@@ -21,6 +21,7 @@ class ValidadorApi {
     ..post('/api/login', _login)
     ..post('/api/beneficiario', _beneficiario)
     ..get('/api/autorizacao', _autorizacao)
+    ..post('/api/consultas', _consultas)
     ..get('/api/status', _status)
     ..all('/<ignored|.*>', _naoEncontrado);
 
@@ -139,6 +140,125 @@ class ValidadorApi {
       return _json(dados, statusCode: 502);
     }
     return _json(dados);
+  }
+
+  /// Consulta em lote: recebe várias solicitações (elegibilidade/vpp) e
+  /// executa contra o portal com concorrência limitada, devolvendo cada
+  /// resultado individualmente — o cliente faz uma única requisição HTTP.
+  Future<Response> _consultas(Request request) async {
+    final Map<String, dynamic>? corpo = await _lerJson(request);
+    if (corpo == null) return _erro('Corpo JSON invalido.', 400);
+
+    final SessaoPortal? sessao = _sessaoPorCorpo(corpo);
+    if (sessao == null) {
+      return _erro('Token de sessao invalido ou ausente.', 401);
+    }
+
+    final dynamic consultas = corpo['consultas'];
+    if (consultas is! List || consultas.isEmpty) {
+      return _erro('Campo consultas e obrigatorio.', 400);
+    }
+
+    final List<Map<String, dynamic>> resultados = [];
+    for (final List<dynamic> lote in _fatiar(consultas, 4)) {
+      final List<Future<Map<String, dynamic>>> futuros =
+          lote.map((item) => _executarConsulta(sessao, item)).toList();
+      resultados.addAll(await Future.wait(futuros));
+    }
+    return _json({'status': 'ok', 'resultados': resultados});
+  }
+
+  List<List<T>> _fatiar<T>(List<T> lista, int tamanho) {
+    final List<List<T>> lotes = [];
+    for (int i = 0; i < lista.length; i += tamanho) {
+      final int fim = min(i + tamanho, lista.length);
+      lotes.add(lista.sublist(i, fim));
+    }
+    return lotes;
+  }
+
+  Future<Map<String, dynamic>> _executarConsulta(
+    SessaoPortal sessao,
+    dynamic item,
+  ) async {
+    final String? tipo = item is Map ? item['tipo'] as String? : null;
+    final String? chave = item is Map ? item['chave'] as String? : null;
+    if (chave == null || chave.isEmpty) {
+      return {
+        'chave': chave ?? '',
+        'tipo': tipo ?? '',
+        'sucesso': false,
+        'erro': 'chave invalida.',
+      };
+    }
+
+    if (tipo == 'elegibilidade') {
+      if (chave.length != 20 || !RegExp(r'^\d+$').hasMatch(chave)) {
+        return {
+          'chave': chave,
+          'tipo': tipo,
+          'sucesso': false,
+          'erro': 'Carteira deve conter exatamente 20 digitos.',
+        };
+      }
+      final String? html = await sessao
+          .consultarBeneficiario(carteirinhaCompleta: chave);
+      if (html == null) {
+        return {
+          'chave': chave,
+          'tipo': tipo,
+          'sucesso': false,
+          'erro': 'Falha na consulta ao portal SulAmerica.',
+        };
+      }
+      return {
+        'chave': chave,
+        'tipo': tipo,
+        'sucesso': true,
+        'elegivel': extrairElegivel(html),
+        'rotuloElegibilidade': extrairRotuloElegibilidade(html),
+      };
+    }
+
+    if (tipo == 'autorizacaoVpp') {
+      final Map<String, dynamic>? dados = await sessao
+          .consultarAutorizacaoVpp(numeroVpp: chave);
+      if (dados == null) {
+        return {
+          'chave': chave,
+          'tipo': tipo,
+          'sucesso': false,
+          'erro': 'Falha na consulta de autorizacao VPP.',
+        };
+      }
+      return {
+        'chave': chave,
+        'tipo': tipo,
+        'sucesso': true,
+        'statusVpp': _extrairStatusVpp(dados),
+      };
+    }
+
+    return {
+      'chave': chave,
+      'tipo': tipo ?? '',
+      'sucesso': false,
+      'erro': 'Tipo de consulta desconhecido.',
+    };
+  }
+
+  /// Descricao do status da autorização (ex.: "Autorizado", "Negado") a
+  /// partir do JSON do portal; null quando não há registro com status.
+  String? _extrairStatusVpp(Map<String, dynamic> dados) {
+    final dynamic registros = dados['registros'];
+    if (registros is! List || registros.isEmpty) return null;
+    for (final dynamic registro in registros) {
+      final dynamic status =
+          registro is Map ? registro['status_solicitacao'] : null;
+      final dynamic descricao = status is Map ? status['descricao'] : null;
+      if (descricao is String && descricao.isNotEmpty) return descricao;
+    }
+    return null;
   }
 
   Future<Response> _status(Request request) async {
