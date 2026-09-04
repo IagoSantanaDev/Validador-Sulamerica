@@ -48,9 +48,23 @@ class ValidadorApi {
     }
 
     final SessaoPortal sessao = SessaoPortal(logger: _logger);
-    final bool ok = await sessao.login(code: code, user: user, senha: senha);
-    if (!ok) {
-      return _erro('Falha ao autenticar no portal SulAmerica.', 401);
+    final ResultadoLogin resultado = await sessao.login(
+      code: code,
+      user: user,
+      senha: senha,
+    );
+    if (!resultado.autenticada) {
+      final String mensagem = switch (resultado.motivo) {
+        MotivoFalhaLogin.credenciaisInvalidas =>
+          'Credenciais invalidas para o portal SulAmerica. '
+          'Confira PORTAL_CODE, PORTAL_USER e PORTAL_SENHA.',
+        MotivoFalhaLogin.falhaRede =>
+          'Falha de rede ao acessar o portal SulAmerica.',
+        MotivoFalhaLogin.respostaInesperada || null =>
+          'O portal SulAmerica respondeu de forma inesperada '
+          '(possivel bloqueio do F5 ASM).',
+      };
+      return _erro(mensagem, 401);
     }
 
     final String token = _novoToken(sessao);

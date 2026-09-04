@@ -5,6 +5,21 @@ import 'package:dio/dio.dart';
 import 'package:dio_cookie_manager/dio_cookie_manager.dart';
 import 'package:logger/logger.dart';
 
+/// Motivo da falha ao autenticar no portal (para o proxy distinguir
+/// credencial inválida de bloqueio/resposta inesperada).
+enum MotivoFalhaLogin { credenciaisInvalidas, respostaInesperada, falhaRede }
+
+class ResultadoLogin {
+  const ResultadoLogin.autenticado()
+      : autenticada = true,
+        motivo = null;
+
+  const ResultadoLogin.falha(this.motivo) : autenticada = false;
+
+  final bool autenticada;
+  final MotivoFalhaLogin? motivo;
+}
+
 /// Cliente do portal Lumis. O login exige GET inicial na pagina (senão o F5
 /// ASM responde 403 sem o cookie NSC_*), e a VPP exige sessão (401 sem login).
 class SessaoPortal {
@@ -77,6 +92,7 @@ class SessaoPortal {
   final Logger _logger;
 
   bool _autenticada = false;
+  String _codigoPrestador = '100000015513';
 
 
   bool get autenticada => _autenticada;
@@ -100,7 +116,7 @@ class SessaoPortal {
       };
 
 
-  Future<bool> login({
+  Future<ResultadoLogin> login({
     required String code,
     required String user,
     required String senha,
@@ -114,8 +130,13 @@ class SessaoPortal {
         ),
       );
       if (pagina.statusCode != 200) {
-        _logger.e('GET inicial do login retornou HTTP ${pagina.statusCode}.');
-        return false;
+        _logger.e(
+          'GET inicial do login retornou HTTP ${pagina.statusCode} '
+          '(possivel bloqueio do F5 ASM).',
+        );
+        return const ResultadoLogin.falha(
+          MotivoFalhaLogin.respostaInesperada,
+        );
       }
 
       final Map<String, String> campos = {
@@ -141,7 +162,9 @@ class SessaoPortal {
         final String? destino = resposta.headers.value('location');
         if (destino == null) {
           _logger.e('Login Lumis: 302 sem Location.');
-          return false;
+          return const ResultadoLogin.falha(
+            MotivoFalhaLogin.respostaInesperada,
+          );
         }
         final Uri uri = Uri.parse(destino);
         final String urlFinal = uri.hasScheme
@@ -156,10 +179,14 @@ class SessaoPortal {
         );
         if (pos.statusCode != 200) {
           _logger.e('Login Lumis: redirect final HTTP ${pos.statusCode}.');
-          return false;
+          return const ResultadoLogin.falha(
+            MotivoFalhaLogin.respostaInesperada,
+          );
         }
-        _autenticada =
+        final bool paginaAutenticada =
             (pos.data ?? '').toLowerCase().contains('logout');
+        _codigoPrestador = code;
+        _autenticada = paginaAutenticada;
         final int quantidadeCookies =
             (await _cookieJar.loadForRequest(Uri.parse(_urlLogin))).length;
         _logger.i(
@@ -167,14 +194,24 @@ class SessaoPortal {
           'pagina autenticada: $_autenticada | '
           'sessao: $quantidadeCookies cookies.',
         );
-        return _autenticada;
+        if (!paginaAutenticada) {
+          return const ResultadoLogin.falha(
+            MotivoFalhaLogin.credenciaisInvalidas,
+          );
+        }
+        return const ResultadoLogin.autenticado();
       }
 
       if (resposta.statusCode != 200) {
         _logger.e('Login Lumis retornou HTTP ${resposta.statusCode}.');
-        return false;
+        return const ResultadoLogin.falha(
+          MotivoFalhaLogin.respostaInesperada,
+        );
       }
 
+      // HTTP 200 sem redirect: o portal devolveu a propria pagina de login
+      // (credenciais rejeitadas) ou uma pagina de erro — confirma logando
+      // um trecho do corpo para diagnostico.
       final String corpo = resposta.data ?? '';
       _autenticada = corpo.toLowerCase().contains('logout');
       final int quantidadeCookies =
@@ -184,14 +221,28 @@ class SessaoPortal {
         'pagina autenticada: $_autenticada | '
         'sessao: $quantidadeCookies cookies.',
       );
-      return _autenticada;
+      if (!_autenticada) {
+        _logger.w(
+          'Login Lumis: corpo sem sessao autenticada — trecho: '
+          '${_resumirCorpo(corpo)}',
+        );
+        return const ResultadoLogin.falha(
+          MotivoFalhaLogin.credenciaisInvalidas,
+        );
+      }
+      return const ResultadoLogin.autenticado();
     } on DioException catch (erro) {
       _logger.e('Falha de rede no login: ${erro.message}');
-      return false;
+      return const ResultadoLogin.falha(MotivoFalhaLogin.falhaRede);
     } catch (erro) {
       _logger.e('Falha inesperada no login: $erro');
-      return false;
+      return const ResultadoLogin.falha(MotivoFalhaLogin.falhaRede);
     }
+  }
+
+  String _resumirCorpo(String corpo) {
+    final String texto = corpo.replaceAll(RegExp(r'\s+'), ' ').trim();
+    return texto.length > 300 ? '${texto.substring(0, 300)}…' : texto;
   }
 
 
@@ -303,7 +354,7 @@ class SessaoPortal {
           'data-final': '',
           'status-solicitacao': '',
           'numero-vpp': numeroVpp,
-          'codigo-prestador': '100000015513',
+          'codigo-prestador': _codigoPrestador,
           'codigo-solicitacao': '',
           'tipo-solicitacao.codigo': '',
         },
