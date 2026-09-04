@@ -7,7 +7,7 @@ import 'package:flutter/foundation.dart';
 /// andamento e o resultado (status + corpo) — útil para conferir que as
 /// chamadas ao backend estão realmente acontecendo.
 class LoggingInterceptor extends Interceptor {
-  static const int _maxCaracteresCorpo = 500;
+  static const int _maxCaracteresCorpo = 180;
 
   @override
   void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
@@ -26,7 +26,10 @@ class LoggingInterceptor extends Interceptor {
         '[HTTP] <- ${response.requestOptions.method} '
         '${_urlDe(response.requestOptions)} -> ${response.statusCode}',
       );
-      _logarCorpo('resposta', response.data);
+      // O corpo do login contém o token da sessão — não logar.
+      if (!_urlDe(response.requestOptions).contains('/api/login')) {
+        _logarCorpo('resposta', response.data);
+      }
     }
     handler.next(response);
   }

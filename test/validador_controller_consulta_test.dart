@@ -208,6 +208,82 @@ void main() {
       expect(controller.guiasComErro.single.consulta, isNull);
     });
 
+    test('dedupe: guias com a mesma carteira geram uma única consulta',
+        () async {
+      final _FakeGatewayAdapter adapter = _FakeGatewayAdapter({
+        '/api/login': (200, {'token': 'tok123'}),
+        '/api/beneficiario': (
+          200,
+          {'status': 'ok', 'elegivel': true, 'rotuloElegibilidade': 'SIM', 'html': '<html/>'},
+        ),
+      });
+
+      const GuiaTiss guiaSemSenhaB = GuiaTiss(
+        numeroGuiaPrestador: '112',
+        numeroCarteira: '42509512809910100031',
+        senha: null,
+      );
+
+      final ValidadorController controller = await _validar(
+        _controllerComGateway(
+          adapter: adapter,
+          retornoValidacao: const [
+            GuiaValidada(
+              guia: _guiaSemSenha,
+              erros: [ErroValidacao(campo: 'senha', mensagem: 'sem senha')],
+            ),
+            GuiaValidada(
+              guia: guiaSemSenhaB,
+              erros: [ErroValidacao(campo: 'senha', mensagem: 'sem senha')],
+            ),
+          ],
+        ),
+      );
+
+      expect(controller.status, StatusValidador.concluido);
+      expect(
+        adapter.logChamadas.where((p) => p == '/api/beneficiario'),
+        hasLength(1),
+      );
+      expect(controller.guias, hasLength(2));
+      for (final GuiaValidada guia in controller.guias) {
+        expect(guia.consulta?.descricao, 'Elegível: SIM');
+      }
+    });
+
+    test('dedupe: guias com a mesma senha geram uma única autorização',
+        () async {
+      final _FakeGatewayAdapter adapter = _FakeGatewayAdapter({
+        '/api/login': (200, {'token': 'tok123'}),
+        '/api/autorizacao': (200, {'ok': true}),
+      });
+
+      const GuiaTiss guiaVppB = GuiaTiss(
+        numeroGuiaPrestador: '223',
+        numeroCarteira: '55788888482319470020',
+        senha: '5056430843',
+      );
+
+      final ValidadorController controller = await _validar(
+        _controllerComGateway(
+          adapter: adapter,
+          retornoValidacao: const [
+            GuiaValidada(guia: _guiaSenhaVppValida, erros: []),
+            GuiaValidada(guia: guiaVppB, erros: []),
+          ],
+        ),
+      );
+
+      expect(controller.status, StatusValidador.concluido);
+      expect(
+        adapter.logChamadas.where((p) => p == '/api/autorizacao'),
+        hasLength(1),
+      );
+      for (final GuiaValidada guia in controller.guias) {
+        expect(guia.consulta?.descricao, 'Autorização VPP: ok');
+      }
+    });
+
     test('sem credenciais do prestador nenhuma chamada é feita', () async {
       final _FakeGatewayAdapter adapter = _FakeGatewayAdapter({
         '/api/login': (200, {'token': 'tok123'}),

@@ -40,6 +40,12 @@ class ValidadorController extends ChangeNotifier {
 
   String? _tokenSessao;
 
+  /// Dedupe intra-lote: a mesma carteira/senha repetida no mesmo arquivo é
+  /// consultada uma única vez (resultado idêntico no mesmo instante). O cache
+  /// é limpo a cada validação — não envelhece dados entre lotes.
+  final Map<String, ConsultaGuia> _cacheElegibilidade = {};
+  final Map<String, ConsultaGuia> _cacheAutorizacao = {};
+
   StatusValidador _status = StatusValidador.semArquivo;
   String? _nomeArquivo;
   Uint8List? _bytesArquivo;
@@ -152,6 +158,11 @@ class ValidadorController extends ChangeNotifier {
     final SulAmericaBackendService? service = _service;
     if (service == null || guias.isEmpty) return guias;
 
+    // Escopo de dedupe: apenas a validação atual. A próxima validação sempre
+    // consulta o portal novamente (dados novos).
+    _cacheElegibilidade.clear();
+    _cacheAutorizacao.clear();
+
     final String? token = await _obterTokenSessao(service);
     if (token == null) return guias;
 
@@ -216,6 +227,11 @@ class ValidadorController extends ChangeNotifier {
     final String? carteira = guia.numeroCarteira;
     if (carteira == null || carteira.isEmpty) return guia;
 
+    final ConsultaGuia? naCache = _cacheElegibilidade[carteira];
+    if (naCache != null) {
+      return _anexarConsulta(guia, naCache);
+    }
+
     final Result<ResultadoConsultaBeneficiario> resultado =
         await service.consultarBeneficiario(token: token, carteira: carteira);
 
@@ -235,6 +251,7 @@ class ValidadorController extends ChangeNotifier {
         descricao: 'Consulta de elegibilidade falhou: $erro',
       ),
     );
+    _cacheElegibilidade[carteira] = consulta;
     return _anexarConsulta(guia, consulta);
   }
 
@@ -243,8 +260,15 @@ class ValidadorController extends ChangeNotifier {
     String token,
     GuiaValidada guia,
   ) async {
+    final String senha = guia.senha!;
+
+    final ConsultaGuia? naCache = _cacheAutorizacao[senha];
+    if (naCache != null) {
+      return _anexarConsulta(guia, naCache);
+    }
+
     final Result<Map<String, dynamic>> resultado =
-        await service.autorizacaoVpp(token: token, numeroVpp: guia.senha!);
+        await service.autorizacaoVpp(token: token, numeroVpp: senha);
 
     final ConsultaGuia consulta = resultado.fold<ConsultaGuia>(
       onSuccess: (_) => const ConsultaGuia(
@@ -258,6 +282,7 @@ class ValidadorController extends ChangeNotifier {
         descricao: 'Consulta de autorização VPP falhou: $erro',
       ),
     );
+    _cacheAutorizacao[senha] = consulta;
     return _anexarConsulta(guia, consulta);
   }
 
