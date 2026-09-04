@@ -259,6 +259,10 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
             for (final GuiaValidada g in comProblema)
               if (tipoErroDe(g) == _filtroErro) g,
           ];
+    // Cada detalhe (erro local ou consulta) vira uma linha própria da grade.
+    final List<LinhaGradeGuia> linhas = [
+      for (final GuiaValidada g in guias) ...linhasDeGuia(g),
+    ];
     final int falhasConsulta = c.guias
         .where((g) => g.consulta != null && !g.consulta!.sucesso)
         .length;
@@ -321,7 +325,7 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
                       mensagem: AppStrings.filtroSemResultado,
                     )
                   else
-                    GradeGuias(guias: guias),
+                    GradeGuias(linhas: linhas),
                 ],
                 const SizedBox(height: AppDimens.spaceLg),
                 RodapeResultado(

@@ -1,0 +1,63 @@
+import 'package:flutter_test/flutter_test.dart';
+import 'package:validador_xml_sulamerica/modules/validador_xml/data/models/consulta_guia.dart';
+import 'package:validador_xml_sulamerica/modules/validador_xml/data/models/erro_validacao.dart';
+import 'package:validador_xml_sulamerica/modules/validador_xml/data/models/guia_tiss.dart';
+import 'package:validador_xml_sulamerica/modules/validador_xml/data/models/guia_validada.dart';
+import 'package:validador_xml_sulamerica/modules/validador_xml/presentation/widgets/grade_guias.dart';
+
+void main() {
+  const GuiaTiss guia = GuiaTiss(
+    numeroGuiaPrestador: '111',
+    numeroCarteira: '42509512809910100031',
+    senha: null,
+  );
+
+  const GuiaValidada guiaMulti = GuiaValidada(
+    guia: guia,
+    erros: [
+      ErroValidacao(
+        campo: 'numeroCarteira',
+        mensagem: 'numeroCarteira não informado',
+      ),
+      ErroValidacao(campo: 'senha', mensagem: 'senha não informada'),
+    ],
+    consulta: ConsultaGuia(
+      sucesso: false,
+      descricao: 'Carteira não encontrada',
+    ),
+  );
+
+  group('linhasDeGuia - expansão da grade', () {
+    test('cada erro local vira uma linha própria e a consulta outra linha',
+        () {
+      final List<LinhaGradeGuia> linhas = linhasDeGuia(guiaMulti);
+
+      expect(linhas, hasLength(3));
+      expect(linhas[0].detalhe, 'numeroCarteira não informado');
+      expect(linhas[1].detalhe, 'Carteira não encontrada');
+      // Todos apontam para a mesma guia.
+      for (final LinhaGradeGuia linha in linhas) {
+        expect(linha.guia, same(guiaMulti));
+      }
+    });
+
+    test('senha não informada fica sempre por último', () {
+      final List<LinhaGradeGuia> linhas = linhasDeGuia(guiaMulti);
+
+      expect(linhas.last.detalhe, 'senha não informada');
+    });
+
+    test('sem consulta gera uma linha por erro local', () {
+      const GuiaValidada soErroLocal = GuiaValidada(
+        guia: guia,
+        erros: [
+          ErroValidacao(campo: 'senha', mensagem: 'senha não informada'),
+        ],
+      );
+
+      final List<LinhaGradeGuia> linhas = linhasDeGuia(soErroLocal);
+      expect(linhas, hasLength(1));
+      expect(linhas.single.detalhe, 'senha não informada');
+    });
+  });
+}
