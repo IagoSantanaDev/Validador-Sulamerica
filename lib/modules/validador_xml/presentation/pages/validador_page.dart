@@ -248,11 +248,8 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
   }
 
   Widget _buildResultado(BuildContext context, ValidadorController c) {
-    // Guias com qualquer problema: erro local OU falha de consulta ao portal.
     final List<GuiaValidada> comProblema = c.guiasComErro;
-    // Cada detalhe (erro local ou consulta) vira uma linha própria; o filtro
-    // opera por LINHA (não por guia), evitando que erros de outro tipo
-    // apareçam no filtro selecionado.
+    // Filtro opera por LINHA para não vazar erros de outro tipo.
     final List<LinhaGradeGuia> todasLinhas = [
       for (final GuiaValidada g in comProblema) ...linhasDeGuia(g),
     ];

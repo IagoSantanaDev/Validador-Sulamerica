@@ -76,13 +76,11 @@ List<LinhaGradeGuia> agruparPorDetalhe(List<LinhaGradeGuia> linhas) {
 /// linha da consulta pelo tipo/motivo. Nula quando não categorizável.
 TipoErroGuia? tipoErroDeLinha(LinhaGradeGuia linha) {
   final String detalhe = linha.detalhe;
-  // Linha de consulta (falha): procura a consulta cuja descrição é o detalhe.
   for (final ConsultaGuia consulta in linha.guia.consultas) {
     if (!consulta.sucesso && detalhe == consulta.descricao) {
       return _tipoDeConsulta(consulta);
     }
   }
-  // Linha de erro local: categoriza pelo campo do erro correspondente.
   for (final erro in linha.guia.erros) {
     if (erro.mensagem != detalhe) continue;
     if (erro.campo == 'senha') return TipoErroGuia.senha;
@@ -236,8 +234,7 @@ class GradeGuias extends StatelessWidget {
                 rotulo: AppStrings.rotuloSenha,
                 valor: guia.senha ?? AppStrings.valorIndisponivel,
               ),
-              // Visão geral: status de CADA consulta (elegibilidade e/ou
-              // autorização), sem semântica de erro — erros ficam na grade.
+              // Visão geral dos status (elegibilidade e/ou senha) por consulta.
               for (final ConsultaGuia consulta in guia.consultas) ...[
                 const SizedBox(height: AppDimens.spaceMd),
                 RotuloValor(

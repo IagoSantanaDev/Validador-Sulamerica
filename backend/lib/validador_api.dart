@@ -72,8 +72,8 @@ class ValidadorApi {
     }
 
     final String token = _novoToken(sessao);
-    // Retém apenas para abrir sessões extras (logins paralelos) em lotes
-    // grandes de elegibilidade; vive só em memória e sai junto com a sessão.
+    // Retém as credenciais apenas para abrir sessões extras (logins), em
+    // memória, e as remove junto com a sessão.
     _credenciaisPorToken[token] = _CredenciaisPortal(
       code: code,
       user: user,
