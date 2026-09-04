@@ -9,8 +9,9 @@ import '../../../../globals/widgets/textos.dart';
 import '../../data/models/consulta_guia.dart';
 import '../../data/models/guia_validada.dart';
 
-/// Categorias de erro usadas no filtro da grade.
-enum TipoErroGuia { senha, carteira, elegibilidade, autorizacao, credenciais }
+/// Categorias de erro usadas no filtro da grade. Erros de autorização VPP
+/// (senha inválida, negada...) pertencem à categoria [senha].
+enum TipoErroGuia { senha, carteira, elegibilidade, credenciais }
 
 /// Uma linha exibível da grade: a guia que a originou + o detalhe da linha.
 class LinhaGradeGuia {
@@ -76,18 +77,7 @@ TipoErroGuia? tipoErroDeLinha(LinhaGradeGuia linha) {
   // Linha de consulta (falha): procura a consulta cuja descrição é o detalhe.
   for (final ConsultaGuia consulta in linha.guia.consultas) {
     if (!consulta.sucesso && detalhe == consulta.descricao) {
-      if (detalhe.contains('autenticar') ||
-          detalhe.contains('Credenciais') ||
-          detalhe.contains('credenciais')) {
-        return TipoErroGuia.credenciais;
-      }
-      if (consulta.tipo == TipoConsultaGuia.elegibilidade) {
-        if (detalhe.contains('Carteira') || detalhe.contains('carteira')) {
-          return TipoErroGuia.carteira;
-        }
-        return TipoErroGuia.elegibilidade;
-      }
-      return TipoErroGuia.autorizacao;
+      return _tipoDeConsulta(consulta);
     }
   }
   // Linha de erro local: categoriza pelo campo do erro correspondente.
@@ -99,24 +89,30 @@ TipoErroGuia? tipoErroDeLinha(LinhaGradeGuia linha) {
   return null;
 }
 
+/// Classifica uma consulta que falhou: VPP → Senha; elegibilidade → Carteira
+/// (carteira não encontrada/inválida) ou Elegibilidade.
+TipoErroGuia _tipoDeConsulta(ConsultaGuia consulta) {
+  final String descricao = consulta.descricao;
+  if (descricao.contains('autenticar') ||
+      descricao.contains('Credenciais') ||
+      descricao.contains('credenciais')) {
+    return TipoErroGuia.credenciais;
+  }
+  if (consulta.tipo == TipoConsultaGuia.elegibilidade) {
+    if (descricao.contains('Carteira') || descricao.contains('carteira')) {
+      return TipoErroGuia.carteira;
+    }
+    return TipoErroGuia.elegibilidade;
+  }
+  return TipoErroGuia.senha;
+}
+
 /// Categoriza o problema que uma guia representa (erro local ou de consulta).
 /// Nulo quando a guia não tem problema.
 TipoErroGuia? tipoErroDe(GuiaValidada guia) {
   for (final ConsultaGuia consulta in guia.consultas) {
     if (!consulta.sucesso) {
-      final String descricao = consulta.descricao;
-      if (descricao.contains('autenticar') ||
-          descricao.contains('Credenciais') ||
-          descricao.contains('credenciais')) {
-        return TipoErroGuia.credenciais;
-      }
-      if (consulta.tipo == TipoConsultaGuia.elegibilidade) {
-        if (descricao.contains('Carteira') || descricao.contains('carteira')) {
-          return TipoErroGuia.carteira;
-        }
-        return TipoErroGuia.elegibilidade;
-      }
-      return TipoErroGuia.autorizacao;
+      return _tipoDeConsulta(consulta);
     }
   }
   if (guia.erros.any((e) => e.campo == 'senha')) {
@@ -132,7 +128,6 @@ String rotuloTipoErro(TipoErroGuia tipo) => switch (tipo) {
       TipoErroGuia.senha => AppStrings.filtroSenha,
       TipoErroGuia.carteira => AppStrings.filtroCarteira,
       TipoErroGuia.elegibilidade => AppStrings.filtroElegibilidade,
-      TipoErroGuia.autorizacao => AppStrings.filtroAutorizacao,
       TipoErroGuia.credenciais => AppStrings.filtroCredenciais,
     };
 

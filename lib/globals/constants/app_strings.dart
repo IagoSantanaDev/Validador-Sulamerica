@@ -1,7 +1,7 @@
 class AppStrings {
   const AppStrings._();
 
-  static const String tituloApp = 'Validador TISS';
+  static const String tituloApp = 'Validador SulAmerica';
   static const String valorIndisponivel = '—';
   static const String mensagemArquivoInvalidoExtensao =
       'Selecione um arquivo com extensão .xml';
@@ -79,7 +79,6 @@ class AppStrings {
   static const String filtroSenha = 'Senha';
   static const String filtroCarteira = 'Carteira';
   static const String filtroElegibilidade = 'Elegibilidade';
-  static const String filtroAutorizacao = 'Autorização';
   static const String filtroCredenciais = 'Credenciais';
   static const String filtroSemResultado = 'Nenhuma guia encontrada com este filtro.';
 }

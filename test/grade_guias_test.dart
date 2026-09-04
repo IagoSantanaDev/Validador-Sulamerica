@@ -151,5 +151,22 @@ void main() {
 
       expect(tipoErroDeLinha(linha), TipoErroGuia.carteira);
     });
+
+    test('linha de VPP (senha inválida/negada) é filtrada como Senha', () {
+      const GuiaValidada guiaVpp = GuiaValidada(
+        guia: guia,
+        erros: [],
+        consultas: [
+          ConsultaGuia(
+            tipo: TipoConsultaGuia.autorizacaoVpp,
+            sucesso: false,
+            descricao: 'Senha inválida (5056430843)',
+          ),
+        ],
+      );
+      final LinhaGradeGuia linha = linhasDeGuia(guiaVpp).single;
+
+      expect(tipoErroDeLinha(linha), TipoErroGuia.senha);
+    });
   });
 }

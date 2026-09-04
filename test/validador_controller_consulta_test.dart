@@ -304,7 +304,7 @@ void main() {
       final ConsultaGuia? consulta = controller.guias.single.consulta;
       expect(consulta, isNotNull);
       expect(consulta!.sucesso, isFalse);
-      expect(consulta.descricao, 'Autorização VPP: Negado');
+      expect(consulta.descricao, contains('Autorização VPP: Negado'));
     });
 
     test('guia com senha inválida não gera consultas (nem login)', () async {
@@ -331,7 +331,7 @@ void main() {
       expect(adapter.consultasRecebidas, hasLength(1));
       final List<String> descricoes =
           controller.guiasComErro.single.consultas.map((c) => c.descricao).toList();
-      expect(descricoes, contains('Senha inválida'));
+      expect(descricoes.any((d) => d.startsWith('Senha inválida')), isTrue);
       expect(descricoes, contains('Elegível: SIM'));
     });
 
@@ -375,7 +375,7 @@ void main() {
       final ConsultaGuia? consulta = controller.guias.single.consulta;
       expect(consulta, isNotNull);
       expect(consulta!.sucesso, isFalse);
-      expect(consulta.descricao, 'Beneficiário não elegível');
+      expect(consulta.descricao, contains('Beneficiário não elegível'));
     });
 
     test('VPP sem status é exibido como senha inválida', () async {
@@ -394,7 +394,7 @@ void main() {
       final ConsultaGuia? consulta = controller.guias.single.consulta;
       expect(consulta, isNotNull);
       expect(consulta!.sucesso, isFalse);
-      expect(consulta.descricao, 'Senha inválida');
+      expect(consulta.descricao, contains('Senha inválida'));
     });
 
     test('carteira sem 20 dígitos vira erro próprio sem chamar a API',
@@ -422,7 +422,7 @@ void main() {
       expect(controller.guias.single.consulta?.sucesso, isFalse);
       expect(
         controller.guias.single.consulta?.descricao,
-        'Número da carteira inválido',
+        contains('Número da carteira inválido'),
       );
     });
 

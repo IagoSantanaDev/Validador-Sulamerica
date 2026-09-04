@@ -232,19 +232,19 @@ class ValidadorController extends ChangeNotifier {
       final String? carteira = guia.numeroCarteira;
       final List<ConsultaGuia> errosLocais = [];
       if (senha != null && senha.isNotEmpty && !_senhaValidaParaVpp(senha)) {
-        errosLocais.add(const ConsultaGuia(
+        errosLocais.add(ConsultaGuia(
           tipo: TipoConsultaGuia.autorizacaoVpp,
           sucesso: false,
-          descricao: AppStrings.erroVppSenhaInvalida,
+          descricao: '${AppStrings.erroVppSenhaInvalida} ($senha)',
         ),);
       }
       if (carteira != null &&
           carteira.isNotEmpty &&
           !_carteiraValida(carteira)) {
-        errosLocais.add(const ConsultaGuia(
+        errosLocais.add(ConsultaGuia(
           tipo: TipoConsultaGuia.elegibilidade,
           sucesso: false,
-          descricao: AppStrings.erroCarteiraInvalida,
+          descricao: '${AppStrings.erroCarteiraInvalida} ($carteira)',
         ),);
       }
       if (errosLocais.isNotEmpty) {
@@ -353,15 +353,21 @@ class ValidadorController extends ChangeNotifier {
       );
     }
     if (r.tipo == TipoConsultaGuia.elegibilidade) {
-      return _consultaElegibilidade(r.elegivel, sucessoConsulta: r.sucesso);
+      return _consultaElegibilidade(
+        r.elegivel,
+        carteira: r.chave,
+        sucessoConsulta: r.sucesso,
+      );
     }
-    return _consultaVpp(r.statusVpp);
+    return _consultaVpp(r.statusVpp, senha: r.chave);
   }
 
   /// Erro próprio para elegibilidade: SIM = ok; NÃO = erro; sem indicador =
   /// carteira não encontrada (erro); falha de transporte também é erro.
+  /// A carteira é incluída no texto do erro para identificar o que falhou.
   ConsultaGuia _consultaElegibilidade(
     bool? elegivel, {
+    required String carteira,
     bool sucessoConsulta = true,
   }) {
     if (!sucessoConsulta) {
@@ -377,15 +383,15 @@ class ValidadorController extends ChangeNotifier {
           sucesso: true,
           descricao: 'Elegível: SIM',
         ),
-      false => const ConsultaGuia(
+      false => ConsultaGuia(
           tipo: TipoConsultaGuia.elegibilidade,
           sucesso: false,
-          descricao: AppStrings.erroNaoElegivel,
+          descricao: '${AppStrings.erroNaoElegivel} ($carteira)',
         ),
-      null => const ConsultaGuia(
+      null => ConsultaGuia(
           tipo: TipoConsultaGuia.elegibilidade,
           sucesso: false,
-          descricao: AppStrings.erroCarteiraNaoEncontrada,
+          descricao: '${AppStrings.erroCarteiraNaoEncontrada} ($carteira)',
         ),
     };
   }
@@ -429,7 +435,8 @@ class ValidadorController extends ChangeNotifier {
         await service.consultarBeneficiario(token: token, carteira: carteira);
 
     final ConsultaGuia consulta = resultado.fold<ConsultaGuia>(
-      onSuccess: (res) => _consultaElegibilidade(res.elegivel),
+      onSuccess: (res) =>
+          _consultaElegibilidade(res.elegivel, carteira: carteira),
       onFailure: (erro) => ConsultaGuia(
         tipo: TipoConsultaGuia.elegibilidade,
         sucesso: false,
@@ -454,7 +461,8 @@ class ValidadorController extends ChangeNotifier {
     final ConsultaGuia consulta = resultado.fold<ConsultaGuia>(
       // O backend devolve resposta compacta (descricao do status) — sem o
       // JSON cru do portal.
-      onSuccess: (dados) => _consultaVpp(dados['descricao'] as String?),
+      onSuccess: (dados) =>
+          _consultaVpp(dados['descricao'] as String?, senha: senha),
       onFailure: (erro) => ConsultaGuia(
         tipo: TipoConsultaGuia.autorizacaoVpp,
         sucesso: false,
@@ -500,9 +508,9 @@ class ValidadorController extends ChangeNotifier {
 
   /// Monta o resultado da autorização VPP a partir da descrição do status do
   /// portal. Autorizada quando a descrição CONTÉM a palavra "autorizado"
-  /// (case-insensitive) — cobre "Autorizado", "Autorizada", "Autorizado
-  /// parcialmente", etc.
-  ConsultaGuia _consultaVpp(String? descricao) {
+  /// (case-insensitive). A senha é incluída nos textos de erro para
+  /// identificar o que falhou.
+  ConsultaGuia _consultaVpp(String? descricao, {required String senha}) {
     final bool autorizada = _descricaoAutorizada(descricao);
     return ConsultaGuia(
       tipo: TipoConsultaGuia.autorizacaoVpp,
@@ -512,8 +520,8 @@ class ValidadorController extends ChangeNotifier {
           // Sem status = a senha não retornou nenhuma autorização:
           // trata como senha inválida (erro próprio).
           : descricao == null
-              ? AppStrings.erroVppSenhaInvalida
-              : 'Autorização VPP: $descricao',
+              ? '${AppStrings.erroVppSenhaInvalida} ($senha)'
+              : 'Autorização VPP: $descricao ($senha)',
     );
   }
 
