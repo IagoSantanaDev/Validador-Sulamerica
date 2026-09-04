@@ -66,11 +66,10 @@ class AppStrings {
       'Confira os valores das variáveis PORTAL_* e tente novamente.';
   static const String apiTentarNovamente = 'Tentar novamente';
 
-  static const String erroCarteiraInvalida =
-      'Número da carteira inválido (deve ter 20 dígitos) e não foi consultado';
+  static const String erroCarteiraInvalida = 'Número da carteira inválido';
   static const String erroNaoElegivel = 'Beneficiário não elegível';
   static const String erroCarteiraNaoEncontrada = 'Carteira não encontrada';
-  static const String erroVppSenhaInvalida = 'Autorização VPP: senha inválida';
+  static const String erroVppSenhaInvalida = 'Senha inválida';
   static const String erroLoginFalhou =
       'Falha ao autenticar no portal (confira PORTAL_CODE/USER/SENHA).';
   static const String erroCredenciaisAusentes =

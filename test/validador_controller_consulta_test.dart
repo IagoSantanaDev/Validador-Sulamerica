@@ -327,7 +327,7 @@ void main() {
       final ConsultaGuia? consulta = controller.guiasComErro.single.consulta;
       expect(consulta, isNotNull);
       expect(consulta!.sucesso, isFalse);
-      expect(consulta.descricao, 'Autorização VPP: senha inválida');
+      expect(consulta.descricao, 'Senha inválida');
     });
 
     test('fallback: sem /api/consultas usa o fluxo individual', () async {
@@ -390,7 +390,7 @@ void main() {
       final ConsultaGuia? consulta = controller.guias.single.consulta;
       expect(consulta, isNotNull);
       expect(consulta!.sucesso, isFalse);
-      expect(consulta.descricao, 'Autorização VPP: senha inválida');
+      expect(consulta.descricao, 'Senha inválida');
     });
 
     test('carteira sem 20 dígitos vira erro próprio sem chamar a API',
@@ -416,10 +416,9 @@ void main() {
 
       expect(adapter.logChamadas, isEmpty);
       expect(controller.guias.single.consulta?.sucesso, isFalse);
-      // ignore: lines_longer_than_80_chars
       expect(
         controller.guias.single.consulta?.descricao,
-        'Número da carteira inválido (deve ter 20 dígitos) e não foi consultado',
+        'Número da carteira inválido',
       );
     });
 

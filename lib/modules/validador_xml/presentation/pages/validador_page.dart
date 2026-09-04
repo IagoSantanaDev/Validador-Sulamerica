@@ -253,17 +253,19 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
       for (final GuiaValidada g in c.guias)
         if (g.temErro || (g.consulta != null && !g.consulta!.sucesso)) g,
     ];
-    final List<GuiaValidada> guias = _filtroErro == null
-        ? comProblema
+    // Cada detalhe (erro local ou consulta) vira uma linha própria; o filtro
+    // opera por LINHA (não por guia), evitando que erros de outro tipo
+    // apareçam no filtro selecionado.
+    final List<LinhaGradeGuia> todasLinhas = [
+      for (final GuiaValidada g in comProblema) ...linhasDeGuia(g),
+    ];
+    final List<LinhaGradeGuia> linhasFiltradas = _filtroErro == null
+        ? todasLinhas
         : [
-            for (final GuiaValidada g in comProblema)
-              if (tipoErroDe(g) == _filtroErro) g,
+            for (final LinhaGradeGuia l in todasLinhas)
+              if (tipoErroDeLinha(l) == _filtroErro) l,
           ];
-    // Cada detalhe (erro local ou consulta) vira uma linha própria da grade,
-    // agrupadas por detalhe igual; "senha não informada" fica por último.
-    final List<LinhaGradeGuia> linhas = agruparPorDetalhe([
-      for (final GuiaValidada g in guias) ...linhasDeGuia(g),
-    ]);
+    final List<LinhaGradeGuia> linhas = agruparPorDetalhe(linhasFiltradas);
     return SingleChildScrollView(
       key: const ValueKey('resultado'),
       child: Center(
@@ -303,7 +305,7 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
                   const SizedBox(height: AppDimens.spaceSm),
                   _filtroErros(),
                   const SizedBox(height: AppDimens.spaceSm),
-                  if (guias.isEmpty)
+                  if (linhas.isEmpty)
                     const PainelStatus(
                       icone: Icons.filter_alt_off,
                       cor: AppColors.textMuted,

@@ -14,7 +14,7 @@ class RegraSenhaPrefixo extends RegraValidacao {
     if (senha == null || senha.isEmpty) {
       return const ErroValidacao(
         campo: 'senha',
-        mensagem: 'senha não informada',
+        mensagem: 'Senha não informada',
       );
     }
     if (!senha.startsWith(_prefixoObrigatorio)) {

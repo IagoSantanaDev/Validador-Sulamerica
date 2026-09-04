@@ -20,10 +20,14 @@ class LinhaGradeGuia {
   final String detalhe;
 }
 
+/// Indica se o detalhe é a mensagem "Senha não informada" (qualquer caixa).
+bool _ehSenhaNaoInformada(String detalhe) =>
+    detalhe.toLowerCase().contains('senha não informada');
+
 /// Expande uma guia problemática em linhas: um erro local por linha e, quando
 /// a consulta ao portal FALHOU, uma linha adicional com o motivo. Consultas
 /// bem-sucedidas (Elegível: SIM, Autorização VPP: ok) NÃO viram linha de erro
-/// — ficam no popup. A linha de "senha não informada" é sempre a última.
+/// — ficam no popup. A linha de "Senha não informada" é sempre a última.
 List<LinhaGradeGuia> linhasDeGuia(GuiaValidada guia) {
   final List<LinhaGradeGuia> linhas = [
     for (final erro in guia.erros)
@@ -33,8 +37,9 @@ List<LinhaGradeGuia> linhasDeGuia(GuiaValidada guia) {
       LinhaGradeGuia(guia: guia, detalhe: consulta.descricao),
   ];
 
-  final int indiceSenha = linhas
-      .indexWhere((l) => l.detalhe.contains('senha não informada'));
+  final int indiceSenha = linhas.indexWhere(
+    (l) => _ehSenhaNaoInformada(l.detalhe),
+  );
   if (indiceSenha > -1 && indiceSenha != linhas.length - 1) {
     final LinhaGradeGuia linhaSenha = linhas.removeAt(indiceSenha);
     linhas.add(linhaSenha);
@@ -53,16 +58,44 @@ List<LinhaGradeGuia> agruparPorDetalhe(List<LinhaGradeGuia> linhas) {
   final List<LinhaGradeGuia> ordenado = [];
   for (final MapEntry<String, List<LinhaGradeGuia>> entrada
       in grupos.entries) {
-    if (entrada.key.contains('senha não informada')) continue;
+    if (_ehSenhaNaoInformada(entrada.key)) continue;
     ordenado.addAll(entrada.value);
   }
   for (final List<LinhaGradeGuia> lista in grupos.values) {
-    if (lista.isNotEmpty &&
-        lista.first.detalhe.contains('senha não informada')) {
+    if (lista.isNotEmpty && _ehSenhaNaoInformada(lista.first.detalhe)) {
       ordenado.addAll(lista);
     }
   }
   return ordenado;
+}
+
+/// Categoriza UMA LINHA (detalhe) para o filtro: erros locais pelo campo, a
+/// linha da consulta pelo tipo/motivo. Nula quando não categorizável.
+TipoErroGuia? tipoErroDeLinha(LinhaGradeGuia linha) {
+  final ConsultaGuia? consulta = linha.guia.consulta;
+  final String detalhe = linha.detalhe;
+  // Linha da consulta (falha): o detalhe é a própria descrição da consulta.
+  if (consulta != null && !consulta.sucesso && detalhe == consulta.descricao) {
+    if (detalhe.contains('autenticar') ||
+        detalhe.contains('Credenciais') ||
+        detalhe.contains('credenciais')) {
+      return TipoErroGuia.credenciais;
+    }
+    if (consulta.tipo == TipoConsultaGuia.elegibilidade) {
+      if (detalhe.contains('Carteira') || detalhe.contains('carteira')) {
+        return TipoErroGuia.carteira;
+      }
+      return TipoErroGuia.elegibilidade;
+    }
+    return TipoErroGuia.autorizacao;
+  }
+  // Linha de erro local: categoriza pelo campo do erro correspondente.
+  for (final erro in linha.guia.erros) {
+    if (erro.mensagem != detalhe) continue;
+    if (erro.campo == 'senha') return TipoErroGuia.senha;
+    if (erro.campo == 'numeroCarteira') return TipoErroGuia.carteira;
+  }
+  return null;
 }
 
 /// Categoriza o problema que uma guia representa (erro local ou de consulta).

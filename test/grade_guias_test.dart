@@ -83,12 +83,12 @@ void main() {
     test('detalhes iguais ficam agrupados e senha não informada por último',
         () {
       final List<LinhaGradeGuia> linhas = agruparPorDetalhe([
-        const LinhaGradeGuia(guia: guiaMulti, detalhe: 'senha não informada'),
+        const LinhaGradeGuia(guia: guiaMulti, detalhe: 'Senha não informada'),
         const LinhaGradeGuia(
           guia: guiaMulti,
           detalhe: 'Carteira não encontrada',
         ),
-        const LinhaGradeGuia(guia: guiaMulti, detalhe: 'senha não informada'),
+        const LinhaGradeGuia(guia: guiaMulti, detalhe: 'Senha não informada'),
         const LinhaGradeGuia(
           guia: guiaMulti,
           detalhe: 'Carteira não encontrada',
@@ -99,8 +99,50 @@ void main() {
       // Blocos por detalhe: carteira primeiro, senha por último.
       expect(linhas[0].detalhe, 'Carteira não encontrada');
       expect(linhas[1].detalhe, 'Carteira não encontrada');
-      expect(linhas[2].detalhe, 'senha não informada');
-      expect(linhas[3].detalhe, 'senha não informada');
+      expect(linhas[2].detalhe, 'Senha não informada');
+      expect(linhas[3].detalhe, 'Senha não informada');
+    });
+  });
+
+  group('tipoErroDeLinha - filtro por detalhe', () {
+    test('linha de erro local de senha é filtrada como Senha', () {
+      const GuiaValidada guiaLocal = GuiaValidada(
+        guia: guia,
+        erros: [
+          ErroValidacao(campo: 'senha', mensagem: 'Senha não informada'),
+        ],
+      );
+      final LinhaGradeGuia linha = linhasDeGuia(guiaLocal).single;
+
+      expect(tipoErroDeLinha(linha), TipoErroGuia.senha);
+    });
+
+    test('linha da consulta de elegibilidade é filtrada pelo motivo', () {
+      const GuiaValidada guiaConsulta = GuiaValidada(
+        guia: guia,
+        erros: [],
+        consulta: ConsultaGuia(
+          sucesso: false,
+          descricao: 'Beneficiário não elegível',
+        ),
+      );
+      final LinhaGradeGuia linha = linhasDeGuia(guiaConsulta).single;
+
+      expect(tipoErroDeLinha(linha), TipoErroGuia.elegibilidade);
+    });
+
+    test('linha de carteira não encontrada é filtrada como Carteira', () {
+      const GuiaValidada guiaCarteira = GuiaValidada(
+        guia: guia,
+        erros: [],
+        consulta: ConsultaGuia(
+          sucesso: false,
+          descricao: 'Carteira não encontrada',
+        ),
+      );
+      final LinhaGradeGuia linha = linhasDeGuia(guiaCarteira).single;
+
+      expect(tipoErroDeLinha(linha), TipoErroGuia.carteira);
     });
   });
 }
