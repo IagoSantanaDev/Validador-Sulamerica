@@ -41,6 +41,27 @@ class ValidadorController extends ChangeNotifier {
 
   String? _tokenSessao;
 
+  /// Conectividade com a API intermediária: null = checando, false = bloqueia
+  /// o uso do site (só funciona com a API acessível).
+  bool? _apiDisponivel;
+
+  bool? get apiDisponivel => _apiDisponivel;
+
+  /// Pinga em /api/status para liberar (ou bloquear) o site.
+  Future<void> verificarDisponibilidadeApi() async {
+    final SulAmericaBackendService? service = _service;
+    _apiDisponivel = null;
+    notifyListeners();
+    if (service == null) {
+      _apiDisponivel = false;
+      notifyListeners();
+      return;
+    }
+    final Result<Map<String, dynamic>> resultado = await service.status();
+    _apiDisponivel = resultado is Success<Map<String, dynamic>>;
+    notifyListeners();
+  }
+
   /// Dedupe intra-lote: a mesma carteira/senha repetida no mesmo arquivo é
   /// consultada uma única vez (resultado idêntico no mesmo instante). O cache
   /// é limpo a cada validação — não envelhece dados entre lotes.

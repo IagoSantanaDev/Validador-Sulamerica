@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../../../../globals/constants/app_colors.dart';
 import '../../../../globals/constants/app_dimens.dart';
 import '../../../../globals/constants/app_strings.dart';
+import '../../../../globals/widgets/botao_texto.dart';
 import '../../../../globals/widgets/card_surface.dart';
 import '../../../../globals/widgets/icone_favicon.dart';
 import '../../../../globals/widgets/painel_status.dart';
@@ -47,6 +48,16 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
   String? _identificador;
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        context.read<ValidadorController>().verificarDisponibilidadeApi();
+      }
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     final ValidadorController controller =
         context.watch<ValidadorController>();
@@ -77,6 +88,14 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
   }
 
   Widget _buildConteudo(BuildContext context, ValidadorController c) {
+    final bool? apiDisponivel = c.apiDisponivel;
+    if (apiDisponivel == false) {
+      return _painelApi(c, indisponivel: true);
+    }
+    if (apiDisponivel == null) {
+      return _painelApi(c, indisponivel: false);
+    }
+
     if (c.status == StatusValidador.concluido) {
       return _buildResultado(context, c);
     }
@@ -136,6 +155,53 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
                   ),
               ],
             ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Gate de conectividade: o site só funciona com a API intermediária
+  /// acessível (ping em /api/status).
+  Widget _painelApi(
+    ValidadorController c, {
+    required bool indisponivel,
+  }) {
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: AppDimens.larguraMaximaHome),
+        child: Padding(
+          padding: const EdgeInsets.all(AppDimens.spaceXl),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              PainelStatus(
+                icone: indisponivel ? Icons.cloud_off : Icons.cloud_sync,
+                cor: indisponivel ? AppColors.error : AppColors.warning,
+                corFundo: indisponivel
+                    ? AppColors.errorBackground
+                    : AppColors.successBackground,
+                titulo: indisponivel
+                    ? AppStrings.apiIndisponivelTitulo
+                    : AppStrings.apiVerificandoTitulo,
+                mensagem: indisponivel
+                    ? AppStrings.apiIndisponivelMensagem
+                    : AppStrings.apiVerificandoMensagem,
+              ),
+              if (indisponivel) ...[
+                const SizedBox(height: AppDimens.spaceSm),
+                const TextoApp.detalhe(
+                  AppStrings.apiIndisponivelDetalhe,
+                  cor: AppColors.textMuted,
+                  alinhamento: TextAlign.center,
+                ),
+                const SizedBox(height: AppDimens.spaceMd),
+                BotaoTexto(
+                  rotulo: AppStrings.apiTentarNovamente,
+                  onPressed: () => c.verificarDisponibilidadeApi(),
+                ),
+              ],
+            ],
           ),
         ),
       ),

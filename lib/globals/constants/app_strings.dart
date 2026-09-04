@@ -41,4 +41,15 @@ class AppStrings {
   static const String rotuloElegibilidade = 'Elegibilidade';
   static const String rotuloAutorizacaoVpp = 'Autorização VPP';
   static const String dialogoFechar = 'Fechar';
+
+  static const String apiVerificandoTitulo = 'Conectando à API';
+  static const String apiVerificandoMensagem =
+      'Verificando a conexão com o servidor intermediário...';
+  static const String apiIndisponivelTitulo = 'API indisponível';
+  static const String apiIndisponivelMensagem =
+      'Não foi possível conectar ao servidor intermediário.';
+  static const String apiIndisponivelDetalhe =
+      'Confira se a variável API_URL está configurada no build '
+      '(ex.: API_URL=https://seu-backend.onrender.com).';
+  static const String apiTentarNovamente = 'Tentar novamente';
 }
