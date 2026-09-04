@@ -9,6 +9,45 @@ import '../../../../globals/widgets/textos.dart';
 import '../../data/models/consulta_guia.dart';
 import '../../data/models/guia_validada.dart';
 
+/// Categorias de erro usadas no filtro da grade.
+enum TipoErroGuia { senha, carteira, elegibilidade, autorizacao, credenciais }
+
+/// Categoriza o problema que uma guia representa (erro local ou de consulta).
+/// Nulo quando a guia não tem problema.
+TipoErroGuia? tipoErroDe(GuiaValidada guia) {
+  final ConsultaGuia? consulta = guia.consulta;
+  if (consulta != null && !consulta.sucesso) {
+    final String descricao = consulta.descricao;
+    if (descricao.contains('autenticar') ||
+        descricao.contains('Credenciais') ||
+        descricao.contains('credenciais')) {
+      return TipoErroGuia.credenciais;
+    }
+    if (consulta.tipo == TipoConsultaGuia.elegibilidade) {
+      if (descricao.contains('Carteira') || descricao.contains('carteira')) {
+        return TipoErroGuia.carteira;
+      }
+      return TipoErroGuia.elegibilidade;
+    }
+    return TipoErroGuia.autorizacao;
+  }
+  if (guia.erros.any((e) => e.campo == 'senha')) {
+    return TipoErroGuia.senha;
+  }
+  if (guia.erros.any((e) => e.campo == 'numeroCarteira')) {
+    return TipoErroGuia.carteira;
+  }
+  return null;
+}
+
+String rotuloTipoErro(TipoErroGuia tipo) => switch (tipo) {
+      TipoErroGuia.senha => AppStrings.filtroSenha,
+      TipoErroGuia.carteira => AppStrings.filtroCarteira,
+      TipoErroGuia.elegibilidade => AppStrings.filtroElegibilidade,
+      TipoErroGuia.autorizacao => AppStrings.filtroAutorizacao,
+      TipoErroGuia.credenciais => AppStrings.filtroCredenciais,
+    };
+
 /// Grade de guias invalidadas: borda fina em todas as células (linha ×
 /// coluna), sem cantos arredondados, sem sombra e sem card por trás. A linha
 /// inteira é clicável (texto e ícone), fica um pouco escura no hover e o

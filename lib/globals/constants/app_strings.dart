@@ -65,4 +65,26 @@ class AppStrings {
   static const String apiLoginFalhouDetalhe =
       'Confira os valores das variáveis PORTAL_* e tente novamente.';
   static const String apiTentarNovamente = 'Tentar novamente';
+
+  static const String erroCarteiraInvalida =
+      'Número da carteira inválido (deve ter 20 dígitos) e não foi consultado';
+  static const String erroNaoElegivel = 'Beneficiário não elegível';
+  static const String erroCarteiraNaoEncontrada = 'Carteira não encontrada';
+  static const String erroVppSenhaInvalida = 'Autorização VPP: senha inválida';
+  static const String erroLoginFalhou =
+      'Falha ao autenticar no portal (confira PORTAL_CODE/USER/SENHA).';
+  static const String erroCredenciaisAusentes =
+      'Credenciais do portal não configuradas (PORTAL_CODE/USER/SENHA).';
+
+  static const String consultasFalharamTitulo = 'Consultas ao portal falharam';
+  static const String consultasFalharamDetalhe =
+      'guia(s) com falha na consulta — clique na linha para ver o detalhe.';
+
+  static const String filtroTodos = 'Todas';
+  static const String filtroSenha = 'Senha';
+  static const String filtroCarteira = 'Carteira';
+  static const String filtroElegibilidade = 'Elegibilidade';
+  static const String filtroAutorizacao = 'Autorização';
+  static const String filtroCredenciais = 'Credenciais';
+  static const String filtroSemResultado = 'Nenhuma guia encontrada com este filtro.';
 }

@@ -12,6 +12,7 @@ import '../../../../globals/widgets/icone_favicon.dart';
 import '../../../../globals/widgets/painel_status.dart';
 import '../../../../globals/widgets/textos.dart';
 import '../controllers/validador_controller.dart';
+import '../../data/models/guia_validada.dart';
 import '../widgets/barra_progresso_envio.dart';
 import '../widgets/cabecalho_resultado.dart';
 import '../widgets/drop_zone_site.dart';
@@ -46,6 +47,9 @@ class _ValidadorBody extends StatefulWidget {
 class _ValidadorBodyState extends State<_ValidadorBody> {
   String? _ultimoValidadoNome;
   String? _identificador;
+
+  /// Filtro por tipo de erro na grade (null = todas).
+  TipoErroGuia? _filtroErro;
 
   @override
   void initState() {
@@ -244,7 +248,20 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
   }
 
   Widget _buildResultado(BuildContext context, ValidadorController c) {
-    final guias = c.guiasComErro;
+    // Guias com qualquer problema: erro local OU falha de consulta ao portal.
+    final List<GuiaValidada> comProblema = [
+      for (final GuiaValidada g in c.guias)
+        if (g.temErro || (g.consulta != null && !g.consulta!.sucesso)) g,
+    ];
+    final List<GuiaValidada> guias = _filtroErro == null
+        ? comProblema
+        : [
+            for (final GuiaValidada g in comProblema)
+              if (tipoErroDe(g) == _filtroErro) g,
+          ];
+    final int falhasConsulta = c.guias
+        .where((g) => g.consulta != null && !g.consulta!.sucesso)
+        .length;
     return SingleChildScrollView(
       key: const ValueKey('resultado'),
       child: Center(
@@ -271,7 +288,18 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
                   ),
                 ),
                 const SizedBox(height: AppDimens.spaceLg),
-                if (guias.isEmpty)
+                if (falhasConsulta > 0) ...[
+                  PainelStatus(
+                    icone: Icons.cloud_off,
+                    cor: AppColors.warning,
+                    corFundo: AppColors.surfaceMuted,
+                    titulo: AppStrings.consultasFalharamTitulo,
+                    mensagem:
+                        '$falhasConsulta ${AppStrings.consultasFalharamDetalhe}',
+                  ),
+                  const SizedBox(height: AppDimens.spaceLg),
+                ],
+                if (comProblema.isEmpty)
                   const PainelStatus(
                     icone: Icons.check_circle_outline,
                     cor: AppColors.success,
@@ -282,7 +310,18 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
                 else ...[
                   const _TituloLista(),
                   const SizedBox(height: AppDimens.spaceSm),
-                  GradeGuias(guias: guias),
+                  _filtroErros(),
+                  const SizedBox(height: AppDimens.spaceSm),
+                  if (guias.isEmpty)
+                    const PainelStatus(
+                      icone: Icons.filter_alt_off,
+                      cor: AppColors.textMuted,
+                      corFundo: AppColors.surfaceMuted,
+                      titulo: '',
+                      mensagem: AppStrings.filtroSemResultado,
+                    )
+                  else
+                    GradeGuias(guias: guias),
                 ],
                 const SizedBox(height: AppDimens.spaceLg),
                 RodapeResultado(
@@ -303,6 +342,29 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
     );
   }
 
+  /// Chips para filtrar a grade por tipo de erro.
+  Widget _filtroErros() {
+    return Wrap(
+      spacing: AppDimens.spaceSm,
+      runSpacing: AppDimens.spaceXs,
+      children: [
+        ChoiceChip(
+          label: const Text(AppStrings.filtroTodos),
+          selected: _filtroErro == null,
+          onSelected: (_) => setState(() => _filtroErro = null),
+        ),
+        for (final TipoErroGuia tipo in TipoErroGuia.values)
+          ChoiceChip(
+            label: Text(rotuloTipoErro(tipo)),
+            selected: _filtroErro == tipo,
+            onSelected: (_) => setState(() {
+              _filtroErro = _filtroErro == tipo ? null : tipo;
+            }),
+          ),
+      ],
+    );
+  }
+
   String _gerarIdentificador() {
     final Random rng = Random.secure();
     final String hex = List<int>.generate(16, (_) => rng.nextInt(256))
@@ -315,6 +377,7 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
     setState(() {
       _ultimoValidadoNome = null;
       _identificador = null;
+      _filtroErro = null;
     });
     context.read<ValidadorController>().novoArquivo();
   }

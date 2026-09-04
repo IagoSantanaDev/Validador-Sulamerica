@@ -15,9 +15,15 @@ import 'package:validador_xml_sulamerica/modules/validador_xml/presentation/cont
 /// Adapter de rede falso que responde /api/consultas a partir do CORPO do
 /// request (lote) e registra as chamadas feitas — sem rede real.
 class _FakeBatchAdapter implements HttpClientAdapter {
-  _FakeBatchAdapter({this.statusAutorizacao = 'Autorizado'});
+  _FakeBatchAdapter({
+    this.statusAutorizacao = 'Autorizado',
+    this.elegivel = true,
+    this.loginOk = true,
+  });
 
-  final String statusAutorizacao;
+  final String? statusAutorizacao;
+  final bool? elegivel;
+  final bool loginOk;
   final List<String> logChamadas = [];
   final List<dynamic> consultasRecebidas = [];
 
@@ -33,7 +39,9 @@ class _FakeBatchAdapter implements HttpClientAdapter {
     logChamadas.add(options.path);
     switch (options.path) {
       case '/api/login':
-        return _resposta(200, {'token': 'tok123'});
+        return loginOk
+            ? _resposta(200, {'token': 'tok123'})
+            : _resposta(401, {'status': 'erro'});
       case '/api/consultas':
         final Object? data = options.data;
         final Map<String, dynamic> corpo = data is String
@@ -48,8 +56,8 @@ class _FakeBatchAdapter implements HttpClientAdapter {
                 'chave': c['chave'],
                 'tipo': c['tipo'],
                 'sucesso': true,
-                'elegivel': true,
-                'rotuloElegibilidade': 'SIM',
+                'elegivel': elegivel,
+                'rotuloElegibilidade': elegivel == true ? 'SIM' : null,
               }
             else
               {
@@ -339,6 +347,99 @@ void main() {
       expect(adapter.logChamadas, contains('/api/consultas'));
       expect(adapter.logChamadas, contains('/api/beneficiario'));
       expect(controller.guias.single.consulta?.descricao, 'Elegível: SIM');
+    });
+
+    test('elegibilidade NÃO é um erro próprio no frontend', () async {
+      final _FakeBatchAdapter adapter =
+          _FakeBatchAdapter(elegivel: false);
+
+      final ValidadorController controller = await _validar(
+        _controllerComGateway(
+          adapter: adapter,
+          retornoValidacao: const [
+            GuiaValidada(
+              guia: _guiaSemSenha,
+              erros: [ErroValidacao(campo: 'senha', mensagem: 'sem senha')],
+            ),
+          ],
+        ),
+      );
+
+      final ConsultaGuia? consulta = controller.guias.single.consulta;
+      expect(consulta, isNotNull);
+      expect(consulta!.sucesso, isFalse);
+      expect(consulta.descricao, 'Beneficiário não elegível');
+    });
+
+    test('VPP sem status é exibido como senha inválida', () async {
+      final _FakeBatchAdapter adapter =
+          _FakeBatchAdapter(statusAutorizacao: null);
+
+      final ValidadorController controller = await _validar(
+        _controllerComGateway(
+          adapter: adapter,
+          retornoValidacao: const [
+            GuiaValidada(guia: _guiaSenhaVppValida, erros: []),
+          ],
+        ),
+      );
+
+      final ConsultaGuia? consulta = controller.guias.single.consulta;
+      expect(consulta, isNotNull);
+      expect(consulta!.sucesso, isFalse);
+      expect(consulta.descricao, 'Autorização VPP: senha inválida');
+    });
+
+    test('carteira sem 20 dígitos vira erro próprio sem chamar a API',
+        () async {
+      const GuiaTiss guiaCarteiraCurta = GuiaTiss(
+        numeroGuiaPrestador: '114',
+        numeroCarteira: '123',
+        senha: null,
+      );
+      final _FakeBatchAdapter adapter = _FakeBatchAdapter();
+
+      final ValidadorController controller = await _validar(
+        _controllerComGateway(
+          adapter: adapter,
+          retornoValidacao: const [
+            GuiaValidada(
+              guia: guiaCarteiraCurta,
+              erros: [],
+            ),
+          ],
+        ),
+      );
+
+      expect(adapter.logChamadas, isEmpty);
+      expect(controller.guias.single.consulta?.sucesso, isFalse);
+      // ignore: lines_longer_than_80_chars
+      expect(
+        controller.guias.single.consulta?.descricao,
+        'Número da carteira inválido (deve ter 20 dígitos) e não foi consultado',
+      );
+    });
+
+    test('falha no login é exibida como erro em todas as guias', () async {
+      final _FakeBatchAdapter adapter = _FakeBatchAdapter(loginOk: false);
+
+      final ValidadorController controller = await _validar(
+        _controllerComGateway(
+          adapter: adapter,
+          retornoValidacao: const [
+            GuiaValidada(
+              guia: _guiaSemSenha,
+              erros: [ErroValidacao(campo: 'senha', mensagem: 'sem senha')],
+            ),
+          ],
+        ),
+      );
+
+      expect(controller.status, StatusValidador.concluido);
+      final ConsultaGuia? consulta = controller.guias.single.consulta;
+      expect(consulta, isNotNull);
+      expect(consulta!.sucesso, isFalse);
+      expect(consulta.descricao, contains('autenticar'));
     });
 
     test('sem credenciais do prestador nenhuma chamada é feita', () async {

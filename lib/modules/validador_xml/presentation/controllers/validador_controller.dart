@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:get_it/get_it.dart';
 
 import '../../../../globals/constants/app_config.dart';
+import '../../../../globals/constants/app_strings.dart';
 import '../../../../globals/network/result.dart';
 import '../../data/datasources/xml_lote_guias_datasource.dart';
 import '../../data/datasources/xml_lote_guias_exceptions.dart';
@@ -214,20 +215,46 @@ class ValidadorController extends ChangeNotifier {
 
   /// Consulta o portal (via /api/consultas em lote) para as guias do lote:
   /// sem senha → elegibilidade (carteira); senha iniciada em 5 com 10
-  /// caracteres → autorização VPP. O backend recebe tudo em uma única
-  /// requisição e executa em paralelo. Sem credenciais configuradas, a
-  /// validação permanece apenas local.
+  /// caracteres → autorização VPP. Falhas estruturais (credenciais/login,
+  /// carteira inválida) viram erros visíveis na guia em vez de silêncio.
   Future<List<GuiaValidada>> _consultarGuias(
     List<GuiaValidada> guias,
   ) async {
     final SulAmericaBackendService? service = _service;
     if (service == null || guias.isEmpty) return guias;
 
+    // Erros locais detectáveis antes de chamar a API: carteira sem 20 dígitos
+    // não vai ao lote; vira erro próprio na guia.
+    final List<GuiaValidada> base = List.of(guias);
+    for (int i = 0; i < base.length; i++) {
+      final GuiaValidada guia = base[i];
+      final String? carteira = guia.numeroCarteira;
+      if ((guia.senha == null || guia.senha!.isEmpty) &&
+          carteira != null &&
+          carteira.isNotEmpty &&
+          !_carteiraValida(carteira)) {
+        base[i] = _anexarConsulta(
+          guia,
+          const ConsultaGuia(
+            tipo: TipoConsultaGuia.elegibilidade,
+            sucesso: false,
+            descricao: AppStrings.erroCarteiraInvalida,
+          ),
+        );
+        continue;
+      }
+      if (guia.consulta case final ConsultaGuia consulta
+          when !consulta.sucesso) {
+        // já marcada localmente (acima)
+        continue;
+      }
+    }
+
     // Itens de consulta únicos (dedupe tipo+chave) para enviar ao lote;
     // montando antes do login para evitar sessão sem consultas úteis.
     final List<ConsultaLoteItem> itens = [];
     final Set<String> chavesVistas = {};
-    for (final GuiaValidada guia in guias) {
+    for (final GuiaValidada guia in base) {
       final ConsultaLoteItem? item = _itemDeConsulta(guia);
       if (item == null) continue;
       final String chaveUnica = '${item.tipo.name}|${item.chave}';
@@ -235,10 +262,20 @@ class ValidadorController extends ChangeNotifier {
         itens.add(item);
       }
     }
-    if (itens.isEmpty) return guias;
+    if (itens.isEmpty) return base;
 
-    final String? token = await _obterTokenSessao(service);
-    if (token == null) return guias;
+    final (String? token, String? motivoErro) = await _obterTokenSessao(service);
+    if (token == null) {
+      // Falha de autenticação/credenciais precisa aparecer no front.
+      final ConsultaGuia erro = ConsultaGuia(
+        sucesso: false,
+        descricao: motivoErro ?? AppStrings.erroCredenciaisAusentes,
+      );
+      return [
+        for (final GuiaValidada guia in base)
+          guia.consulta == null ? _anexarConsulta(guia, erro) : guia,
+      ];
+    }
 
     final Result<List<ResultadoConsultaLote>> resultado =
         await service.consultarLote(token: token, consultas: itens);
@@ -252,9 +289,9 @@ class ValidadorController extends ChangeNotifier {
         };
         // Aplica o resultado a TODAS as guias com a mesma chave (o lote
         // enviou chaves únicas, mas várias guias podem compartilhá-las).
-        final List<GuiaValidada> acumulado = List.of(guias);
-        for (int indice = 0; indice < guias.length; indice++) {
-          final ConsultaLoteItem? item = _itemDeConsulta(guias[indice]);
+        final List<GuiaValidada> acumulado = List.of(base);
+        for (int indice = 0; indice < base.length; indice++) {
+          final ConsultaLoteItem? item = _itemDeConsulta(base[indice]);
           if (item == null) continue;
           final ConsultaGuia? consulta = porChave[item.chave];
           if (consulta == null) continue;
@@ -269,8 +306,11 @@ class ValidadorController extends ChangeNotifier {
 
     // Fallback: backend sem /api/consultas (deploy antigo) — fluxo
     // individual, com dedupe intra-lote.
-    return _consultarGuiasIndividualmente(service, token, guias);
+    return _consultarGuiasIndividualmente(service, token, base);
   }
+
+  static bool _carteiraValida(String carteira) =>
+      carteira.length == 20 && RegExp(r'^\d+$').hasMatch(carteira);
 
   /// Decide a consulta aplicável a uma guia (elegibilidade sem senha; VPP
   /// para senha válida); nula quando a guia não deve ser consultada.
@@ -278,7 +318,10 @@ class ValidadorController extends ChangeNotifier {
     final String? senha = guia.senha;
     if (senha == null || senha.isEmpty) {
       final String? carteira = guia.numeroCarteira;
-      if (carteira == null || carteira.isEmpty) return null;
+      // Carteira inválida não vai ao lote; o erro já foi anexado antes.
+      if (carteira == null || carteira.isEmpty || !_carteiraValida(carteira)) {
+        return null;
+      }
       return ConsultaLoteItem(
         tipo: TipoConsultaGuia.elegibilidade,
         chave: carteira,
@@ -304,17 +347,41 @@ class ValidadorController extends ChangeNotifier {
       );
     }
     if (r.tipo == TipoConsultaGuia.elegibilidade) {
-      return ConsultaGuia(
-        tipo: TipoConsultaGuia.elegibilidade,
-        sucesso: true,
-        descricao: switch (r.elegivel) {
-          true => 'Elegível: SIM',
-          false => 'Elegível: NÃO',
-          null => 'Carteira não encontrada',
-        },
-      );
+      return _consultaElegibilidade(r.elegivel, sucessoConsulta: r.sucesso);
     }
     return _consultaVpp(r.statusVpp);
+  }
+
+  /// Erro próprio para elegibilidade: SIM = ok; NÃO = erro; sem indicador =
+  /// carteira não encontrada (erro); falha de transporte também é erro.
+  ConsultaGuia _consultaElegibilidade(
+    bool? elegivel, {
+    bool sucessoConsulta = true,
+  }) {
+    if (!sucessoConsulta) {
+      return const ConsultaGuia(
+        tipo: TipoConsultaGuia.elegibilidade,
+        sucesso: false,
+        descricao: 'Consulta de elegibilidade falhou',
+      );
+    }
+    return switch (elegivel) {
+      true => const ConsultaGuia(
+        tipo: TipoConsultaGuia.elegibilidade,
+        sucesso: true,
+        descricao: 'Elegível: SIM',
+      ),
+      false => const ConsultaGuia(
+        tipo: TipoConsultaGuia.elegibilidade,
+        sucesso: false,
+        descricao: AppStrings.erroNaoElegivel,
+      ),
+      null => const ConsultaGuia(
+        tipo: TipoConsultaGuia.elegibilidade,
+        sucesso: false,
+        descricao: AppStrings.erroCarteiraNaoEncontrada,
+      ),
+    };
   }
 
   /// Fluxo individual (uma requisição por consulta) usado quando o backend
@@ -333,8 +400,13 @@ class ValidadorController extends ChangeNotifier {
     return comConsultas;
   }
 
-  Future<String?> _obterTokenSessao(SulAmericaBackendService service) async {
-    if (_tokenSessao != null) return _tokenSessao;
+  /// Retorna (token, motivoDeErro): token nulo com motivo quando a sessão
+  /// não pôde ser obtida (credenciais ausentes ou login rejeitado).
+  Future<(String?, String?)> _obterTokenSessao(
+    SulAmericaBackendService service,
+  ) async {
+    final String? tokenAtual = _tokenSessao;
+    if (tokenAtual != null) return (tokenAtual, null);
     final String? code = _codigoPrestador;
     final String? user = _usuarioPrestador;
     final String? senha = _senhaPrestador;
@@ -344,7 +416,7 @@ class ValidadorController extends ChangeNotifier {
         user.isEmpty ||
         senha == null ||
         senha.isEmpty) {
-      return null;
+      return (null, AppStrings.erroCredenciaisAusentes);
     }
 
     final Result<String> resultado = await service.login(
@@ -352,12 +424,12 @@ class ValidadorController extends ChangeNotifier {
       user: user,
       senha: senha,
     );
-    return resultado.fold<String?>(
+    return resultado.fold<(String?, String?)>(
       onSuccess: (token) {
         _tokenSessao = token;
-        return token;
+        return (token, null);
       },
-      onFailure: (_) => null,
+      onFailure: (_) => (null, AppStrings.erroLoginFalhou),
     );
   }
 
@@ -396,15 +468,7 @@ class ValidadorController extends ChangeNotifier {
         await service.consultarBeneficiario(token: token, carteira: carteira);
 
     final ConsultaGuia consulta = resultado.fold<ConsultaGuia>(
-      onSuccess: (res) => ConsultaGuia(
-        tipo: TipoConsultaGuia.elegibilidade,
-        sucesso: true,
-        descricao: switch (res.elegivel) {
-          true => 'Elegível: SIM',
-          false => 'Elegível: NÃO',
-          null => 'Carteira não encontrada',
-        },
-      ),
+      onSuccess: (res) => _consultaElegibilidade(res.elegivel),
       onFailure: (erro) => ConsultaGuia(
         tipo: TipoConsultaGuia.elegibilidade,
         sucesso: false,
@@ -456,7 +520,11 @@ class ValidadorController extends ChangeNotifier {
       sucesso: autorizada,
       descricao: autorizada
           ? 'Autorização VPP: ok'
-          : 'Autorização VPP: ${descricao ?? 'nenhuma solicitação encontrada'}',
+          // Sem status = a senha não retornou nenhuma autorização:
+          // trata como senha inválida (erro próprio).
+          : descricao == null
+              ? AppStrings.erroVppSenhaInvalida
+              : 'Autorização VPP: $descricao',
     );
   }
 
