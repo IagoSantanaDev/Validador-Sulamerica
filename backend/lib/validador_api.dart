@@ -170,7 +170,7 @@ class ValidadorApi {
     final Map<String, dynamic>? dados = await sessao
         .consultarAutorizacaoVpp(numeroVpp: numeroVpp);
     if (dados == null) {
-      return _erro('Falha na consulta de autorizacao VPP.', 502);
+      return _erro('Falha na consulta ao portal SulAmerica.', 502);
     }
 
     // Resposta compacta: o cliente só precisa saber se há autorização e a
@@ -471,7 +471,7 @@ class ValidadorApi {
           'chave': chave,
           'tipo': tipo,
           'sucesso': false,
-          'erro': 'Falha na consulta de autorizacao VPP.',
+          'erro': 'Falha na consulta ao portal SulAmerica.',
         };
       }
       return {
