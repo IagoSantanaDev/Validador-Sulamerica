@@ -108,6 +108,11 @@ class XmlLoteGuiasDatasource {
         const ['dadosBeneficiario', 'numeroCarteira'],
       ),
       senha: _textoDeElementoDescendente(guiaElement, 'senha'),
+      nomeBeneficiario: _textoDoFilhoAninhado(
+            guiaElement,
+            const ['dadosBeneficiario', 'nomeBeneficiario'],
+          ) ??
+          _textoDeElementoDescendente(guiaElement, 'nomeBeneficiario'),
     );
   }
 

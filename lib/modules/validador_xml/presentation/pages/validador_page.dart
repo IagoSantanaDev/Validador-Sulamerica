@@ -14,7 +14,7 @@ import '../controllers/validador_controller.dart';
 import '../widgets/barra_progresso_envio.dart';
 import '../widgets/cabecalho_resultado.dart';
 import '../widgets/drop_zone_site.dart';
-import '../widgets/item_validacao.dart';
+import '../widgets/grade_guias.dart';
 import '../widgets/navbar_site.dart';
 import '../widgets/rodape_resultado.dart';
 import '../widgets/tabela_metadados.dart';
@@ -178,16 +178,11 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
                     titulo: AppStrings.semErrosTitulo,
                     mensagem: AppStrings.semErrosDetalhe,
                   )
-                else
-                  CardSurface(
-                    child: Column(
-                      children: [
-                        const _TituloLista(),
-                        for (int i = 0; i < guias.length; i++)
-                          ItemValidacao(guia: guias[i]),
-                      ],
-                    ),
-                  ),
+                else ...[
+                  const _TituloLista(),
+                  const SizedBox(height: AppDimens.spaceSm),
+                  GradeGuias(guias: guias),
+                ],
                 const SizedBox(height: AppDimens.spaceLg),
                 RodapeResultado(
                   tempoProcessamento: c.tempoProcessamento,
@@ -229,14 +224,9 @@ class _TituloLista extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(
-        horizontal: AppDimens.spaceMd,
-        vertical: AppDimens.spaceSm,
-      ),
-      color: AppColors.surfaceMuted,
-      child: const TextoApp.detalhe(
+    return const Padding(
+      padding: EdgeInsets.only(bottom: AppDimens.spaceSm),
+      child: TextoApp.detalhe(
         AppStrings.validacoesPorGuia,
         peso: FontWeight.w700,
       ),
