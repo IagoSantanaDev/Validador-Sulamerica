@@ -18,5 +18,6 @@ Future<void> main() async {
   logger.i('API intermediaria SulAmerica em '
       'http://${server.address.host}:${server.port}');
   logger.i('Rotas: POST /api/login | POST /api/beneficiario | '
-      'GET /api/autorizacao?numeroVpp= | GET /api/status');
+      'GET /api/autorizacao?numeroVpp= | POST /api/consultas | '
+      'GET /api/status');
 }

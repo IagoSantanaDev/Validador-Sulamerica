@@ -7,6 +7,8 @@ import 'package:dio/io.dart';
 import 'package:dio_cookie_manager/dio_cookie_manager.dart';
 import 'package:logger/logger.dart';
 
+import 'util_texto.dart';
+
 /// Motivo da falha ao autenticar no portal (para o proxy distinguir
 /// credencial inválida de bloqueio/resposta inesperada).
 enum MotivoFalhaLogin { credenciaisInvalidas, respostaInesperada, falhaRede }
@@ -273,7 +275,7 @@ class SessaoPortal {
       if (!_autenticada) {
         _logger.w(
           'Login Lumis: corpo sem sessao autenticada — trecho: '
-          '${_resumirCorpo(corpo)}',
+          '${resumirTexto(corpo)}',
         );
         return const ResultadoLogin.falha(
           MotivoFalhaLogin.credenciaisInvalidas,
@@ -299,11 +301,6 @@ class SessaoPortal {
     final int? status = erro.response?.statusCode;
     final String tipo = erro.type.name;
     return status != null ? '$tipo (HTTP $status): ${erro.message}' : tipo;
-  }
-
-  String _resumirCorpo(String corpo) {
-    final String texto = corpo.replaceAll(RegExp(r'\s+'), ' ').trim();
-    return texto.length > 300 ? '${texto.substring(0, 300)}…' : texto;
   }
 
 
@@ -480,5 +477,11 @@ class SessaoPortal {
       inicio += tamanho;
     }
     return partes;
+  }
+
+  /// Libera as conexões HTTP desta sessão (usada para sessões extras
+  /// descartáveis após o lote; a sessão base permanece para o cliente).
+  Future<void> encerrar() async {
+    _dio.close();
   }
 }

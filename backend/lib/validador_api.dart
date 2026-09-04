@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:logger/logger.dart';
 import 'package:shelf/shelf.dart';
@@ -8,6 +9,7 @@ import 'package:shelf_router/shelf_router.dart';
 
 import 'elegibilidade_parser.dart';
 import 'sessao_portal.dart';
+import 'util_texto.dart';
 
 class ValidadorApi {
   ValidadorApi({Logger? logger}) : _logger = logger ?? Logger();
@@ -17,6 +19,24 @@ class ValidadorApi {
   final Map<String, _CredenciaisPortal> _credenciaisPorToken = {};
   final Random _aleatorio = Random.secure();
   static const int _limiteSessoes = 10;
+
+  bool _loteEmAndamento = false;
+
+  /// Teto de itens por lote e de bytes de corpo (proteção contra abuso do
+  /// proxy aberto — cada item gera chamada real ao portal SulAmerica).
+  static const int _maxItensPorLote = 300;
+  static const int _maxBytesCorpo = 1 << 20; // 1 MB
+
+  /// Rate limit por IP nas rotas que tocam o portal (evita varredura e
+  /// bloqueio do F5 ASM em uso concorrente).
+  static const Set<String> _rotasDePortal = {
+    'api/login',
+    'api/beneficiario',
+    'api/autorizacao',
+    'api/consultas',
+  };
+  static const int _maxRateLimitPorJanela = 40;
+  static const Duration _janelaRateLimit = Duration(minutes: 1);
 
   late final Router _rotas = Router()
     ..post('/api/login', _login)
@@ -28,11 +48,14 @@ class ValidadorApi {
 
   Handler get handler => const Pipeline()
       .addMiddleware(ValidadorApi._cors())
+      .addMiddleware(ValidadorApi._rateLimitPortal())
       .addHandler(_rotas.call);
 
 
   Future<Response> _login(Request request) async {
-    final Map<String, dynamic>? corpo = await _lerJson(request);
+    final _LeituraJson leitura = await _lerJson(request);
+    if (leitura.excedeLimite) return _erroCorpoGrande();
+    final Map<String, dynamic>? corpo = leitura.valor;
     if (corpo == null) {
       return _erro('Corpo JSON invalido.', 400);
     }
@@ -84,7 +107,9 @@ class ValidadorApi {
   }
 
   Future<Response> _beneficiario(Request request) async {
-    final Map<String, dynamic>? corpo = await _lerJson(request);
+    final _LeituraJson leitura = await _lerJson(request);
+    if (leitura.excedeLimite) return _erroCorpoGrande();
+    final Map<String, dynamic>? corpo = leitura.valor;
     if (corpo == null) {
       return _erro('Corpo JSON invalido.', 400);
     }
@@ -98,7 +123,7 @@ class ValidadorApi {
     if (carteira == null || carteira.isEmpty) {
       return _erro('Campo carteira e obrigatorio.', 400);
     }
-    if (carteira.length != 20 || !RegExp(r'^\d+$').hasMatch(carteira)) {
+    if (!_carteiraValida(carteira)) {
       return _erro(
         'Carteira deve conter exatamente 20 digitos '
         '(segmentos 3-5-4-4-4).',
@@ -135,6 +160,12 @@ class ValidadorApi {
     if (numeroVpp == null || numeroVpp.isEmpty) {
       return _erro('Parametro numeroVpp e obrigatorio.', 400);
     }
+    if (!_senhaValidaParaVpp(numeroVpp)) {
+      return _erro(
+        'Senha invalida: deve ter exatamente 10 digitos comecando com 5.',
+        400,
+      );
+    }
 
     final Map<String, dynamic>? dados = await sessao
         .consultarAutorizacaoVpp(numeroVpp: numeroVpp);
@@ -156,7 +187,9 @@ class ValidadorApi {
   /// executa contra o portal com paralelismo controlado, devolvendo cada
   /// resultado na ordem da requisição — o cliente faz uma única chamada HTTP.
   Future<Response> _consultas(Request request) async {
-    final Map<String, dynamic>? corpo = await _lerJson(request);
+    final _LeituraJson leitura = await _lerJson(request);
+    if (leitura.excedeLimite) return _erroCorpoGrande();
+    final Map<String, dynamic>? corpo = leitura.valor;
     if (corpo == null) return _erro('Corpo JSON invalido.', 400);
 
     final SessaoPortal? sessao = _sessaoPorCorpo(corpo);
@@ -169,12 +202,27 @@ class ValidadorApi {
     if (consultas is! List || consultas.isEmpty) {
       return _erro('Campo consultas e obrigatorio.', 400);
     }
+    if (consultas.length > _maxItensPorLote) {
+      return _erro(
+        'Lote excede o limite de $_maxItensPorLote itens por requisicao.',
+        413,
+      );
+    }
+    if (_loteEmAndamento) {
+      return _erro('Ja existe um lote em andamento. Aguarde.', 429);
+    }
 
-    final List<Map<String, dynamic>> resultados = await _executarConsultas(
-      sessaoBase: sessao,
-      credenciais: token == null ? null : _credenciaisPorToken[token],
-      consultas: consultas,
-    );
+    _loteEmAndamento = true;
+    List<Map<String, dynamic>> resultados;
+    try {
+      resultados = await _executarConsultas(
+        sessaoBase: sessao,
+        credenciais: token == null ? null : _credenciaisPorToken[token],
+        consultas: consultas,
+      );
+    } finally {
+      _loteEmAndamento = false;
+    }
 
     // Reordena para a ordem da requisição original.
     final Map<String, Map<String, dynamic>> porChave = {
@@ -262,6 +310,12 @@ class ValidadorApi {
         in await Future.wait(trabalhos)) {
       resultados.addAll(parte);
     }
+
+    // Sessões extras são descartáveis: libera as conexões após o lote
+    // (a base permanece para as próximas consultas do cliente).
+    for (final SessaoPortal extra in sessoes.skip(1)) {
+      await extra.encerrar();
+    }
     return resultados;
   }
 
@@ -345,7 +399,7 @@ class ValidadorApi {
     }
 
     if (tipo == 'elegibilidade') {
-      if (chave.length != 20 || !RegExp(r'^\d+$').hasMatch(chave)) {
+      if (!_carteiraValida(chave)) {
         return {
           'chave': chave,
           'tipo': tipo,
@@ -369,7 +423,8 @@ class ValidadorApi {
         // ser carteira realmente não encontrada OU estado de sessão perdido.
         _logger.w(
           'Elegibilidade sem indicador | carteira ${_mascararChave(chave)} | '
-          'pagina: ${_resumirTexto(html)}',
+          'pagina: ${
+              resumirTexto(html.replaceAll(RegExp(r'<[^>]*>'), ' '))}',
         );
       }
       return {
@@ -382,6 +437,14 @@ class ValidadorApi {
     }
 
     if (tipo == 'autorizacaoVpp') {
+      if (!_senhaValidaParaVpp(chave)) {
+        return {
+          'chave': chave,
+          'tipo': tipo,
+          'sucesso': false,
+          'erro': 'Senha invalida: deve ter exatamente 10 digitos comecando com 5.',
+        };
+      }
       final Map<String, dynamic>? dados = await sessao
           .consultarAutorizacaoVpp(numeroVpp: chave);
       if (dados == null) {
@@ -412,14 +475,6 @@ class ValidadorApi {
   String _mascararChave(String chave) => chave.length <= 5
       ? chave
       : '${chave.substring(0, 4)}…${chave.substring(chave.length - 2)}';
-
-  String _resumirTexto(String html) {
-    final String texto = html
-        .replaceAll(RegExp(r'<[^>]*>'), ' ')
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .trim();
-    return texto.length > 300 ? '${texto.substring(0, 300)}…' : texto;
-  }
 
   /// Descricao do status da autorização (ex.: "Autorizado", "Negado") a
   /// partir do JSON do portal; null quando não há registro com status.
@@ -500,14 +555,74 @@ class ValidadorApi {
   }
 
 
-  Future<Map<String, dynamic>?> _lerJson(Request request) async {
-    try {
-      final String corpo = await request.readAsString();
-      if (corpo.isEmpty) return null;
-      return jsonDecode(corpo) as Map<String, dynamic>;
-    } catch (_) {
-      return null;
+  /// Fonte única das regras de formato: carteira com exatamente 20 dígitos e
+  /// senha VPP com exatamente 10 dígitos começando com 5 (mesmas do app).
+  static bool _carteiraValida(String carteira) =>
+      carteira.length == 20 && RegExp(r'^\d+$').hasMatch(carteira);
+
+  static bool _senhaValidaParaVpp(String senha) =>
+      senha.length == 10 && senha.startsWith('5');
+
+  Future<_LeituraJson> _lerJson(Request request) async {
+    final int? informado = request.contentLength;
+    if (informado != null && informado > _maxBytesCorpo) {
+      return const _LeituraJson(null, excedeLimite: true);
     }
+    try {
+      final BytesBuilder acumulador = BytesBuilder(copy: false);
+      await for (final List<int> parte in request.read()) {
+        acumulador.add(parte);
+        if (acumulador.length > _maxBytesCorpo) {
+          return const _LeituraJson(null, excedeLimite: true);
+        }
+      }
+      final String corpo =
+          utf8.decode(acumulador.takeBytes(), allowMalformed: true);
+      if (corpo.trim().isEmpty) return const _LeituraJson(null);
+      return _LeituraJson(jsonDecode(corpo) as Map<String, dynamic>);
+    } catch (_) {
+      return const _LeituraJson(null);
+    }
+  }
+
+  Response _erroCorpoGrande() =>
+      _erro('Corpo excede o limite de ${_maxBytesCorpo ~/ (1 << 20)} MB.', 413);
+
+  static Middleware _rateLimitPortal() {
+    final Map<String, List<DateTime>> acessos = {};
+    return (Handler inner) => (Request request) async {
+          if (!_rotasDePortal.contains(request.url.path)) {
+            return inner(request);
+          }
+          final String ip = _ipDe(request);
+          final DateTime agora = DateTime.now();
+          final List<DateTime> recentes = (acessos[ip] ?? const [])
+              .where((t) => agora.difference(t) < _janelaRateLimit)
+              .toList();
+          if (recentes.length >= _maxRateLimitPorJanela) {
+            return Response(
+              429,
+              body: jsonEncode({
+                'status': 'erro',
+                'mensagem': 'Muitas requisicoes. Aguarde um instante.',
+              }),
+              headers: const {'content-type': 'application/json; charset=utf-8'},
+            );
+          }
+          recentes.add(agora);
+          acessos[ip] = recentes;
+          return inner(request);
+        };
+  }
+
+  static String _ipDe(Request request) {
+    final String? forward = request.headers['x-forwarded-for'];
+    if (forward != null && forward.isNotEmpty) {
+      return forward.split(',').first.trim();
+    }
+    final dynamic info = request.context['shelf.io.connection_info'];
+    if (info is HttpConnectionInfo) return info.remoteAddress.address;
+    return 'desconhecido';
   }
 
   Response _json(Map<String, dynamic> dados, {int statusCode = 200}) {
@@ -546,6 +661,17 @@ class ValidadorApi {
     };
   }
 }
+
+/// Resultado da leitura do corpo JSON: [valor] nulo quando vazio/parsing
+/// falhou; [excedeLimite] distingue o corpo acima de [_maxBytesCorpo]
+/// (413) do corpo malformado (400).
+class _LeituraJson {
+  const _LeituraJson(this.valor, {this.excedeLimite = false});
+
+  final Map<String, dynamic>? valor;
+  final bool excedeLimite;
+}
+
 /// Credenciais do prestador retidas em memória por token de sessão, usadas
 /// apenas para abrir sessões extras (paralelas) quando um lote tem muitas
 /// elegibilidades. Nunca são logadas e saem quando a sessão é removida.
