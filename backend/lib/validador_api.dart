@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'package:dio/dio.dart' as dio;
 import 'package:logger/logger.dart';
 import 'package:shelf/shelf.dart';
 import 'package:shelf_router/shelf_router.dart';
@@ -59,11 +60,13 @@ class ValidadorApi {
           'Credenciais invalidas para o portal SulAmerica. '
           'Confira PORTAL_CODE, PORTAL_USER e PORTAL_SENHA.',
         MotivoFalhaLogin.falhaRede =>
-          'Falha de rede ao acessar o portal SulAmerica.',
+          'Falha de rede ao acessar o portal SulAmerica. '
+          'Detalhe: ${resultado.detalhe ?? 'sem detalhe'}.',
         MotivoFalhaLogin.respostaInesperada || null =>
           'O portal SulAmerica respondeu de forma inesperada '
           '(possivel bloqueio do F5 ASM).',
       };
+      _logger.w('Login recusado: $mensagem');
       return _erro(mensagem, 401);
     }
 
@@ -140,11 +143,39 @@ class ValidadorApi {
   }
 
   Future<Response> _status(Request request) async {
+    final Map<String, dynamic> alcancePortal = await _testarAlcancePortal();
     return _json({
       'status': 'ok',
       'sessoesAtivas': _sessoes.length,
+      'portalSulAmerica': alcancePortal,
       'timestamp': DateTime.now().toIso8601String(),
     });
+  }
+
+  /// GET simples (sem headers de navegador) ao portal para saber se o
+  /// servidor consegue abrir conexão com ele — distingue bloqueio de rede
+  /// (F5 ASM / datacenter) de falha de autenticação.
+  Future<Map<String, dynamic>> _testarAlcancePortal() async {
+    try {
+      final dio.Dio cliente = dio.Dio(
+        dio.BaseOptions(
+          connectTimeout: const Duration(seconds: 10),
+          receiveTimeout: const Duration(seconds: 10),
+          followRedirects: false,
+        ),
+      );
+      final dio.Response<void> resposta =
+          await cliente.get<void>('https://saude.sulamericaseguros.com.br/');
+      return {
+        'alcançavel': true,
+        'status': resposta.statusCode,
+      };
+    } catch (erro) {
+      return {
+        'alcançavel': false,
+        'detalhe': erro.toString(),
+      };
+    }
   }
 
   Response _naoEncontrado(Request request, String ignorado) {

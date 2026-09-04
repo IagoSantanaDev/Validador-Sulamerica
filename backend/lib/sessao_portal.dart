@@ -12,12 +12,16 @@ enum MotivoFalhaLogin { credenciaisInvalidas, respostaInesperada, falhaRede }
 class ResultadoLogin {
   const ResultadoLogin.autenticado()
       : autenticada = true,
-        motivo = null;
+        motivo = null,
+        detalhe = null;
 
-  const ResultadoLogin.falha(this.motivo) : autenticada = false;
+  const ResultadoLogin.falha(this.motivo, {this.detalhe}) : autenticada = false;
 
   final bool autenticada;
   final MotivoFalhaLogin? motivo;
+
+  /// Contexto da falha (ex.: tipo de DioException) para diagnóstico.
+  final String? detalhe;
 }
 
 /// Cliente do portal Lumis. O login exige GET inicial na pagina (senão o F5
@@ -233,11 +237,23 @@ class SessaoPortal {
       return const ResultadoLogin.autenticado();
     } on DioException catch (erro) {
       _logger.e('Falha de rede no login: ${erro.message}');
-      return const ResultadoLogin.falha(MotivoFalhaLogin.falhaRede);
+      return ResultadoLogin.falha(
+        MotivoFalhaLogin.falhaRede,
+        detalhe: _detalheDioException(erro),
+      );
     } catch (erro) {
       _logger.e('Falha inesperada no login: $erro');
-      return const ResultadoLogin.falha(MotivoFalhaLogin.falhaRede);
+      return ResultadoLogin.falha(
+        MotivoFalhaLogin.falhaRede,
+        detalhe: erro.toString(),
+      );
     }
+  }
+
+  String _detalheDioException(DioException erro) {
+    final int? status = erro.response?.statusCode;
+    final String tipo = erro.type.name;
+    return status != null ? '$tipo (HTTP $status): ${erro.message}' : tipo;
   }
 
   String _resumirCorpo(String corpo) {
