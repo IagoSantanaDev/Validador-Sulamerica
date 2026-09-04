@@ -48,7 +48,6 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
   String? _ultimoValidadoNome;
   String? _identificador;
 
-  /// Filtro por tipo de erro na grade (null = todas).
   TipoErroGuia? _filtroErro;
 
   @override
@@ -248,11 +247,8 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
   }
 
   Widget _buildResultado(BuildContext context, ValidadorController c) {
-    // Guias com qualquer problema: erro local OU falha de consulta ao portal.
     final List<GuiaValidada> comProblema = c.guiasComErro;
-    // Cada detalhe (erro local ou consulta) vira uma linha própria; o filtro
-    // opera por LINHA (não por guia), evitando que erros de outro tipo
-    // apareçam no filtro selecionado.
+    // Filtro opera por LINHA para não vazar erros de outro tipo.
     final List<LinhaGradeGuia> todasLinhas = [
       for (final GuiaValidada g in comProblema) ...linhasDeGuia(g),
     ];
@@ -332,8 +328,6 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
     );
   }
 
-  /// Chips para filtrar a grade por tipo de erro (sem a categoria
-  /// Credenciais, que é exibida apenas em "Todas").
   Widget _filtroErros() {
     return Wrap(
       spacing: AppDimens.spaceSm,

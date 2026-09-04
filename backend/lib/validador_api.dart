@@ -72,8 +72,8 @@ class ValidadorApi {
     }
 
     final String token = _novoToken(sessao);
-    // Retém apenas para abrir sessões extras (logins paralelos) em lotes
-    // grandes de elegibilidade; vive só em memória e sai junto com a sessão.
+    // Retém as credenciais apenas para abrir sessões extras (logins), em
+    // memória, e as remove junto com a sessão.
     _credenciaisPorToken[token] = _CredenciaisPortal(
       code: code,
       user: user,
@@ -192,19 +192,19 @@ class ValidadorApi {
 
   /// Nº máximo de sessões do portal usadas em paralelo num lote (1 por lote
   /// pequeno + extras via login quando há muitas elegibilidades).
-  static const int _limiteSessoesParalelas = 8;
+  static const int _limiteSessoesParalelas = 10;
 
   /// A partir deste volume de elegibilidades vale criar sessões extras.
   static const int _minElegibilidadeParaMultiplasSessoes = 10;
 
-  /// Teto de requisições simultâneas ao portal dentro de uma sessão
-  /// (aplicado ao VPP, que é um GET sem estado de form).
-  static const int _limiteConcorrencia = 10;
+  /// Teto de consultas VPP simultâneas POR SESSÃO (GET sem estado de form,
+  /// leve). Distribuir também os VPPs entre as sessões evita concentrar os
+  /// 100 VPPs na sessão base.
+  static const int _limiteVppPorSessao = 3;
 
   /// Executa as consultas: elegibilidade é sempre serial POR SESSÃO (o form
-  /// do portal tem estado); quando há muitas carteiras, abre sessões extras
-  /// (logins) e divide a fila entre elas — só a elegibilidade, o VPP fica
-  /// paralelo na sessão base.
+  /// do portal tem estado); com muitas carteiras abre sessões extras (logins
+  /// em paralelo) e divide elegibilidade e VPPs entre todas as sessões.
   Future<List<Map<String, dynamic>>> _executarConsultas({
     required SessaoPortal sessaoBase,
     required _CredenciaisPortal? credenciais,
@@ -219,35 +219,31 @@ class ValidadorApi {
         if ((c as Map)['tipo'] != 'elegibilidade') c,
     ];
 
-    // Reúne as sessões de elegibilidade (base + extras se valer a pena).
+    // Reúne as sessões (base + extras autenticadas) com logins EM PARALELO.
     final List<SessaoPortal> sessoes = [sessaoBase];
     if (credenciais != null &&
         elegibilidades.length >= _minElegibilidadeParaMultiplasSessoes) {
       final int extras =
           min(_limiteSessoesParalelas - 1, elegibilidades.length - 1);
-      for (int i = 0; i < extras; i++) {
-        final SessaoPortal nova = SessaoPortal(logger: _logger);
-        final ResultadoLogin login = await nova.login(
-          code: credenciais.code,
-          user: credenciais.user,
-          senha: credenciais.senha,
-        );
-        if (login.autenticada) {
-          sessoes.add(nova);
-        } else {
-          _logger.w(
-            'Sessao de elegibilidade extra ${i + 1} nao autenticada '
-            '(segue com as demais).',
-          );
-        }
+      final List<Future<SessaoPortal?>> futuros = [
+        for (int i = 0; i < extras; i++) _criarSessaoExtra(credenciais, i),
+      ];
+      for (final SessaoPortal? extra in await Future.wait(futuros)) {
+        if (extra != null) sessoes.add(extra);
       }
     }
 
-    // Distribui as carteiras em round-robin pelas sessões (serial por sessão).
-    final List<List<dynamic>> particoes =
+    // Distribui elegibilidades (serial por sessão) e VPPs (pool por sessão)
+    // em round-robin por todas as sessões.
+    final List<List<dynamic>> particoesEleg =
+        List.generate(sessoes.length, (_) => <dynamic>[]);
+    final List<List<dynamic>> particoesVpp =
         List.generate(sessoes.length, (_) => <dynamic>[]);
     for (int i = 0; i < elegibilidades.length; i++) {
-      particoes[i % sessoes.length].add(elegibilidades[i]);
+      particoesEleg[i % sessoes.length].add(elegibilidades[i]);
+    }
+    for (int i = 0; i < vpps.length; i++) {
+      particoesVpp[i % sessoes.length].add(vpps[i]);
     }
 
     final List<Future<List<Map<String, dynamic>>>> trabalhos = [];
@@ -255,8 +251,8 @@ class ValidadorApi {
       trabalhos.add(
         _processarSessao(
           sessao: sessoes[i],
-          fatiaElegibilidade: particoes[i],
-          vpps: i == 0 ? vpps : const [],
+          fatiaElegibilidade: particoesEleg[i],
+          fatiaVpps: particoesVpp[i],
         ),
       );
     }
@@ -269,20 +265,38 @@ class ValidadorApi {
     return resultados;
   }
 
+  Future<SessaoPortal?> _criarSessaoExtra(
+    _CredenciaisPortal credenciais,
+    int indice,
+  ) async {
+    final SessaoPortal nova = SessaoPortal(logger: _logger);
+    final ResultadoLogin login = await nova.login(
+      code: credenciais.code,
+      user: credenciais.user,
+      senha: credenciais.senha,
+    );
+    if (login.autenticada) return nova;
+    _logger.w(
+      'Sessao de elegibilidade extra ${indice + 1} nao autenticada '
+      '(segue com as demais).',
+    );
+    return null;
+  }
+
   /// Uma sessão: elegibilidade da fatia uma a uma (serial, preserva o form);
-  /// os VPPs rodam em paralelo até [_limiteConcorrencia].
+  /// os VPPs da fatia rodam em paralelo até [_limiteVppPorSessao].
   Future<List<Map<String, dynamic>>> _processarSessao({
     required SessaoPortal sessao,
     required List<dynamic> fatiaElegibilidade,
-    required List<dynamic> vpps,
+    required List<dynamic> fatiaVpps,
   }) async {
     final List<Map<String, dynamic>> resultados = [];
     for (final dynamic item in fatiaElegibilidade) {
       resultados.add(await _executarConsulta(sessao, item));
     }
-    if (vpps.isNotEmpty) {
+    if (fatiaVpps.isNotEmpty) {
       resultados.addAll(
-        await _processarEmParalelo(vpps, sessao, _limiteConcorrencia),
+        await _processarEmParalelo(fatiaVpps, sessao, _limiteVppPorSessao),
       );
     }
     return resultados;

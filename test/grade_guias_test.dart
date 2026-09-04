@@ -36,7 +36,6 @@ void main() {
       expect(linhas, hasLength(3));
       expect(linhas[0].detalhe, 'numeroCarteira não informado');
       expect(linhas[1].detalhe, 'Carteira não encontrada');
-      // Todos apontam para a mesma guia.
       for (final LinhaGradeGuia linha in linhas) {
         expect(linha.guia, same(guiaMulti));
       }
@@ -99,7 +98,6 @@ void main() {
       ]);
 
       expect(linhas, hasLength(4));
-      // Blocos por detalhe: carteira primeiro, senha por último.
       expect(linhas[0].detalhe, 'Carteira não encontrada');
       expect(linhas[1].detalhe, 'Carteira não encontrada');
       expect(linhas[2].detalhe, 'Senha não informada');

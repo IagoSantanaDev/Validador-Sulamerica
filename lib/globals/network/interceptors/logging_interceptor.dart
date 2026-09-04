@@ -3,9 +3,6 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
-/// Registra no console, apenas em builds de debug, cada requisição HTTP em
-/// andamento e o resultado (status + corpo) — útil para conferir que as
-/// chamadas ao backend estão realmente acontecendo.
 class LoggingInterceptor extends Interceptor {
   static const int _maxCaracteresCorpo = 180;
 

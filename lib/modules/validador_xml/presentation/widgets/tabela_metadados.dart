@@ -50,7 +50,7 @@ class TabelaMetadados extends StatelessWidget {
       ),
       (
         AppStrings.metadadoValorTotalInformado,
-        informacoes.valorTotalInformado ?? AppStrings.valorIndisponivel,
+        formatarMoeda(informacoes.valorTotalInformado),
       ),
     ];
 

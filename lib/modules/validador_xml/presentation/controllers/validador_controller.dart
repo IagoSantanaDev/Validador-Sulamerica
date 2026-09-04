@@ -58,8 +58,6 @@ class ValidadorController extends ChangeNotifier {
 
   EstadoConexao get estadoConexao => _estadoConexao;
 
-  /// Pinge em /api/status e autentica no portal; bloqueia o site quando a
-  /// API está fora ou as credenciais estão ausentes/inválidas.
   Future<void> verificarDisponibilidadeApi() async {
     final SulAmericaBackendService? service = _service;
     _estadoConexao = EstadoConexao.verificando;
@@ -125,11 +123,9 @@ class ValidadorController extends ChangeNotifier {
   String? get mensagemErro => _mensagemErro;
   int? get tamanhoArquivoBytes => _bytesArquivo?.length;
 
-  /// Guias com qualquer problema: erro local OU falha de consulta ao portal.
   List<GuiaValidada> get guiasComErro =>
       _resultado.where((g) => g.temErro || g.temFalhaConsulta).toList();
 
-  /// Todas as guias validadas (com ou sem erro), já ordenadas.
   List<GuiaValidada> get guias => _resultado;
 
   int get totalGuias => _resultado.length;
@@ -222,9 +218,6 @@ class ValidadorController extends ChangeNotifier {
     final SulAmericaBackendService? service = _service;
     if (service == null || guias.isEmpty) return guias;
 
-    // Erros locais detectáveis antes de chamar a API: senha fora do padrão
-    // (não começa com 5 / 10 caracteres) e carteira sem 20 dígitos viram
-    // erros próprios (a elegibilidade/carteira ainda vale pelos itens).
     final List<GuiaValidada> base = List.of(guias);
     for (int i = 0; i < base.length; i++) {
       final GuiaValidada guia = base[i];
@@ -248,7 +241,6 @@ class ValidadorController extends ChangeNotifier {
         ),);
       }
       if (errosLocais.isNotEmpty) {
-        // "Senha inválida" substitui os erros locais de senha (linha única).
         base[i] = GuiaValidada(
           guia: guia.guia,
           erros:
@@ -260,7 +252,6 @@ class ValidadorController extends ChangeNotifier {
       }
     }
 
-    // Itens de consulta únicos (até 2 por guia: carteira + senha válida).
     final List<ConsultaLoteItem> itens = [];
     final Set<String> chavesVistas = {};
     for (final GuiaValidada guia in base) {
@@ -276,7 +267,6 @@ class ValidadorController extends ChangeNotifier {
     final (String? token, String? motivoErro) =
         await _obterTokenSessao(service);
     if (token == null) {
-      // Falha de autenticação/credenciais precisa aparecer no front.
       final ConsultaGuia erro = ConsultaGuia(
         sucesso: false,
         descricao: motivoErro ?? AppStrings.erroCredenciaisAusentes,
@@ -296,7 +286,6 @@ class ValidadorController extends ChangeNotifier {
           for (final ResultadoConsultaLote r in resultados)
             '${r.tipo.name}|${r.chave}': _consultaDesdeBatch(r),
         };
-        // Aplica os resultados por item (elegibilidade e/ou VPP) a cada guia.
         final List<GuiaValidada> acumulado = List.of(base);
         for (int indice = 0; indice < base.length; indice++) {
           for (final ConsultaLoteItem item in _itensDeConsulta(base[indice])) {
@@ -459,8 +448,6 @@ class ValidadorController extends ChangeNotifier {
         await service.autorizacaoVpp(token: token, numeroVpp: senha);
 
     final ConsultaGuia consulta = resultado.fold<ConsultaGuia>(
-      // O backend devolve resposta compacta (descricao do status) — sem o
-      // JSON cru do portal.
       onSuccess: (dados) =>
           _consultaVpp(dados['descricao'] as String?, senha: senha),
       onFailure: (erro) => ConsultaGuia(

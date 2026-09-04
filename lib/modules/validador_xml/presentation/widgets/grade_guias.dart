@@ -15,7 +15,6 @@ import '../../data/models/guia_validada.dart';
 /// categoria [carteira].
 enum TipoErroGuia { senha, carteira, credenciais }
 
-/// Uma linha exibível da grade: a guia que a originou + o detalhe da linha.
 class LinhaGradeGuia {
   const LinhaGradeGuia({required this.guia, required this.detalhe});
 
@@ -23,7 +22,6 @@ class LinhaGradeGuia {
   final String detalhe;
 }
 
-/// Indica se o detalhe é a mensagem "Senha não informada" (qualquer caixa).
 bool _ehSenhaNaoInformada(String detalhe) =>
     detalhe.toLowerCase().contains('senha não informada');
 
@@ -72,17 +70,13 @@ List<LinhaGradeGuia> agruparPorDetalhe(List<LinhaGradeGuia> linhas) {
   return ordenado;
 }
 
-/// Categoriza UMA LINHA (detalhe) para o filtro: erros locais pelo campo, a
-/// linha da consulta pelo tipo/motivo. Nula quando não categorizável.
 TipoErroGuia? tipoErroDeLinha(LinhaGradeGuia linha) {
   final String detalhe = linha.detalhe;
-  // Linha de consulta (falha): procura a consulta cuja descrição é o detalhe.
   for (final ConsultaGuia consulta in linha.guia.consultas) {
     if (!consulta.sucesso && detalhe == consulta.descricao) {
       return _tipoDeConsulta(consulta);
     }
   }
-  // Linha de erro local: categoriza pelo campo do erro correspondente.
   for (final erro in linha.guia.erros) {
     if (erro.mensagem != detalhe) continue;
     if (erro.campo == 'senha') return TipoErroGuia.senha;
@@ -105,8 +99,6 @@ TipoErroGuia _tipoDeConsulta(ConsultaGuia consulta) {
       : TipoErroGuia.carteira;
 }
 
-/// Categoriza o problema que uma guia representa (erro local ou de consulta).
-/// Nulo quando a guia não tem problema.
 TipoErroGuia? tipoErroDe(GuiaValidada guia) {
   for (final ConsultaGuia consulta in guia.consultas) {
     if (!consulta.sucesso) {
@@ -128,12 +120,6 @@ String rotuloTipoErro(TipoErroGuia tipo) => switch (tipo) {
       TipoErroGuia.credenciais => AppStrings.filtroCredenciais,
     };
 
-/// Grade das guias invalidadas: borda fina em todas as células (linha ×
-/// coluna), sem cantos arredondados, sem sombra e sem card por trás. Cada
-/// detalhe gera uma linha própria; a linha inteira é clicável (texto e
-/// ícone), fica um pouco escura no hover com cursor de clique, e abre o
-/// popup com as informações da guia (sem os motivos de erro — eles ficam
-/// nas linhas).
 class GradeGuias extends StatelessWidget {
   const GradeGuias({super.key, required this.linhas});
 
@@ -236,8 +222,6 @@ class GradeGuias extends StatelessWidget {
                 rotulo: AppStrings.rotuloSenha,
                 valor: guia.senha ?? AppStrings.valorIndisponivel,
               ),
-              // Visão geral: status de CADA consulta (elegibilidade e/ou
-              // autorização), sem semântica de erro — erros ficam na grade.
               for (final ConsultaGuia consulta in guia.consultas) ...[
                 const SizedBox(height: AppDimens.spaceMd),
                 RotuloValor(
@@ -261,9 +245,6 @@ class GradeGuias extends StatelessWidget {
   }
 }
 
-/// Célula da grade: borda desenhada pelo TableBorder, padding, feedback no
-/// hover (fundo levemente escuro compartilhado com a linha), cursor de clique
-/// e toda a área (incluindo texto/ícone) clicável quando há [tap].
 class _Celula extends StatelessWidget {
   const _Celula({
     this.texto,
