@@ -119,8 +119,7 @@ class ValidadorApi {
   Future<Response> _autorizacao(Request request) async {
     final String? token = request.url.queryParameters['token'];
     final String? numeroVpp = request.url.queryParameters['numeroVpp'];
-    final SessaoPortal? sessao =
-        token == null ? null : _sessoes[token];
+    final SessaoPortal? sessao = token == null ? null : _sessoes[token];
 
     if (sessao == null) {
       return _erro('Token de sessao invalido ou ausente.', 401);
@@ -135,11 +134,14 @@ class ValidadorApi {
       return _erro('Falha na consulta de autorizacao VPP.', 502);
     }
 
-    final int? codigoStatus = dados['http-codigo-status'] as int?;
-    if (codigoStatus != null && codigoStatus >= 400) {
-      return _json(dados, statusCode: 502);
-    }
-    return _json(dados);
+    // Resposta compacta: o cliente só precisa saber se há autorização e a
+    // descricao do status — o JSON cru do portal não é devolvido.
+    final String? descricao = _extrairStatusVpp(dados);
+    return _json({
+      'status': 'ok',
+      'encontrada': descricao != null,
+      'descricao': descricao,
+    });
   }
 
   /// Consulta em lote: recebe várias solicitações (elegibilidade/vpp) e
