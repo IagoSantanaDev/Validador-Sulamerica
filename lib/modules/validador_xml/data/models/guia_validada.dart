@@ -19,8 +19,6 @@ class GuiaValidada {
 
   bool get temErro => erros.isNotEmpty;
 
-  /// Há alguma consulta ao portal que falhou (elegível NÃO, senha inválida,
-  /// autorização negada, erro de transporte, etc.).
   bool get temFalhaConsulta => consultas.any((c) => !c.sucesso);
 
   /// Primeira consulta com falha; se nenhuma falhou, a primeira consulta;

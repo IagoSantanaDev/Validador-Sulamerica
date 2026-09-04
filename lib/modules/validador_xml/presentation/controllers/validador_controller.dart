@@ -58,8 +58,6 @@ class ValidadorController extends ChangeNotifier {
 
   EstadoConexao get estadoConexao => _estadoConexao;
 
-  /// Pinge em /api/status e autentica no portal; bloqueia o site quando a
-  /// API está fora ou as credenciais estão ausentes/inválidas.
   Future<void> verificarDisponibilidadeApi() async {
     final SulAmericaBackendService? service = _service;
     _estadoConexao = EstadoConexao.verificando;
@@ -125,11 +123,9 @@ class ValidadorController extends ChangeNotifier {
   String? get mensagemErro => _mensagemErro;
   int? get tamanhoArquivoBytes => _bytesArquivo?.length;
 
-  /// Guias com qualquer problema: erro local OU falha de consulta ao portal.
   List<GuiaValidada> get guiasComErro =>
       _resultado.where((g) => g.temErro || g.temFalhaConsulta).toList();
 
-  /// Todas as guias validadas (com ou sem erro), já ordenadas.
   List<GuiaValidada> get guias => _resultado;
 
   int get totalGuias => _resultado.length;

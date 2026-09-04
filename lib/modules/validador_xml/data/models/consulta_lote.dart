@@ -8,7 +8,6 @@ class ConsultaLoteItem {
   final String chave;
 }
 
-/// Resultado individual devolvido pelo lote de consultas.
 class ResultadoConsultaLote {
   const ResultadoConsultaLote({
     required this.chave,

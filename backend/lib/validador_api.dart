@@ -265,7 +265,6 @@ class ValidadorApi {
     return resultados;
   }
 
-  /// Abre uma sessão extra (login no portal); null quando o login falha.
   Future<SessaoPortal?> _criarSessaoExtra(
     _CredenciaisPortal credenciais,
     int indice,

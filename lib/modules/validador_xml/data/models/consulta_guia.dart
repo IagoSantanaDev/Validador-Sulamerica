@@ -1,5 +1,3 @@
-/// Resultado de uma consulta ao portal SulAmérica feita por guia durante a
-/// validação (elegibilidade ou autorização VPP).
 enum TipoConsultaGuia { elegibilidade, autorizacaoVpp }
 
 class ConsultaGuia {

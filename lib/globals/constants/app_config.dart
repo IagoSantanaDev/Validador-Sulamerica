@@ -1,4 +1,3 @@
-/// Configurações de ambiente.
 class AppConfig {
   const AppConfig._();
 

@@ -11,8 +11,6 @@ String formatarTamanho(int? bytes) {
   return '${mb.toStringAsFixed(mb >= 100 ? 0 : 1)} MB';
 }
 
-/// Formata um valor monetário em real (BRL), ex.: "3031.41" → "R$ 3.031,41".
-/// Retorna o placeholder quando o valor não é numérico.
 String formatarMoeda(String? valor) {
   final double? numero = double.tryParse((valor ?? '').trim());
   if (numero == null) return AppStrings.valorIndisponivel;

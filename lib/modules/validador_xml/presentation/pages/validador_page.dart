@@ -48,7 +48,6 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
   String? _ultimoValidadoNome;
   String? _identificador;
 
-  /// Filtro por tipo de erro na grade (null = todas).
   TipoErroGuia? _filtroErro;
 
   @override
@@ -329,8 +328,6 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
     );
   }
 
-  /// Chips para filtrar a grade por tipo de erro (sem a categoria
-  /// Credenciais, que é exibida apenas em "Todas").
   Widget _filtroErros() {
     return Wrap(
       spacing: AppDimens.spaceSm,

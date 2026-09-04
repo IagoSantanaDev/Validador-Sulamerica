@@ -9,8 +9,6 @@ import '../../../../globals/widgets/textos.dart';
 class NavbarSite extends StatelessWidget {
   const NavbarSite({super.key, this.onTituloTap});
 
-  /// Acionado ao clicar no ícone/texto da navbar (voltar para a página
-  /// principal). Quando nulo, o cabeçalho não é clicável.
   final VoidCallback? onTituloTap;
 
   @override
