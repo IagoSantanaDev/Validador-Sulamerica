@@ -29,7 +29,7 @@ Variáveis de ambiente (opcionais):
 |---|---|---|
 | `PORT` | `8080` | Porta HTTP |
 | `HOST` | `0.0.0.0` | Interface de escuta |
-| `CORS_ORIGIN` | `*` | Origem permitida (ex.: `https://validador-tiss.pages.dev`) — lida em runtime, serve via `railway variables set` |
+| `CORS_ORIGIN` | `*` | Origem permitida (ex.: `https://validador-tiss.pages.dev`) — lida em runtime; definir no serviço do Render (Settings) |
 
 ## Deploy (Render free tier)
 
@@ -67,8 +67,8 @@ serviço dorme quando ocioso, fica bem abaixo das 750h — grátis.
 | Método | Rota | Corpo / Query | Descrição |
 |---|---|---|---|
 | `POST` | `/api/login` | `{code, user, senha}` | Autentica no portal e devolve `{token}` |
-| `POST` | `/api/beneficiario` | `{token, carteira}` | Consulta o beneficiário; devolve `{status, elegivel, rotuloElegibilidade, html}` |
-| `GET` | `/api/autorizacao` | `?token=&numeroVpp=` | Consulta a autorização VPP; devolve o JSON do portal |
+| `POST` | `/api/beneficiario` | `{token, carteira}` | Elegibilidade; devolve `{status, elegivel, rotuloElegibilidade}` |
+| `GET` | `/api/autorizacao` | `?token=&senha=` | Status da autorização pela senha; devolve `{status, encontrada, descricao}` |
 | `GET` | `/api/status` | — | Health check (número de sessões ativas) |
 
 Regras de negócio aplicadas no proxy (espelhando o app):
