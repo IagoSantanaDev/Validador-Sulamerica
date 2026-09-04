@@ -10,8 +10,10 @@ import '../../data/models/consulta_guia.dart';
 import '../../data/models/guia_validada.dart';
 
 /// Categorias de erro usadas no filtro da grade. Erros de autorização VPP
-/// (senha inválida, negada...) pertencem à categoria [senha].
-enum TipoErroGuia { senha, carteira, elegibilidade, credenciais }
+/// (senha inválida, não encontrada, negada...) pertencem à categoria [senha];
+/// os de elegibilidade (não elegível, carteira não encontrada...) pertencem à
+/// categoria [carteira].
+enum TipoErroGuia { senha, carteira, credenciais }
 
 /// Uma linha exibível da grade: a guia que a originou + o detalhe da linha.
 class LinhaGradeGuia {
@@ -28,7 +30,7 @@ bool _ehSenhaNaoInformada(String detalhe) =>
 /// Expande uma guia problemática em linhas: um erro local por linha e, para
 /// cada CONSULTA que falhou (elegibilidade NÃO, senha inválida, autorização
 /// negada...), uma linha adicional com o motivo. Consultas bem-sucedidas
-/// (Elegível: SIM, Autorização VPP: ok) NÃO viram linha — ficam no popup.
+/// (Elegível: SIM, Senha: ok) NÃO viram linha — ficam no popup.
 /// A linha de "Senha não informada" é sempre a última.
 List<LinhaGradeGuia> linhasDeGuia(GuiaValidada guia) {
   final List<LinhaGradeGuia> linhas = [
@@ -90,7 +92,7 @@ TipoErroGuia? tipoErroDeLinha(LinhaGradeGuia linha) {
 }
 
 /// Classifica uma consulta que falhou: VPP → Senha; elegibilidade → Carteira
-/// (carteira não encontrada/inválida) ou Elegibilidade.
+/// (não elegível, carteira não encontrada, número inválido...).
 TipoErroGuia _tipoDeConsulta(ConsultaGuia consulta) {
   final String descricao = consulta.descricao;
   if (descricao.contains('autenticar') ||
@@ -98,13 +100,9 @@ TipoErroGuia _tipoDeConsulta(ConsultaGuia consulta) {
       descricao.contains('credenciais')) {
     return TipoErroGuia.credenciais;
   }
-  if (consulta.tipo == TipoConsultaGuia.elegibilidade) {
-    if (descricao.contains('Carteira') || descricao.contains('carteira')) {
-      return TipoErroGuia.carteira;
-    }
-    return TipoErroGuia.elegibilidade;
-  }
-  return TipoErroGuia.senha;
+  return consulta.tipo == TipoConsultaGuia.autorizacaoVpp
+      ? TipoErroGuia.senha
+      : TipoErroGuia.carteira;
 }
 
 /// Categoriza o problema que uma guia representa (erro local ou de consulta).
@@ -127,7 +125,6 @@ TipoErroGuia? tipoErroDe(GuiaValidada guia) {
 String rotuloTipoErro(TipoErroGuia tipo) => switch (tipo) {
       TipoErroGuia.senha => AppStrings.filtroSenha,
       TipoErroGuia.carteira => AppStrings.filtroCarteira,
-      TipoErroGuia.elegibilidade => AppStrings.filtroElegibilidade,
       TipoErroGuia.credenciais => AppStrings.filtroCredenciais,
     };
 
@@ -246,7 +243,7 @@ class GradeGuias extends StatelessWidget {
                 RotuloValor(
                   rotulo: consulta.tipo == TipoConsultaGuia.elegibilidade
                       ? AppStrings.rotuloElegibilidade
-                      : AppStrings.rotuloAutorizacaoVpp,
+                      : AppStrings.rotuloSenha,
                   valor: consulta.descricao,
                 ),
               ],

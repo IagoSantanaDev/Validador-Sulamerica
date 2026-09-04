@@ -228,7 +228,7 @@ void main() {
       final List<String> consultasGuiaSenha =
           controller.guias[1].consultas.map((c) => c.descricao).toList();
       expect(consultasGuiaSenha, contains('Elegível: SIM'));
-      expect(consultasGuiaSenha, contains('Autorização VPP: ok'));
+      expect(consultasGuiaSenha, contains('Senha: ok'));
     });
 
     test('batch agrupa chaves repetidas em uma única consulta', () async {
@@ -282,7 +282,7 @@ void main() {
       final ConsultaGuia consulta = controller.guias.single.consultas
           .firstWhere((c) => c.tipo == TipoConsultaGuia.autorizacaoVpp);
       expect(consulta.sucesso, isTrue);
-      expect(consulta.descricao, 'Autorização VPP: ok');
+      expect(consulta.descricao, 'Senha: ok');
     });
 
     test('autorização VPP não autorizada (Negado) é marcada como falha',
@@ -304,7 +304,7 @@ void main() {
       final ConsultaGuia? consulta = controller.guias.single.consulta;
       expect(consulta, isNotNull);
       expect(consulta!.sucesso, isFalse);
-      expect(consulta.descricao, contains('Autorização VPP: Negado'));
+      expect(consulta.descricao, contains('Senha: Negado'));
     });
 
     test('guia com senha inválida não gera consultas (nem login)', () async {
@@ -394,7 +394,7 @@ void main() {
       final ConsultaGuia? consulta = controller.guias.single.consulta;
       expect(consulta, isNotNull);
       expect(consulta!.sucesso, isFalse);
-      expect(consulta.descricao, contains('Senha inválida'));
+      expect(consulta.descricao, contains('Senha não encontrada no portal'));
     });
 
     test('carteira sem 20 dígitos vira erro próprio sem chamar a API',

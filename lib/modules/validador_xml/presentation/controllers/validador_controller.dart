@@ -506,22 +506,21 @@ class ValidadorController extends ChangeNotifier {
     );
   }
 
-  /// Monta o resultado da autorização VPP a partir da descrição do status do
-  /// portal. Autorizada quando a descrição CONTÉM a palavra "autorizado"
-  /// (case-insensitive). A senha é incluída nos textos de erro para
-  /// identificar o que falhou.
+  /// Monta o resultado da autorização (senha) a partir da descrição do status
+  /// do portal. Autorizada quando a descrição CONTÉM "autorizado". Senha com
+  /// formato válido mas SEM status no portal = "Senha não encontrada no
+  /// portal" — diferente de formato inválido (Senha inválida), tratado na
+  /// pré-validação.
   ConsultaGuia _consultaVpp(String? descricao, {required String senha}) {
     final bool autorizada = _descricaoAutorizada(descricao);
     return ConsultaGuia(
       tipo: TipoConsultaGuia.autorizacaoVpp,
       sucesso: autorizada,
       descricao: autorizada
-          ? 'Autorização VPP: ok'
-          // Sem status = a senha não retornou nenhuma autorização:
-          // trata como senha inválida (erro próprio).
+          ? 'Senha: ok'
           : descricao == null
-              ? '${AppStrings.erroVppSenhaInvalida} ($senha)'
-              : 'Autorização VPP: $descricao ($senha)',
+              ? '${AppStrings.erroSenhaNaoEncontrada} ($senha)'
+              : 'Senha: $descricao ($senha)',
     );
   }
 

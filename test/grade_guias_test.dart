@@ -133,7 +133,7 @@ void main() {
       );
       final LinhaGradeGuia linha = linhasDeGuia(guiaConsulta).single;
 
-      expect(tipoErroDeLinha(linha), TipoErroGuia.elegibilidade);
+      expect(tipoErroDeLinha(linha), TipoErroGuia.carteira);
     });
 
     test('linha de carteira não encontrada é filtrada como Carteira', () {
