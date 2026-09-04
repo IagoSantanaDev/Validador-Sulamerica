@@ -22,6 +22,9 @@ class AppColors {
   static const Color success = Color(0xFF2E7D32);
   static const Color successBackground = Color(0xFFE4F2E6);
 
+  /// Fundo ao passar o mouse sobre uma linha da grade (um pouco escuro).
+  static const Color hoverLinha = Color(0x12000000);
+
   static const Color shadowRing = Color(0x14000000);
   static const Color shadowLift = Color(0x12000000);
   static const Color shadowAmbient = Color(0x0D000000);
