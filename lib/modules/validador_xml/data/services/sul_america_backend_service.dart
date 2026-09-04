@@ -37,7 +37,7 @@ class SulAmericaBackendService {
     required String senha,
   }) {
     return _dio.get<Map<String, dynamic>>(
-      '/api/senha',
+      '/api/autorizacao',
       parametrosConsulta: { 'token': token, 'senha': senha},
       parser: (dados) => (dados as Map).cast<String, dynamic>(),
     );

@@ -41,7 +41,7 @@ class ValidadorApi {
   late final Router _rotas = Router()
     ..post('/api/login', _login)
     ..post('/api/beneficiario', _beneficiario)
-    ..get('/api/senha', _senha)
+    ..get('/api/autorizacao', _senha)
     ..post('/api/consultas', _consultas)
     ..get('/api/status', _status)
     ..all('/<ignored|.*>', _naoEncontrado);
