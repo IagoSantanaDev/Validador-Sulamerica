@@ -161,22 +161,65 @@ class ValidadorApi {
       return _erro('Campo consultas e obrigatorio.', 400);
     }
 
-    final List<Map<String, dynamic>> resultados = [];
-    for (final List<dynamic> lote in _fatiar(consultas, 4)) {
-      final List<Future<Map<String, dynamic>>> futuros =
-          lote.map((item) => _executarConsulta(sessao, item)).toList();
-      resultados.addAll(await Future.wait(futuros));
-    }
+    final List<Map<String, dynamic>> resultados =
+        await _processarEmParalelo(consultas, sessao, _limiteConcorrencia);
     return _json({'status': 'ok', 'resultados': resultados});
   }
 
-  List<List<T>> _fatiar<T>(List<T> lista, int tamanho) {
-    final List<List<T>> lotes = [];
-    for (int i = 0; i < lista.length; i += tamanho) {
-      final int fim = min(i + tamanho, lista.length);
-      lotes.add(lista.sublist(i, fim));
+  /// Teto de requisições simultâneas ao portal: alto o bastante para lotes
+  /// grandes (100+ guias) terminarem rápido, e contido para não sobrecarregar
+  /// o F5 ASM do portal nem a memória do free tier (respostas são enxutas).
+  static const int _limiteConcorrencia = 10;
+
+  /// Pool de workers nativo (sem dependência): processa [consultas] com até
+  /// [limite] requisições simultâneas, preservando a ordem dos resultados.
+  Future<List<Map<String, dynamic>>> _processarEmParalelo(
+    List<dynamic> consultas,
+    SessaoPortal sessao,
+    int limite,
+  ) async {
+    final List<Map<String, dynamic>?> resultados =
+        List<Map<String, dynamic>?>.filled(consultas.length, null);
+    int proximo = 0;
+
+    Future<void> trabalhador() async {
+      while (true) {
+        final int indice = proximo++;
+        if (indice >= consultas.length) return;
+        final dynamic item = consultas[indice];
+        final String tipo =
+            item is Map ? (item['tipo'] as String? ?? '') : '';
+        // Elegibilidade usa form com estado por sessão no portal: dois POSTs
+        // simultâneos corrompem o resultado (falso "carteira não
+        // encontrada"). Serializa só a elegibilidade; o VPP (GET) segue
+        // paralelo dentro do limite do pool.
+        resultados[indice] = tipo == 'elegibilidade'
+            ? await _executarElegibilidadeSerializada(
+                () => _executarConsulta(sessao, item),
+              )
+            : await _executarConsulta(sessao, item);
+      }
     }
-    return lotes;
+
+    final int qtdTrabalhadores = min(limite, consultas.length);
+    await Future.wait([
+      for (int i = 0; i < qtdTrabalhadores; i++) trabalhador(),
+    ]);
+    return resultados.whereType<Map<String, dynamic>>().toList();
+  }
+
+  /// Encadeia as consultas de elegibilidade (uma de cada vez) para preservar
+  /// o estado do form do portal por sessão.
+  Future<void> _ultimaElegibilidade = Future.value();
+
+  Future<T> _executarElegibilidadeSerializada<T>(
+    Future<T> Function() acao,
+  ) {
+    final Future<T> resultado =
+        _ultimaElegibilidade.then((_) => acao());
+    _ultimaElegibilidade =
+        resultado.then<void>((_) {}, onError: (Object _, StackTrace __) {});
+    return resultado;
   }
 
   Future<Map<String, dynamic>> _executarConsulta(
@@ -213,11 +256,20 @@ class ValidadorApi {
           'erro': 'Falha na consulta ao portal SulAmerica.',
         };
       }
+      final bool? elegivel = extrairElegivel(html);
+      if (elegivel == null) {
+        // Diagnóstico: o portal voltou sem o bloco de elegibilidade — pode
+        // ser carteira realmente não encontrada OU estado de sessão perdido.
+        _logger.w(
+          'Elegibilidade sem indicador | carteira ${_mascararChave(chave)} | '
+          'pagina: ${_resumirTexto(html)}',
+        );
+      }
       return {
         'chave': chave,
         'tipo': tipo,
         'sucesso': true,
-        'elegivel': extrairElegivel(html),
+        'elegivel': elegivel,
         'rotuloElegibilidade': extrairRotuloElegibilidade(html),
       };
     }
@@ -247,6 +299,19 @@ class ValidadorApi {
       'sucesso': false,
       'erro': 'Tipo de consulta desconhecido.',
     };
+  }
+
+  /// "primeiro.ultimo" da chave (não vaza dados sensíveis em log).
+  String _mascararChave(String chave) => chave.length <= 5
+      ? chave
+      : '${chave.substring(0, 4)}…${chave.substring(chave.length - 2)}';
+
+  String _resumirTexto(String html) {
+    final String texto = html
+        .replaceAll(RegExp(r'<[^>]*>'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    return texto.length > 300 ? '${texto.substring(0, 300)}…' : texto;
   }
 
   /// Descricao do status da autorização (ex.: "Autorizado", "Negado") a
