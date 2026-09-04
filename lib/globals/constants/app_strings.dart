@@ -1,7 +1,7 @@
 class AppStrings {
   const AppStrings._();
 
-  static const String tituloApp = 'Validador TISS';
+  static const String tituloApp = 'Validador SulAmerica';
   static const String valorIndisponivel = '—';
   static const String mensagemArquivoInvalidoExtensao =
       'Selecione um arquivo com extensão .xml';
@@ -39,7 +39,6 @@ class AppStrings {
   static const String rotuloSenha = 'Senha';
   static const String rotuloBeneficiario = 'Beneficiário';
   static const String rotuloElegibilidade = 'Elegibilidade';
-  static const String rotuloAutorizacaoVpp = 'Autorização VPP';
   static const String dialogoFechar = 'Fechar';
 
   static const String apiVerificandoTitulo = 'Conectando à API';
@@ -65,4 +64,22 @@ class AppStrings {
   static const String apiLoginFalhouDetalhe =
       'Confira os valores das variáveis PORTAL_* e tente novamente.';
   static const String apiTentarNovamente = 'Tentar novamente';
+
+  static const String erroCarteiraInvalida = 'Número da carteira inválido';
+  static const String erroNaoElegivel = 'Beneficiário não elegível';
+  static const String erroCarteiraNaoEncontrada =
+      'Carteira não encontrada no portal';
+  static const String erroVppSenhaInvalida = 'Senha inválida';
+  static const String erroSenhaNaoEncontrada =
+      'Senha não encontrada no portal';
+  static const String erroLoginFalhou =
+      'Falha ao autenticar no portal (confira PORTAL_CODE/USER/SENHA).';
+  static const String erroCredenciaisAusentes =
+      'Credenciais do portal não configuradas (PORTAL_CODE/USER/SENHA).';
+
+  static const String filtroTodos = 'Todas';
+  static const String filtroSenha = 'Senha';
+  static const String filtroCarteira = 'Carteira';
+  static const String filtroCredenciais = 'Credenciais';
+  static const String filtroSemResultado = 'Nenhuma guia encontrada com este filtro.';
 }

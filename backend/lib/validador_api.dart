@@ -192,7 +192,7 @@ class ValidadorApi {
 
   /// Nº máximo de sessões do portal usadas em paralelo num lote (1 por lote
   /// pequeno + extras via login quando há muitas elegibilidades).
-  static const int _limiteSessoesParalelas = 4;
+  static const int _limiteSessoesParalelas = 8;
 
   /// A partir deste volume de elegibilidades vale criar sessões extras.
   static const int _minElegibilidadeParaMultiplasSessoes = 10;

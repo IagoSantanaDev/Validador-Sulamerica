@@ -15,9 +15,15 @@ import 'package:validador_xml_sulamerica/modules/validador_xml/presentation/cont
 /// Adapter de rede falso que responde /api/consultas a partir do CORPO do
 /// request (lote) e registra as chamadas feitas — sem rede real.
 class _FakeBatchAdapter implements HttpClientAdapter {
-  _FakeBatchAdapter({this.statusAutorizacao = 'Autorizado'});
+  _FakeBatchAdapter({
+    this.statusAutorizacao = 'Autorizado',
+    this.elegivel = true,
+    this.loginOk = true,
+  });
 
-  final String statusAutorizacao;
+  final String? statusAutorizacao;
+  final bool? elegivel;
+  final bool loginOk;
   final List<String> logChamadas = [];
   final List<dynamic> consultasRecebidas = [];
 
@@ -33,7 +39,9 @@ class _FakeBatchAdapter implements HttpClientAdapter {
     logChamadas.add(options.path);
     switch (options.path) {
       case '/api/login':
-        return _resposta(200, {'token': 'tok123'});
+        return loginOk
+            ? _resposta(200, {'token': 'tok123'})
+            : _resposta(401, {'status': 'erro'});
       case '/api/consultas':
         final Object? data = options.data;
         final Map<String, dynamic> corpo = data is String
@@ -48,8 +56,8 @@ class _FakeBatchAdapter implements HttpClientAdapter {
                 'chave': c['chave'],
                 'tipo': c['tipo'],
                 'sucesso': true,
-                'elegivel': true,
-                'rotuloElegibilidade': 'SIM',
+                'elegivel': elegivel,
+                'rotuloElegibilidade': elegivel == true ? 'SIM' : null,
               }
             else
               {
@@ -206,18 +214,21 @@ void main() {
       );
 
       expect(controller.status, StatusValidador.concluido);
-      // Login + uma única chamada de lote; sem chamadas individuais.
+      // Login + uma única chamada de lote; sem chamadas individuais. A guia
+      // sem senha recebe 1 item (elegibilidade); a com senha, 2 (carteira +
+      // VPP).
       expect(adapter.logChamadas, ['/api/login', '/api/consultas']);
-      expect(adapter.consultasRecebidas, hasLength(2));
+      expect(adapter.consultasRecebidas, hasLength(3));
 
+      expect(controller.guiasComErro.first.consultas, hasLength(1));
       expect(
-        controller.guiasComErro.single.consulta?.descricao,
+        controller.guiasComErro.first.consulta?.descricao,
         'Elegível: SIM',
       );
-      expect(
-        controller.guias[1].consulta?.descricao,
-        'Autorização VPP: ok',
-      );
+      final List<String> consultasGuiaSenha =
+          controller.guias[1].consultas.map((c) => c.descricao).toList();
+      expect(consultasGuiaSenha, contains('Elegível: SIM'));
+      expect(consultasGuiaSenha, contains('Senha: ok'));
     });
 
     test('batch agrupa chaves repetidas em uma única consulta', () async {
@@ -268,10 +279,10 @@ void main() {
       );
 
       expect(controller.status, StatusValidador.concluido);
-      final ConsultaGuia? consulta = controller.guias.single.consulta;
-      expect(consulta, isNotNull);
-      expect(consulta!.sucesso, isTrue);
-      expect(consulta.descricao, 'Autorização VPP: ok');
+      final ConsultaGuia consulta = controller.guias.single.consultas
+          .firstWhere((c) => c.tipo == TipoConsultaGuia.autorizacaoVpp);
+      expect(consulta.sucesso, isTrue);
+      expect(consulta.descricao, 'Senha: ok');
     });
 
     test('autorização VPP não autorizada (Negado) é marcada como falha',
@@ -293,7 +304,7 @@ void main() {
       final ConsultaGuia? consulta = controller.guias.single.consulta;
       expect(consulta, isNotNull);
       expect(consulta!.sucesso, isFalse);
-      expect(consulta.descricao, 'Autorização VPP: Negado');
+      expect(consulta.descricao, contains('Senha: Negado'));
     });
 
     test('guia com senha inválida não gera consultas (nem login)', () async {
@@ -314,9 +325,14 @@ void main() {
       );
 
       expect(controller.status, StatusValidador.concluido);
-      expect(adapter.logChamadas, isEmpty);
-      expect(adapter.consultasRecebidas, isEmpty);
-      expect(controller.guiasComErro.single.consulta, isNull);
+      // Senha inválida vira erro local; a carteira válida ainda consulta a
+      // elegibilidade no lote (único item enviado, sem VPP).
+      expect(adapter.logChamadas, ['/api/login', '/api/consultas']);
+      expect(adapter.consultasRecebidas, hasLength(1));
+      final List<String> descricoes =
+          controller.guiasComErro.single.consultas.map((c) => c.descricao).toList();
+      expect(descricoes.any((d) => d.startsWith('Senha inválida')), isTrue);
+      expect(descricoes, contains('Elegível: SIM'));
     });
 
     test('fallback: sem /api/consultas usa o fluxo individual', () async {
@@ -339,6 +355,97 @@ void main() {
       expect(adapter.logChamadas, contains('/api/consultas'));
       expect(adapter.logChamadas, contains('/api/beneficiario'));
       expect(controller.guias.single.consulta?.descricao, 'Elegível: SIM');
+    });
+
+    test('elegibilidade NÃO é um erro próprio no frontend', () async {
+      final _FakeBatchAdapter adapter = _FakeBatchAdapter(elegivel: false);
+
+      final ValidadorController controller = await _validar(
+        _controllerComGateway(
+          adapter: adapter,
+          retornoValidacao: const [
+            GuiaValidada(
+              guia: _guiaSemSenha,
+              erros: [ErroValidacao(campo: 'senha', mensagem: 'sem senha')],
+            ),
+          ],
+        ),
+      );
+
+      final ConsultaGuia? consulta = controller.guias.single.consulta;
+      expect(consulta, isNotNull);
+      expect(consulta!.sucesso, isFalse);
+      expect(consulta.descricao, contains('Beneficiário não elegível'));
+    });
+
+    test('VPP sem status é exibido como senha inválida', () async {
+      final _FakeBatchAdapter adapter =
+          _FakeBatchAdapter(statusAutorizacao: null);
+
+      final ValidadorController controller = await _validar(
+        _controllerComGateway(
+          adapter: adapter,
+          retornoValidacao: const [
+            GuiaValidada(guia: _guiaSenhaVppValida, erros: []),
+          ],
+        ),
+      );
+
+      final ConsultaGuia? consulta = controller.guias.single.consulta;
+      expect(consulta, isNotNull);
+      expect(consulta!.sucesso, isFalse);
+      expect(consulta.descricao, contains('Senha não encontrada no portal'));
+    });
+
+    test('carteira sem 20 dígitos vira erro próprio sem chamar a API',
+        () async {
+      const GuiaTiss guiaCarteiraCurta = GuiaTiss(
+        numeroGuiaPrestador: '114',
+        numeroCarteira: '123',
+        senha: null,
+      );
+      final _FakeBatchAdapter adapter = _FakeBatchAdapter();
+
+      final ValidadorController controller = await _validar(
+        _controllerComGateway(
+          adapter: adapter,
+          retornoValidacao: const [
+            GuiaValidada(
+              guia: guiaCarteiraCurta,
+              erros: [],
+            ),
+          ],
+        ),
+      );
+
+      expect(adapter.logChamadas, isEmpty);
+      expect(controller.guias.single.consulta?.sucesso, isFalse);
+      expect(
+        controller.guias.single.consulta?.descricao,
+        contains('Número da carteira inválido'),
+      );
+    });
+
+    test('falha no login é exibida como erro em todas as guias', () async {
+      final _FakeBatchAdapter adapter = _FakeBatchAdapter(loginOk: false);
+
+      final ValidadorController controller = await _validar(
+        _controllerComGateway(
+          adapter: adapter,
+          retornoValidacao: const [
+            GuiaValidada(
+              guia: _guiaSemSenha,
+              erros: [ErroValidacao(campo: 'senha', mensagem: 'sem senha')],
+            ),
+          ],
+        ),
+      );
+
+      expect(controller.status, StatusValidador.concluido);
+      final ConsultaGuia? consulta = controller.guias.single.consulta;
+      expect(consulta, isNotNull);
+      expect(consulta!.sucesso, isFalse);
+      expect(consulta.descricao, contains('autenticar'));
     });
 
     test('sem credenciais do prestador nenhuma chamada é feita', () async {
