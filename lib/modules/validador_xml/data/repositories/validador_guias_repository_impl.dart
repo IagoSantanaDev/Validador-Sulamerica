@@ -2,7 +2,7 @@ import '../datasources/xml_lote_guias_datasource.dart';
 import '../models/erro_validacao.dart';
 import '../models/guia_tiss.dart';
 import '../models/guia_validada.dart';
-import 'regras/regra_numero_carteira_prefixo.dart';
+import 'regras/regra_senha_prefixo.dart';
 import 'regras/regra_validacao.dart';
 import 'validador_guias_repository.dart';
 
@@ -11,8 +11,7 @@ class ValidadorGuiasRepositoryImpl implements ValidadorGuiasRepository {
     XmlLoteGuiasDatasource? datasource,
     List<RegraValidacao>? regras,
   })  : _datasource = datasource ?? const XmlLoteGuiasDatasource(),
-        // Novas regras entram aqui, sem tocar nas existentes (OCP).
-        _regras = regras ?? const [RegraNumeroCarteiraPrefixo()];
+        _regras = regras ?? const [RegraSenhaPrefixo()];
 
   final XmlLoteGuiasDatasource _datasource;
   final List<RegraValidacao> _regras;
@@ -28,7 +27,6 @@ class ValidadorGuiasRepositoryImpl implements ValidadorGuiasRepository {
         .map((regra) => regra.validar(guia))
         .whereType<ErroValidacao>()
         .toList();
-
     return GuiaValidada(guia: guia, erros: erros);
   }
 }

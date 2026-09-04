@@ -1,5 +1,3 @@
-/// Hierarquia de exceções de rede. Nunca usamos null para sinalizar erro
-/// de requisição — todo erro vira uma dessas classes específicas.
 sealed class AppException implements Exception {
   const AppException(this.mensagem);
 
@@ -10,15 +8,11 @@ sealed class AppException implements Exception {
 }
 
 class SemConexaoException extends AppException {
-  const SemConexaoException()
-      : super(
-          'Sem conexão com a internet. Verifique sua rede e tente novamente.',
-        );
+  const SemConexaoException() : super('Sem conexão com a internet.');
 }
 
 class RequisicaoExpiradaException extends AppException {
-  const RequisicaoExpiradaException()
-      : super('A requisição demorou demais para responder. Tente novamente.');
+  const RequisicaoExpiradaException() : super('A requisição expirou.');
 }
 
 class RequisicaoCanceladaException extends AppException {
@@ -26,20 +20,16 @@ class RequisicaoCanceladaException extends AppException {
 }
 
 class NaoAutorizadoException extends AppException {
-  const NaoAutorizadoException()
-      : super('Sessão expirada ou acesso não autorizado.');
+  const NaoAutorizadoException() : super('Acesso não autorizado (401/403).');
 }
 
 class RecursoNaoEncontradoException extends AppException {
-  const RecursoNaoEncontradoException() : super('Recurso não encontrado.');
+  const RecursoNaoEncontradoException() : super('Recurso não encontrado (404).');
 }
 
 class ErroServidorException extends AppException {
-  const ErroServidorException({
-    required this.statusCode,
-    required String mensagem,
-  }) : super(mensagem);
-
+  const ErroServidorException({required this.statusCode, String? mensagem})
+      : super(mensagem ?? 'Erro do servidor.');
   final int? statusCode;
 }
 

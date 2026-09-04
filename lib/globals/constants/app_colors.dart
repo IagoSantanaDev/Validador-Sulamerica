@@ -1,24 +1,31 @@
 import 'package:flutter/material.dart';
 
-/// Paleta de cores centralizada do app. Evita cores "mágicas" espalhadas
-/// pela UI (ver regra "Sem magic numbers" do padrão do projeto).
 class AppColors {
   const AppColors._();
 
-  static const Color primary = Color(0xFF0A5C36);
-  static const Color background = Color(0xFFF5F7F6);
+  static const Color primary = Color(0xFFF57C00);
+  static const Color background = Color(0xFFF4F6F8);
+  static const Color navbar = Color(0xFFF57C00);
+  static const Color track = Color(0xFFEAEEF2);
   static const Color surface = Color(0xFFFFFFFF);
-  static const Color error = Color(0xFFD32F2F);
-  static const Color success = Color(0xFF2E7D32);
-  static const Color successBackground = Color(0xFFEAF7ED);
-  static const Color border = Color(0xFFE0E4E2);
-  static const Color textPrimary = Color(0xFF1A1F1D);
-  static const Color textSecondary = Color(0xFF5B655F);
+  static const Color surfaceMuted = Color(0xFFFAFBFD);
 
-  /// Cores alternadas usadas para destacar visualmente grupos consecutivos
-  /// de linhas com o mesmo numeroGuiaPrestador.
-  static const List<Color> groupBackgrounds = [
-    Color(0xFFFFFFFF),
-    Color(0xFFF1F4F2),
-  ];
+  static const Color textPrimary = Color(0xFF1D2733);
+  static const Color textMuted = Color(0xFF5B6873);
+  static const Color textLight = Color(0xFF555555);
+
+  static const Color border = Color(0xFFD5DCE3);
+
+  static const Color error = Color(0xFFC62828);
+  static const Color warning = Color(0xFFF0AD4E);
+  static const Color errorBackground = Color(0xFFFBEAEA);
+  static const Color success = Color(0xFF2E7D32);
+  static const Color successBackground = Color(0xFFE4F2E6);
+
+  /// Fundo ao passar o mouse sobre uma linha da grade (um pouco escuro).
+  static const Color hoverLinha = Color(0x12000000);
+
+  static const Color shadowRing = Color(0x14000000);
+  static const Color shadowLift = Color(0x12000000);
+  static const Color shadowAmbient = Color(0x0D000000);
 }

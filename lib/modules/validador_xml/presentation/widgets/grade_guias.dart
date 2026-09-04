@@ -1,0 +1,327 @@
+import 'package:flutter/material.dart';
+
+import '../../../../globals/constants/app_colors.dart';
+import '../../../../globals/constants/app_dimens.dart';
+import '../../../../globals/constants/app_strings.dart';
+import '../../../../globals/widgets/botao_texto.dart';
+import '../../../../globals/widgets/rotulo_valor.dart';
+import '../../../../globals/widgets/textos.dart';
+import '../../data/models/consulta_guia.dart';
+import '../../data/models/guia_validada.dart';
+
+/// Categorias de erro usadas no filtro da grade. Erros de autorização VPP
+/// (senha inválida, não encontrada, negada...) pertencem à categoria [senha];
+/// os de elegibilidade (não elegível, carteira não encontrada...) pertencem à
+/// categoria [carteira].
+enum TipoErroGuia { senha, carteira, credenciais }
+
+/// Uma linha exibível da grade: a guia que a originou + o detalhe da linha.
+class LinhaGradeGuia {
+  const LinhaGradeGuia({required this.guia, required this.detalhe});
+
+  final GuiaValidada guia;
+  final String detalhe;
+}
+
+/// Indica se o detalhe é a mensagem "Senha não informada" (qualquer caixa).
+bool _ehSenhaNaoInformada(String detalhe) =>
+    detalhe.toLowerCase().contains('senha não informada');
+
+/// Expande uma guia problemática em linhas: um erro local por linha e, para
+/// cada CONSULTA que falhou (elegibilidade NÃO, senha inválida, autorização
+/// negada...), uma linha adicional com o motivo. Consultas bem-sucedidas
+/// (Elegível: SIM, Senha: ok) NÃO viram linha — ficam no popup.
+/// A linha de "Senha não informada" é sempre a última.
+List<LinhaGradeGuia> linhasDeGuia(GuiaValidada guia) {
+  final List<LinhaGradeGuia> linhas = [
+    for (final erro in guia.erros)
+      LinhaGradeGuia(guia: guia, detalhe: erro.mensagem),
+    for (final ConsultaGuia consulta in guia.consultas)
+      if (!consulta.sucesso)
+        LinhaGradeGuia(guia: guia, detalhe: consulta.descricao),
+  ];
+
+  final int indiceSenha = linhas.indexWhere(
+    (l) => _ehSenhaNaoInformada(l.detalhe),
+  );
+  if (indiceSenha > -1 && indiceSenha != linhas.length - 1) {
+    final LinhaGradeGuia linhaSenha = linhas.removeAt(indiceSenha);
+    linhas.add(linhaSenha);
+  }
+  return linhas;
+}
+
+/// Agrupa as linhas por detalhe igual (guias com o mesmo detalhe ficam uma
+/// abaixo da outra, na ordem em que apareceram) e garante que o bloco de
+/// "senha não informada" vá para o final da grade.
+List<LinhaGradeGuia> agruparPorDetalhe(List<LinhaGradeGuia> linhas) {
+  final Map<String, List<LinhaGradeGuia>> grupos = {};
+  for (final LinhaGradeGuia linha in linhas) {
+    grupos.putIfAbsent(linha.detalhe, () => []).add(linha);
+  }
+  final List<LinhaGradeGuia> ordenado = [];
+  for (final MapEntry<String, List<LinhaGradeGuia>> entrada in grupos.entries) {
+    if (_ehSenhaNaoInformada(entrada.key)) continue;
+    ordenado.addAll(entrada.value);
+  }
+  for (final List<LinhaGradeGuia> lista in grupos.values) {
+    if (lista.isNotEmpty && _ehSenhaNaoInformada(lista.first.detalhe)) {
+      ordenado.addAll(lista);
+    }
+  }
+  return ordenado;
+}
+
+/// Categoriza UMA LINHA (detalhe) para o filtro: erros locais pelo campo, a
+/// linha da consulta pelo tipo/motivo. Nula quando não categorizável.
+TipoErroGuia? tipoErroDeLinha(LinhaGradeGuia linha) {
+  final String detalhe = linha.detalhe;
+  // Linha de consulta (falha): procura a consulta cuja descrição é o detalhe.
+  for (final ConsultaGuia consulta in linha.guia.consultas) {
+    if (!consulta.sucesso && detalhe == consulta.descricao) {
+      return _tipoDeConsulta(consulta);
+    }
+  }
+  // Linha de erro local: categoriza pelo campo do erro correspondente.
+  for (final erro in linha.guia.erros) {
+    if (erro.mensagem != detalhe) continue;
+    if (erro.campo == 'senha') return TipoErroGuia.senha;
+    if (erro.campo == 'numeroCarteira') return TipoErroGuia.carteira;
+  }
+  return null;
+}
+
+/// Classifica uma consulta que falhou: VPP → Senha; elegibilidade → Carteira
+/// (não elegível, carteira não encontrada, número inválido...).
+TipoErroGuia _tipoDeConsulta(ConsultaGuia consulta) {
+  final String descricao = consulta.descricao;
+  if (descricao.contains('autenticar') ||
+      descricao.contains('Credenciais') ||
+      descricao.contains('credenciais')) {
+    return TipoErroGuia.credenciais;
+  }
+  return consulta.tipo == TipoConsultaGuia.autorizacaoVpp
+      ? TipoErroGuia.senha
+      : TipoErroGuia.carteira;
+}
+
+/// Categoriza o problema que uma guia representa (erro local ou de consulta).
+/// Nulo quando a guia não tem problema.
+TipoErroGuia? tipoErroDe(GuiaValidada guia) {
+  for (final ConsultaGuia consulta in guia.consultas) {
+    if (!consulta.sucesso) {
+      return _tipoDeConsulta(consulta);
+    }
+  }
+  if (guia.erros.any((e) => e.campo == 'senha')) {
+    return TipoErroGuia.senha;
+  }
+  if (guia.erros.any((e) => e.campo == 'numeroCarteira')) {
+    return TipoErroGuia.carteira;
+  }
+  return null;
+}
+
+String rotuloTipoErro(TipoErroGuia tipo) => switch (tipo) {
+      TipoErroGuia.senha => AppStrings.filtroSenha,
+      TipoErroGuia.carteira => AppStrings.filtroCarteira,
+      TipoErroGuia.credenciais => AppStrings.filtroCredenciais,
+    };
+
+/// Grade das guias invalidadas: borda fina em todas as células (linha ×
+/// coluna), sem cantos arredondados, sem sombra e sem card por trás. Cada
+/// detalhe gera uma linha própria; a linha inteira é clicável (texto e
+/// ícone), fica um pouco escura no hover com cursor de clique, e abre o
+/// popup com as informações da guia (sem os motivos de erro — eles ficam
+/// nas linhas).
+class GradeGuias extends StatelessWidget {
+  const GradeGuias({super.key, required this.linhas});
+
+  final List<LinhaGradeGuia> linhas;
+
+  static const TableBorder _borda = TableBorder(
+    top: BorderSide(color: AppColors.border, width: 1),
+    bottom: BorderSide(color: AppColors.border, width: 1),
+    left: BorderSide(color: AppColors.border, width: 1),
+    right: BorderSide(color: AppColors.border, width: 1),
+    horizontalInside: BorderSide(color: AppColors.border, width: 1),
+    verticalInside: BorderSide(color: AppColors.border, width: 1),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    return Table(
+      columnWidths: const {
+        0: FixedColumnWidth(52),
+        1: FlexColumnWidth(1),
+        2: FlexColumnWidth(3),
+      },
+      defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+      border: _borda,
+      children: [
+        const TableRow(
+          children: [
+            _Celula(texto: ''),
+            _Celula(texto: AppStrings.rotuloGuia, cabecalho: true),
+            _Celula(texto: 'Detalhes', cabecalho: true),
+          ],
+        ),
+        for (final LinhaGradeGuia linha in linhas) _linha(context, linha),
+      ],
+    );
+  }
+
+  /// Linha da grade: as três células compartilham o estado de hover para a
+  /// linha inteira escurecer junta; todas respondem ao clique.
+  TableRow _linha(BuildContext context, LinhaGradeGuia linha) {
+    final ValueNotifier<bool> hover = ValueNotifier<bool>(false);
+    final GuiaValidada guia = linha.guia;
+    return TableRow(
+      children: [
+        _Celula(
+          hover: hover,
+          tap: () => _mostrarInformacoes(context, guia),
+          child: const Center(
+            child: Icon(
+              Icons.cancel,
+              size: AppDimens.itemIcone,
+              color: AppColors.error,
+            ),
+          ),
+        ),
+        _Celula(
+          hover: hover,
+          tap: () => _mostrarInformacoes(context, guia),
+          child: TextoApp.corpo(
+            guia.numeroGuiaPrestador,
+            peso: FontWeight.w700,
+            selecionavel: false,
+          ),
+        ),
+        _Celula(
+          hover: hover,
+          tap: () => _mostrarInformacoes(context, guia),
+          child: TextoApp.corpo(
+            linha.detalhe,
+            selecionavel: false,
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _mostrarInformacoes(BuildContext context, GuiaValidada guia) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        final String? nome = guia.guia.nomeBeneficiario;
+        return AlertDialog(
+          title: TextoApp.tituloMedio(
+            '${AppStrings.rotuloGuia} ${guia.numeroGuiaPrestador}',
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (nome != null && nome.isNotEmpty) ...[
+                RotuloValor(rotulo: AppStrings.rotuloBeneficiario, valor: nome),
+                const SizedBox(height: AppDimens.spaceXs),
+              ],
+              RotuloValor(
+                rotulo: AppStrings.rotuloCarteira,
+                valor: guia.numeroCarteira ?? AppStrings.valorIndisponivel,
+              ),
+              const SizedBox(height: AppDimens.spaceXs),
+              RotuloValor(
+                rotulo: AppStrings.rotuloSenha,
+                valor: guia.senha ?? AppStrings.valorIndisponivel,
+              ),
+              // Visão geral: status de CADA consulta (elegibilidade e/ou
+              // autorização), sem semântica de erro — erros ficam na grade.
+              for (final ConsultaGuia consulta in guia.consultas) ...[
+                const SizedBox(height: AppDimens.spaceMd),
+                RotuloValor(
+                  rotulo: consulta.tipo == TipoConsultaGuia.elegibilidade
+                      ? AppStrings.rotuloElegibilidade
+                      : AppStrings.rotuloSenha,
+                  valor: consulta.descricao,
+                ),
+              ],
+            ],
+          ),
+          actions: [
+            BotaoTexto(
+              rotulo: AppStrings.dialogoFechar,
+              onPressed: () => Navigator.of(ctx).pop(),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// Célula da grade: borda desenhada pelo TableBorder, padding, feedback no
+/// hover (fundo levemente escuro compartilhado com a linha), cursor de clique
+/// e toda a área (incluindo texto/ícone) clicável quando há [tap].
+class _Celula extends StatelessWidget {
+  const _Celula({
+    this.texto,
+    this.child,
+    this.tap,
+    this.hover,
+    this.cabecalho = false,
+  }) : assert(texto != null || child != null);
+
+  final String? texto;
+  final Widget? child;
+  final VoidCallback? tap;
+  final ValueNotifier<bool>? hover;
+  final bool cabecalho;
+
+  @override
+  Widget build(BuildContext context) {
+    final Widget conteudo = child ??
+        TextoApp.detalhe(
+          texto!,
+          peso: cabecalho ? FontWeight.w700 : FontWeight.w400,
+          cor: cabecalho ? AppColors.textMuted : null,
+          selecionavel: false,
+        );
+
+    if (tap == null || hover == null) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppDimens.spaceMd,
+          vertical: AppDimens.itemPaddingV,
+        ),
+        child: conteudo,
+      );
+    }
+
+    return ValueListenableBuilder<bool>(
+      valueListenable: hover!,
+      builder: (context, ativo, _) {
+        return MouseRegion(
+          cursor: SystemMouseCursors.click,
+          onEnter: (_) => hover!.value = true,
+          onExit: (_) => hover!.value = false,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: tap,
+            child: ColoredBox(
+              color: ativo ? AppColors.hoverLinha : Colors.transparent,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AppDimens.spaceMd,
+                  vertical: AppDimens.itemPaddingV,
+                ),
+                child: conteudo,
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}

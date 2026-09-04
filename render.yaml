@@ -1,0 +1,21 @@
+# Render Blueprint — API intermediária SulAmérica.
+# Referência: https://render.com/docs/blueprint-spec
+#
+# IMPORTANTE: a sessão do portal SulAmérica vive em memória (CookieJar).
+# NÃO habilite réplicas/escala horizontal. No free tier o serviço dorme
+# após ~15 min ocioso e a sessão é perdida — o front re-autentica.
+services:
+  - type: web
+    name: validador-api
+    runtime: docker
+    rootDir: backend
+    dockerfilePath: Dockerfile
+    plan: free
+    healthCheckPath: /api/status
+    envVars:
+      - key: HOST
+        value: "0.0.0.0"
+      # Restringir após definir o domínio do front:
+      # ex.: https://validador-tiss.pages.dev
+      - key: CORS_ORIGIN
+        value: "*"

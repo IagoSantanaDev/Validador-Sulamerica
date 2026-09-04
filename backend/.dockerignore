@@ -1,0 +1,7 @@
+.dart_tool/
+.pub/
+build/
+README.md
+test/
+Dockerfile
+.dockerignore
