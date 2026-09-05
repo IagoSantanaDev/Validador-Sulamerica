@@ -144,9 +144,9 @@ void main() {
         },
       );
 
-      final resultado = await servico.autorizacaoVpp(
+      final resultado = await servico.consultarSenha(
         token: 'a1b2c3d4',
-        numeroVpp: '5056654786',
+        senha: '5056654786',
       );
 
       resultado.fold(

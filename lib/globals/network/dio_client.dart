@@ -51,54 +51,6 @@ class DioClient {
     );
   }
 
-  Future<Result<T>> put<T>(
-    String caminho, {
-    Object? corpo,
-    Map<String, dynamic>? parametrosConsulta,
-    required T Function(dynamic dados) parser,
-  }) {
-    return _executar(
-      () => _dio.put(
-        caminho,
-        data: corpo,
-        queryParameters: parametrosConsulta,
-      ),
-      parser,
-    );
-  }
-
-  Future<Result<T>> patch<T>(
-    String caminho, {
-    Object? corpo,
-    Map<String, dynamic>? parametrosConsulta,
-    required T Function(dynamic dados) parser,
-  }) {
-    return _executar(
-      () => _dio.patch(
-        caminho,
-        data: corpo,
-        queryParameters: parametrosConsulta,
-      ),
-      parser,
-    );
-  }
-
-  Future<Result<T>> delete<T>(
-    String caminho, {
-    Object? corpo,
-    Map<String, dynamic>? parametrosConsulta,
-    required T Function(dynamic dados) parser,
-  }) {
-    return _executar(
-      () => _dio.delete(
-        caminho,
-        data: corpo,
-        queryParameters: parametrosConsulta,
-      ),
-      parser,
-    );
-  }
-
   Future<Result<T>> _executar<T>(
     Future<Response<dynamic>> Function() requisicao,
     T Function(dynamic dados) parser,

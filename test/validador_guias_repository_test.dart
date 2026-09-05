@@ -93,7 +93,7 @@ void main() {
       );
     });
 
-    test('marca erro quando senha excede dez caracteres', () {
+    test('marca erro quando senha não tem exatamente dez caracteres', () {
       final String xml = _xmlComSenhaValida.replaceFirst(
         '5056430843',
         '50564308431',
@@ -103,8 +103,18 @@ void main() {
       expect(resultado.single.temErro, isTrue);
       expect(
         resultado.single.erros.single.mensagem,
-        contains('no máximo 10'),
+        contains('exatamente 10'),
       );
+    });
+
+    test('valida senha com dez caracteres começando com 5', () {
+      final String xml = _xmlComSenhaValida.replaceFirst(
+        '5056430843',
+        '5234567890',
+      );
+      final resultado = repository.validarLote(xml);
+
+      expect(resultado.single.temErro, isFalse);
     });
   });
 }

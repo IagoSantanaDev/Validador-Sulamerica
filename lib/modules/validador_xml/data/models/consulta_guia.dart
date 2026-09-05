@@ -1,4 +1,4 @@
-enum TipoConsultaGuia { elegibilidade, autorizacaoVpp }
+enum TipoConsultaGuia { elegibilidade, senha }
 
 class ConsultaGuia {
   const ConsultaGuia({

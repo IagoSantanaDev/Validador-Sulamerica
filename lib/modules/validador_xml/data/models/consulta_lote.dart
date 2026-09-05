@@ -15,7 +15,7 @@ class ResultadoConsultaLote {
     required this.sucesso,
     this.elegivel,
     this.rotuloElegibilidade,
-    this.statusVpp,
+    this.statusSenha,
     this.erro,
   });
 
@@ -23,13 +23,13 @@ class ResultadoConsultaLote {
     final String tipo = json['tipo'] as String? ?? '';
     return ResultadoConsultaLote(
       chave: json['chave'] as String? ?? '',
-      tipo: tipo == 'autorizacaoVpp'
-          ? TipoConsultaGuia.autorizacaoVpp
+      tipo: tipo == 'senha'
+          ? TipoConsultaGuia.senha
           : TipoConsultaGuia.elegibilidade,
       sucesso: json['sucesso'] as bool? ?? false,
       elegivel: json['elegivel'] as bool?,
       rotuloElegibilidade: json['rotuloElegibilidade'] as String?,
-      statusVpp: json['statusVpp'] as String?,
+      statusSenha: json['statusSenha'] as String?,
       erro: json['erro'] as String?,
     );
   }
@@ -39,6 +39,6 @@ class ResultadoConsultaLote {
   final bool sucesso;
   final bool? elegivel;
   final String? rotuloElegibilidade;
-  final String? statusVpp;
+  final String? statusSenha;
   final String? erro;
 }
