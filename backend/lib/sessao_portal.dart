@@ -7,6 +7,8 @@ import 'package:dio/io.dart';
 import 'package:dio_cookie_manager/dio_cookie_manager.dart';
 import 'package:logger/logger.dart';
 
+import 'util_texto.dart';
+
 /// Motivo da falha ao autenticar no portal (para o proxy distinguir
 /// credencial inválida de bloqueio/resposta inesperada).
 enum MotivoFalhaLogin { credenciaisInvalidas, respostaInesperada, falhaRede }
@@ -27,7 +29,7 @@ class ResultadoLogin {
 }
 
 /// Cliente do portal Lumis. O login exige GET inicial na pagina (senão o F5
-/// ASM responde 403 sem o cookie NSC_*), e a VPP exige sessão (401 sem login).
+/// ASM responde 403 sem o cookie NSC_*), e a consulta de senha exige sessão (401 sem login).
 class SessaoPortal {
   SessaoPortal({
     Dio? dio,
@@ -143,8 +145,14 @@ class SessaoPortal {
   bool _autenticada = false;
   String _codigoPrestador = '100000015513';
 
+  /// Status HTTP da última falha de consulta; null quando a última consulta
+  /// foi bem-sucedida ou falhou por rede/timeout. Usado para distinguir
+  /// sessão rejeitada (401/403) de falha transitória e renovar o login.
+  static const int _statusFalhaSessao = 401;
+  int? _ultimoStatusFalha;
 
   bool get autenticada => _autenticada;
+  int? get ultimoStatusFalha => _ultimoStatusFalha;
 
   Map<String, String> get _headersNavegador => {
         'User-Agent': _userAgent,
@@ -170,6 +178,7 @@ class SessaoPortal {
     required String user,
     required String senha,
   }) async {
+    _ultimoStatusFalha = null;
     try {
       final Response<String> pagina = await _dio.get<String>(
         _urlLogin,
@@ -273,7 +282,7 @@ class SessaoPortal {
       if (!_autenticada) {
         _logger.w(
           'Login Lumis: corpo sem sessao autenticada — trecho: '
-          '${_resumirCorpo(corpo)}',
+          '${resumirTexto(corpo)}',
         );
         return const ResultadoLogin.falha(
           MotivoFalhaLogin.credenciaisInvalidas,
@@ -301,16 +310,12 @@ class SessaoPortal {
     return status != null ? '$tipo (HTTP $status): ${erro.message}' : tipo;
   }
 
-  String _resumirCorpo(String corpo) {
-    final String texto = corpo.replaceAll(RegExp(r'\s+'), ' ').trim();
-    return texto.length > 300 ? '${texto.substring(0, 300)}…' : texto;
-  }
-
 
   Future<String?> consultarBeneficiario({
     required String carteirinhaCompleta,
   }) async {
     if (!_autenticada) {
+      _ultimoStatusFalha = _statusFalhaSessao;
       _logger.e('Consulta nao enviada: sessao nao estabelecida.');
       return null;
     }
@@ -339,6 +344,7 @@ class SessaoPortal {
         final String? destino = resposta.headers.value('location');
         if (destino == null) {
           _logger.e('Consulta: 302 sem Location.');
+          _ultimoStatusFalha = resposta.statusCode;
           return null;
         }
         final Uri uri = Uri.parse(destino);
@@ -354,36 +360,44 @@ class SessaoPortal {
         );
         if (pos.statusCode != 200) {
           _logger.e('Consulta: redirect final HTTP ${pos.statusCode}.');
+          _ultimoStatusFalha = pos.statusCode;
           return null;
         }
+        _ultimoStatusFalha = null;
         return pos.data;
       }
 
       if (resposta.statusCode != 200) {
+        _ultimoStatusFalha = resposta.statusCode;
         _logger.e('Consulta de beneficiario: HTTP ${resposta.statusCode}.');
         return null;
       }
+      _ultimoStatusFalha = null;
       return resposta.data;
     } on FormatException catch (erro) {
       _logger.e('Carteirinha invalida: ${erro.message}');
+      _ultimoStatusFalha = null;
       return null;
     } on DioException catch (erro) {
       _logger.e(
         'Falha de rede na consulta de beneficiario: ${erro.message}',
       );
+      _ultimoStatusFalha = null;
       return null;
     } catch (erro) {
       _logger.e('Falha inesperada na consulta: $erro');
+      _ultimoStatusFalha = null;
       return null;
     }
   }
 
 
-  Future<Map<String, dynamic>?> consultarAutorizacaoVpp({
-    required String numeroVpp,
+  Future<Map<String, dynamic>?> consultarSenha({
+    required String senha,
   }) async {
     if (!_autenticada) {
-      _logger.e('Autorizacao nao consultada: sessao nao estabelecida.');
+      _ultimoStatusFalha = _statusFalhaSessao;
+      _logger.e('Consulta de senha nao enviada: sessao nao estabelecida.');
       return null;
     }
 
@@ -414,7 +428,7 @@ class SessaoPortal {
           'data-inicial': '',
           'data-final': '',
           'status-solicitacao': '',
-          'numero-vpp': numeroVpp,
+          'numero-vpp': senha,
           'codigo-prestador': _codigoPrestador,
           'codigo-solicitacao': '',
           'tipo-solicitacao.codigo': '',
@@ -430,7 +444,8 @@ class SessaoPortal {
       );
 
       if (resposta.statusCode != 200) {
-        _logger.e('Autorizacao VPP: HTTP ${resposta.statusCode}.');
+        _ultimoStatusFalha = resposta.statusCode;
+        _logger.e('Consulta de senha: HTTP ${resposta.statusCode}.');
         return null;
       }
 
@@ -439,15 +454,15 @@ class SessaoPortal {
       final String corpo = _decodificarCorpo(resposta.data ?? []);
       final dynamic json = jsonDecode(corpo);
       if (json is! Map<String, dynamic>) {
-        _logger.e('Autorizacao VPP: JSON inesperado no corpo.');
+        _logger.e('Consulta de senha: JSON inesperado no corpo.');
         return null;
       }
       return json;
     } on DioException catch (erro) {
-      _logger.e('Falha de rede na autorizacao VPP: ${erro.message}');
+      _logger.e('Falha de rede na consulta de senha: ${erro.message}');
       return null;
     } catch (erro) {
-      _logger.e('Falha inesperada na autorizacao VPP: $erro');
+      _logger.e('Falha inesperada na consulta de senha: $erro');
       return null;
     }
   }
@@ -480,5 +495,11 @@ class SessaoPortal {
       inicio += tamanho;
     }
     return partes;
+  }
+
+  /// Libera as conexões HTTP desta sessão (usada para sessões extras
+  /// descartáveis após o lote; a sessão base permanece para o cliente).
+  Future<void> encerrar() async {
+    _dio.close();
   }
 }

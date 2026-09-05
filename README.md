@@ -1,132 +1,170 @@
-# Validador de Guias TISS — SulAmérica
+# Validador SulAmerica
 
-Projeto Flutter Web para validar previamente um lote de guias TISS
-(`guiaSP-SADT`) antes do envio à SulAmérica. Nesta fase, a interface e o
-motor de regras estão prontos; a integração real com o portal passa por uma
-**API intermediária** em `backend/` (contorna CORS e mantém a sessão do
-portal no servidor).
+Validador de arquivos XML no padrão TISS da ANS para pré-validar lotes de guias antes do envio à SulAmérica. O app lê o lote, aplica regras de negócio por guia e consulta o portal da operadora para conferir elegibilidade e autorização em tempo real.
 
-## Como rodar
+O projeto tem duas partes:
+
+- **Frontend**: app Flutter Web que recebe o XML por drag and drop e mostra o resultado da validação.
+- **Backend**: API intermediária em Dart (shelf) que fala com o portal SulAmérica em nome do app.
+
+## Por que uma API intermediária
+
+O portal da SulAmérica não pode ser chamado diretamente do navegador. Dois bloqueios:
+
+1. O portal não envia `Access-Control-Allow-Origin`, então o navegador não consegue ler as respostas (CORS).
+2. Os cookies de sessão do portal (JSESSIONID, lum*, NSC do F5) são `SameSite=Strict` e `HttpOnly`, então não trafegam entre origens.
+
+A API intermediária resolve os dois: ela mantém a sessão do portal em memória (CookieJar no servidor) e expõe rotas JSON para o app. Chamadas de portal nunca partem do navegador.
+
+```
+Navegador (Flutter Web)
+   |
+   | HTTPS para a nossa API
+   v
+API intermediária (Dart, shelf)
+   |
+   | GET inicial + POST, cookies do portal em memória
+   v
+Portal SulAmérica (saude.sulamericaseguros.com.br)
+```
+
+Um detalhe operacional validado: o login no portal precisa começar com um GET na página para semear os cookies JSESSIONID e NSC_*; um POST direto devolve 403 do F5 ASM. O `SessaoPortal.login()` faz isso automaticamente.
+
+## Estrutura do repositório
+
+```
+.
+├── backend/                  API intermediária (Dart + shelf)
+│   ├── bin/server.dart       entrada, roteamento, limites (lote, rate limit)
+│   ├── lib/                  rotas, sessão do portal, parser de elegibilidade
+│   └── test/
+├── lib/                      app Flutter Web
+│   ├── globals/              network (dio), temas, widgets, constantes
+│   └── modules/validador_xml/
+│       ├── data/             parsing do XML, regras, serviços, modelos
+│       └── presentation/     página, controller e widgets
+├── test/                     testes do app
+├── web/                      index.html do Flutter Web
+├── render.yaml               blueprint do Render (backend)
+└── pubspec.yaml
+```
+
+## Como funciona a validação
+
+1. O site abre e verifica a API (`/api/status`) e autentica no portal com as credenciais definidas no build. Enquanto isso não acontece, a página mostra o motivo exato: API fora do ar, credenciais ausentes ou credenciais inválidas.
+2. Você arrasta um arquivo `.xml` de lote TISS para a área de upload. O app calcula o hash MD5 e extrai os metadados do lote.
+3. A validação local roda as regras por guia.
+4. As guias com dados bem formados são consultadas no portal, em lote: elegibilidade pela carteira e status da autorização pela senha.
+5. O resultado lista as guias com problema, cada uma com suas validações, filtros por tipo de erro e o tempo de processamento.
+
+Metadados exibidos no resultado: nome e tamanho do arquivo, versão do padrão TISS (lida de `ans:Padrao`), tipo de transação, hash MD5, prestador, registro ANS, número do lote, quantidade de guias e valor total informado (soma dos `valorTotalGeral` do XML).
+
+### Regras de validação local
+
+| Regra | Critério | Falha exibida |
+|---|---|---|
+| Senha obrigatória | a guia precisa ter `<senha>` | "Senha não informada" |
+| Prefixo da senha | a senha começa com 5 | "senha deve começar com 5" |
+| Comprimento da senha | exatamente 10 caracteres | "senha deve ter exatamente 10 caracteres" |
+| Carteira (antes da consulta) | 20 dígitos, segmentos 3-5-4-4-4 | "Número da carteira inválido" |
+| Senha (antes da consulta) | 10 dígitos começando com 5 | "Senha inválida" |
+
+### Consultas ao portal
+
+Depois da validação local, cada guia com dados válidos é consultada. Carteira e senha só geram chamada quando passam na verificação de formato; senão viram erro local sem tocar o portal.
+
+- **Elegibilidade (carteira)**: devolve SIM ou NÃO. NÃO vira "Beneficiário não elegível"; quando o portal não renderiza o resultado, "Carteira não encontrada no portal".
+- **Autorização (senha)**: devolve a descrição do status da solicitação. Descrição com "autorizado" é sucesso; sem status, "Senha não encontrada no portal"; nos demais casos a descrição do portal é exibida.
+
+As consultas vão todas para `/api/consultas` em uma única chamada HTTP. O backend distribui o trabalho em até 10 sessões do portal (carteiras em série por sessão, senhas com até 3 simultâneas por sessão), preserva a ordem do lote e recupera falhas: sessão rejeitada (401/403) renova o login, falha transitória repete após pausa curta. O app guarda um fallback para chamadas individuais, usado apenas se o backend for um deploy antigo sem `/api/consultas`.
+
+## Como rodar localmente
+
+Pré-requisitos: Flutter 3.19+ e Dart 3.3+.
+
+### Backend
 
 ```bash
-flutter create . --platforms web --org com.sulamerica --project-name validador_xml_sulamerica
+cd backend
+dart pub get
+dart run bin/server.dart
+```
 
+O servidor escuta em `0.0.0.0:8080`. Variáveis de ambiente opcionais: `PORT` (padrão 8080), `HOST` (padrão 0.0.0.0) e `CORS_ORIGIN` (padrão `*`).
+
+### Frontend
+
+```bash
 flutter pub get
-flutter test
-flutter run -d chrome
+flutter run -d chrome --dart-define=API_URL=http://localhost:8080
 ```
 
-## Sistema de requisições HTTP (Dio)
+Com `API_URL` apontando para o backend local e credenciais do portal definidas, o site autentica e libera a validação.
 
-Infraestrutura genérica em `lib/globals/network/`, pronta para qualquer
-datasource futuro (inclusive a integração real com a SulAmérica):
+## Variáveis de build do frontend
 
-- `DioClient` — cliente único com baseUrl/timeouts centralizados,
-  interceptors e métodos `get/post/put/patch/delete` que retornam
-  `Result<T>` em vez de lançar exceção ou devolver `null`.
-- `Result<T>` (`Success`/`Failure`) — Result pattern; use `.fold(...)`
-  para tratar sucesso e erro.
-- `AppException` — hierarquia de erro específica por causa
-  (`SemConexaoException`, `RequisicaoExpiradaException`,
-  `NaoAutorizadoException`, `RecursoNaoEncontradoException`,
-  `ErroServidorException`, `ErroDesconhecidoException`), já mapeada a
-  partir de `DioException` — datasources nunca lidam com Dio diretamente.
-- `LoggingInterceptor` — loga apenas método/URL/status, nunca headers de
-  autenticação nem corpo da requisição/resposta.
-- `globals/service_locator.dart` — registra apenas `DioClient` no GetIt
-  (`configurarDependenciasGlobais`), pois o container global não deve
-  conhecer regra de negócio de módulo específico.
-- `modules/validador_xml/data/services/validador_xml_service_locator.dart`
-  — registra o `SulAmericaService` do módulo (`configurarDependenciasValidadorXml`).
-  Ambos os registros são chamados em `main()` antes do `runApp`.
+Definidas em tempo de build com `--dart-define`. Sem credenciais, o app não libera a validação: a página de conexão explica o que falta.
 
-Exemplo de uso em um datasource futuro:
+| Variável | Descrição |
+|---|---|
+| `API_URL` | URL da API intermediária. Padrão `http://localhost:8080` |
+| `PORTAL_CODE` | Código do prestador no portal SulAmérica |
+| `PORTAL_USER` | Usuário do prestador |
+| `PORTAL_SENHA` | Senha do prestador |
 
-```dart
-final resultado = await getIt<DioClient>().post<GuiaEnviada>(
-  '/guias/lote',
-  corpo: lotePayload,
-  parser: (dados) => GuiaEnviada.fromJson(dados),
-);
+## Deploy
 
-resultado.fold(
-  onSuccess: (guia) => ...,
-  onFailure: (erro) => ...,
-);
+### Backend (Render)
+
+O repo tem um blueprint (`render.yaml`) que cria o serviço `validador-api` a partir do `backend/Dockerfile`, no free tier. O serviço precisa rodar com instância única: a sessão do portal vive em memória, então réplicas quebrariam a autenticação. No free tier o Render dorme após cerca de 15 minutos ocioso e a sessão se perde; o front re-autentica na próxima visita.
+
+Para criar: no dashboard do Render, New +, Blueprint, e selecione o repositório. A URL fica em `https://validador-api.onrender.com` (ajuste o `CORS_ORIGIN` para o domínio do front em produção).
+
+### Frontend (Cloudflare Pages)
+
+```bash
+flutter build web --release \
+  --dart-define=API_URL=https://validador-api.onrender.com \
+  --dart-define=PORTAL_CODE=SEU_CODE \
+  --dart-define=PORTAL_USER=SEU_USER \
+  --dart-define=PORTAL_SENHA=SEU_SENHA
+
+npx wrangler pages deploy build/web --project-name validador-tiss
 ```
 
-Coberto por teste (`test/dio_client_test.dart`) usando um
-`HttpClientAdapter` falso — sem chamada de rede real.
+## Endpoints da API
 
-## Estrutura
+| Método | Rota | Corpo / Query | Descrição |
+|---|---|---|---|
+| POST | `/api/login` | `{code, user, senha}` | Autentica no portal e devolve `{token}` |
+| POST | `/api/beneficiario` | `{token, carteira}` | Elegibilidade de uma carteira |
+| GET | `/api/autorizacao` | `?token=&senha=` | Status da autorização pela senha |
+| POST | `/api/consultas` | `{token, consultas: [{tipo, chave}]}` | Consultas em lote, resultados na ordem da requisição |
+| GET | `/api/status` | nenhum | Health check, sessões ativas e alcance do portal |
 
+Limites do backend, para não abusar do proxy: 300 itens por lote, corpo de até 1 MB, rate limit de 40 requisições por minuto por IP nas rotas que tocam o portal e no máximo 10 sessões ativas (a mais antiga sai quando o limite é atingido).
+
+## Testes
+
+```bash
+flutter test        # app (raiz)
+flutter analyze
+
+dart test           # backend
+dart analyze        # dentro de backend/
 ```
-lib/
-  globals/                 # cores, dimensões, strings, tema e network compartilhados
-  modules/validador_xml/
-    data/
-      models/               # GuiaTiss, ErroValidacao, GuiaValidada
-      datasources/          # parsing do XML (xml package), sem regra de negócio
-      repositories/
-        regras/             # uma classe por regra (RegraValidacao), fácil de estender
-    presentation/
-      controllers/          # ValidadorController (ChangeNotifier / Provider)
-      pages/                # ValidadorPage
-      widgets/              # DropZoneWidget, ResultadoListaWidget, ErroGuiaCard
-```
 
-## Regras implementadas
+## Segurança
 
-- **senha obrigatória, deve começar com `5` e ter no máximo 10 caracteres** —
-  `RegraSenhaPrefixo`. Ausência, prefixo inválido e tamanho excedido geram
-  erros distintos.
-- A autorização VPP pode ser consultada antes do login por
-  `SulAmericaService.verificarSolicitacaoAutorizada`. A solicitação só é
-  considerada autorizada quando `status_solicitacao.descricao` é `Autorizado`.
-- Quando a senha não estiver disponível para a consulta ao beneficiário, o
-  `numeroCarteira` continua sendo o valor alternativo.
-- A carteirinha usada em `consultarBeneficiario` é dividida em segmentos de
-  tamanho fixo (3-5-4-4-4 dígitos), não em cinco partes iguais — os
-  segmentos têm tamanhos diferentes no número real (ex.: 582/01824/0043/
-  8430/0010).
-- Login e consulta postam para a `lumFormAction` de cada formulário
-  (`saude.sulamericaseguros.com.br/main.jsp?lumPageId=...`), nunca para o
-  domínio raiz — postar na raiz gera `ERR_CERT_COMMON_NAME_INVALID`.
+- A senha do prestador nunca é logada; é usada só no login e as credenciais ficam retidas em memória, por token, para abrir sessões extras. Saem junto com a sessão.
+- Tokens de sessão são gerados com `Random.secure()` e mantidos em memória.
+- Os logs registram método, rota e status, nunca corpo nem credenciais.
+- O backend usa `Random.secure()`, valida formatos de carteira e senha no servidor e mascara chaves em logs (ex.: `5820...10`).
 
-Para adicionar uma nova regra: crie uma classe em
-`data/repositories/regras/` implementando `RegraValidacao` e adicione-a à
-lista padrão em `ValidadorGuiasRepositoryImpl` — nenhuma regra existente
-precisa mudar.
+Uma observação honesta: as credenciais do portal vão embutidas no bundle do front (são `--dart-define`). Quem baixar o site consegue lê-las. Isso é um risco assumido; em produção, vale restrigir `CORS_ORIGIN` e limitar a rede de acesso à API, além de usar um usuário de prestador com privilégios mínimos.
 
-## Exibição dos resultados
+## Limitações conhecidas
 
-Cada ocorrência de `guiaSP-SADT` vira uma linha própria (nunca é mesclada
-com outra). Linhas com o mesmo `numeroGuiaPrestador` são reordenadas para
-ficarem sequenciais e recebem uma cor de fundo alternada, formando uma
-sequência visual sem juntar tudo em uma única linha. Há um filtro
-"Mostrar somente erros" e um resumo com total de guias e total com erro.
-
-## Backend intermediário (proxy para o portal)
-
-A integração real (login, consulta de beneficiário e autorização VPP) **não
-pode ser feita direto do navegador**: validamos empiricamente que o portal não
-envia `Access-Control-Allow-Origin` (CORS bloqueia a leitura) e que os cookies
-de sessão são `SameSite=Strict`/`HttpOnly` (não trafegam cross-site). Além
-disso, o endpoint `ajax-controller.jsp` de autorização VPP exige sessão
-autenticada (sem login, responde 401).
-
-A solução fica em `backend/` (Dart + shelf + dio/cookie_jar):
-`POST /api/login`, `POST /api/beneficiario`, `GET /api/autorizacao?numeroVpp=`.
-Veja `backend/README.md` para execução, variáveis de ambiente e detalhes.
-
-Descobertas que afetam qualquer cliente HTTP (inclusive o `SulAmericaService`
-do app — ainda precisa de ajustes):
-
-- **GET inicial obrigatório**: o POST de login direto (sem visitar a página
-  antes) retorna **403** — o F5 ASM exige o cookie `NSC_*` semeado no GET;
-  o GET sem headers de navegador (`Accept`, `Accept-Language`,
-  `Upgrade-Insecure-Requests`) também é barrado (500).
-- **302 pós-submit**: o login autentica com 302 → `/prestador/`; a consulta
-  de beneficiário responde 302 → `elegibilidade-resultado.htm`. O redirect
-  precisa ser seguido via GET (com a sessão) para obter a página final.
-- O `backend/` já implementa GET inicial + follow de redirect nas duas rotas
+- A sessão do portal vive em memória no backend: sem réplicas, e o cold start do free tier do Render perde a sessão (o front re-autentica).
+- O app exige API acessível e login válido para validar; não há modo local sem conexão.
+- O parsing cobre guias `guiaSP-SADT`; outros tipos de guia TISS não são lidos.

@@ -1,97 +1,133 @@
-# API intermediária — Validador de Guias TISS SulAmérica
+# API intermediária do Validador SulAmerica
 
-Proxy entre o app Flutter Web e o portal da SulAmérica (Lumis DOUI).
-Resolve os dois bloqueios validados empiricamente:
+Backend do Validador SulAmerica: proxy em Dart (shelf) entre o app Flutter Web e o portal da SulAmérica (Lumis DOUI). O app nunca chama o portal direto; toda login, consulta de elegibilidade e consulta de autorização passa por aqui.
 
-1. **CORS** — o portal não envia `Access-Control-Allow-Origin`; o navegador
-   não consegue ler as respostas (login/consulta/autorização).
-2. **Sessão cross-site** — os cookies do portal são `SameSite=Strict` +
-   `HttpOnly` (JSESSIONID, lum*, NSC do F5); o navegador num app externo não
-   os envia nem os recebe.
+O código vive em `backend/`, separado do app. A sessão do portal é mantida no servidor (CookieJar em memória), nunca no navegador.
 
-A sessão do portal vive aqui (CookieJar em memória), nunca no navegador.
+## Por que o proxy existe
 
-> Requisito operacional (validado): o login **precisa** começar com um `GET`
-> na página de login para semear `JSESSIONID`/`NSC_*` — um `POST` direto
-> retorna 403 do F5 ASM. O `SessaoPortal.login()` faz isso automaticamente.
+Dois bloqueios impedem chamada direta do navegador ao portal:
+
+1. O portal não envia `Access-Control-Allow-Origin`, então o navegador não lê as respostas (CORS).
+2. Os cookies de sessão (JSESSIONID, lum*, NSC_* do F5) são `SameSite=Strict` e `HttpOnly`, então não trafegam entre origens.
+
+A API resolve os dois: mantém a sessão do portal no servidor e expõe JSON para o app.
 
 ## Como rodar
+
+Pré-requisito: Dart 3.3+.
 
 ```bash
 cd backend
 dart pub get
-dart run bin/server.dart          # escuta em 0.0.0.0:8080
+dart run bin/server.dart
 ```
 
-Variáveis de ambiente (opcionais):
+O servidor escuta em `0.0.0.0:8080`.
+
+Variáveis de ambiente opcionais:
 
 | Variável | Padrão | Descrição |
 |---|---|---|
 | `PORT` | `8080` | Porta HTTP |
 | `HOST` | `0.0.0.0` | Interface de escuta |
-| `CORS_ORIGIN` | `*` | Origem permitida (ex.: `https://validador-tiss.pages.dev`) — lida em runtime, serve via `railway variables set` |
+| `CORS_ORIGIN` | `*` | Origem permitida (ex.: `https://validador-tiss.pages.dev`) |
 
-## Deploy (Render free tier)
+`CORS_ORIGIN` é lida em runtime, então dá para ajustar sem recompilar.
 
-O backend é empacotado como container (`render.yaml` na raiz do repo +
-`backend/Dockerfile`) com **instância única** — a sessão do portal SulAmérica
-vive em memória, então não habilite réplicas/escala horizontal (quebrariam a
-sessão). No free tier o serviço **dorme após ~15 min ocioso** e acorda na
-próxima requisição (cold start de alguns segundos); ao dormir, a sessão do
-portal é perdida e o front re-autentica.
+## Como o backend fala com o portal
 
-### Deploy (primeira vez)
+Os detalhes abaixo foram validados contra o portal em produção e precisam continuar assim.
 
-1. Suba o repo num repositório Git remoto (GitHub/GitLab).
-2. No dashboard do Render: **New + → Blueprint** → selecione o repo.
-   O `render.yaml` na raiz cria o serviço `validador-api`.
-3. Pronto: URL `https://validador-api.onrender.com`.
-
-Ajustes posteriores (dashboard → service → Settings):
-
-- **CORS_ORIGIN**: trocar `*` pelo domínio do front (`https://validador-tiss.pages.dev`).
-- **Mudanças no código**: push no git dispara redeploy automático.
-
-Frontend:
-
-```bash
-flutter build web --release --dart-define=API_URL=https://validador-api.onrender.com
-npx wrangler pages deploy build/web --project-name validador-tiss
-```
-
-Custo: free tier (750h/mês, 0.5 GB RAM, 1 shared vCPU, sem cartão). Como o
-serviço dorme quando ocioso, fica bem abaixo das 750h — grátis.
+- O login começa com um GET na página para semear JSESSIONID e NSC_*; um POST direto devolve 403 do F5 ASM. O GET usa headers de navegador (User-Agent, Accept, Accept-Language, Upgrade-Insecure-Requests); sem eles o portal devolve 500.
+- Login aceito responde 302 para `/prestador/`. O backend segue o redirect via GET com a sessão e confirma a página autenticada (procura por "logout" no corpo) antes de marcar a sessão como válida.
+- A consulta de beneficiário também redireciona (302 para `elegibilidade-resultado.htm`); o backend segue o redirect e devolve o HTML final.
+- A consulta de autorização é um GET em `ajax-controller.jsp` com `metodo=autorizador-pesquisar-solicitacoes` e o campo `numero-vpp` (a senha de 10 dígitos do beneficiário). O portal devolve `text/plain` em ISO-8859-1; o backend tenta UTF-8 e cai para Latin-1. Esse endpoint exige sessão autenticada (401 sem login).
+- A carteirinha é enviada nos segmentos originais 3-5-4-4-4 (campos `codigo-beneficiario-1` a `codigo-beneficiario-5`), não dividida em partes iguais.
+- O certificado TLS do portal tem cadeia com self-signed que a CA pública dos containers rejeita. O backend aceita a cadeia somente para o host `saude.sulamericaseguros.com.br`; qualquer outro host mantém a verificação padrão.
 
 ## Endpoints
 
 | Método | Rota | Corpo / Query | Descrição |
 |---|---|---|---|
-| `POST` | `/api/login` | `{code, user, senha}` | Autentica no portal e devolve `{token}` |
-| `POST` | `/api/beneficiario` | `{token, carteira}` | Consulta o beneficiário; devolve `{status, elegivel, rotuloElegibilidade, html}` |
-| `GET` | `/api/autorizacao` | `?token=&numeroVpp=` | Consulta a autorização VPP; devolve o JSON do portal |
-| `GET` | `/api/status` | — | Health check (número de sessões ativas) |
+| POST | `/api/login` | `{code, user, senha}` | Autentica no portal e devolve `{token}` |
+| POST | `/api/beneficiario` | `{token, carteira}` | Elegibilidade de uma carteira; devolve `{status, elegivel, rotuloElegibilidade}` |
+| GET | `/api/autorizacao` | `?token=&senha=` | Status da autorização pela senha; devolve `{status, encontrada, descricao}` |
+| POST | `/api/consultas` | `{token, consultas: [{tipo, chave}]}` | Consultas em lote; devolve `{status, resultados}` na ordem da requisição |
+| GET | `/api/status` | nenhum | Health check: sessões ativas e teste de alcance do portal |
 
-Regras de negócio aplicadas no proxy (espelhando o app):
+Qualquer outra rota devolve 404.
 
-- a **carteirinha** é dividida nos segmentos fixos **3-5-4-4-4** dígitos
-  (ex.: `58201824004384300010` → 582/01824/0043/8430/0010);
-- **VPP** (`ajax-controller.jsp`) exige sessão autenticada — sem login o
-  portal responde 401;
-- a autorização só é válida quando algum registro tem
-  `status_solicitacao.descricao == "Autorizado"`;
-- **elegibilidade** é extraída do `elegibilidade-resultado.htm` (o POST da
-  consulta redireciona para essa página): o valor está no bloco
-  `div.box-indicador-elegibilidade`, em
-  `<strong>Elegível:</strong> <span class="atencao">SIM|NÃO</span>`.
-  `elegivel: true|false` quando há resultado; `null` quando o portal volta
-  para a página de identificação (carteira não encontrada).
+Regras de negócio aplicadas no servidor, espelhando o app:
+
+- Carteira precisa ter exatamente 20 dígitos.
+- Senha precisa ter exatamente 10 dígitos e começar com 5.
+- Elegibilidade é lida da página de resultado (`elegivel` `true` ou `false`); `null` quando o portal volta para a página de identificação, o que acontece quando a carteira não é encontrada.
+- A resposta de `/api/autorizacao` traz só a descrição do status (ex.: "Autorizado", "Negado") ou `descricao: null` quando não há registro. O backend não repassa o JSON cru do portal.
+- O app considera a senha autorizada quando a descrição contém "autorizado".
+
+### Exemplos
+
+```bash
+curl http://localhost:8080/api/status
+
+curl -X POST http://localhost:8080/api/login \
+  -H 'Content-Type: application/json' \
+  -d '{"code":"123","user":"alguem","senha":"segredo"}'
+```
+
+## Consultas em lote
+
+`/api/consultas` recebe todas as solicitações de um arquivo em uma única chamada HTTP e devolve os resultados na ordem da requisição. Cada item é `{tipo: "elegibilidade"|"senha", chave: <carteira ou senha>}`.
+
+Execução contra o portal:
+
+- Elegibilidade roda em série por sessão, porque o form do portal tem estado.
+- Consultas de senha rodam em paralelo, até 3 por sessão.
+- Lotes com 10 ou mais elegibilidades abrem sessões extras (logins paralelos) até o teto de 10 sessões; as extras são encerradas ao final do lote.
+- Recuperação de falha: sessão rejeitada (401/403) renova o login e repete a consulta uma vez; falha transitória de rede aguarda 500 ms e repete.
+- Falhas de formato (carteira ou senha inválida) viram erro no próprio item, sem tocar o portal.
+
+## Limites e proteções
+
+| Limite | Valor | Resposta |
+|---|---|---|
+| Itens por lote | 300 | 413 |
+| Tamanho do corpo | 1 MB | 413 |
+| Rate limit por IP nas rotas do portal | 40 por minuto | 429 |
+| Lotes simultâneos | 1 | 429 |
+| Sessões ativas | 10 (a mais antiga é descartada) | nova sessão substitui a antiga |
+
+Tokens de sessão são gerados com `Random.secure()`. Sem credenciais válidas, o backend nega o login com 401 e mensagem com o motivo (credencial, rede ou resposta inesperada do portal).
 
 ## Segurança
 
-- Senha **nunca** é armazenada nem logada; é usada apenas na chamada do
-  login e descartada.
-- Tokens de sessão são gerados com `Random.secure()` (32 hex) e mantidos em
-  memória (limite de 10 sessões ativas).
-- Log só registra método/rota/status — nunca corpo nem credenciais.
-- Para produção: rode atrás de TLS e restrinja `CORS_ORIGIN` e a rede de
-  acesso à API.
+- A senha do prestador nunca é logada e não persiste; as credenciais ficam retidas em memória por token, apenas para abrir sessões extras, e saem junto com a sessão.
+- Logs registram método, rota e status, nunca corpo nem credenciais. Chaves (carteira/senha) aparecem mascaradas, ex.: `5820...10`.
+- Em produção: rodar atrás de TLS e restringir `CORS_ORIGIN` e a rede de acesso à API.
+
+## Deploy (Render free tier)
+
+O repo tem um blueprint (`render.yaml` na raiz) que cria o serviço `validador-api` a partir do `backend/Dockerfile` (multi-stage: compila binário nativo e roda em uma imagem mínima Debian).
+
+Pontos que precisam continuar como estão:
+
+- Instância única. A sessão do portal vive em memória; réplicas quebrariam a autenticação.
+- No free tier o Render dorme após cerca de 15 minutos ocioso. O cold start leva alguns segundos e a sessão do portal se perde; o front re-autentica na próxima consulta.
+- `CORS_ORIGIN` precisa apontar para o domínio do front em produção.
+- Push no git dispara redeploy automático.
+
+Para o front, o build aponta para a URL do serviço:
+
+```bash
+flutter build web --release --dart-define=API_URL=https://validador-api.onrender.com
+```
+
+## Testes
+
+```bash
+dart test
+dart analyze
+```
+
+Os testes cobrem o parser de elegibilidade, a classificação de falhas de sessão (401/403 vs. transitórias) e o resumo de texto dos logs.

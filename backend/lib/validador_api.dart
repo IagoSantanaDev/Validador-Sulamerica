@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:logger/logger.dart';
 import 'package:shelf/shelf.dart';
@@ -8,6 +9,7 @@ import 'package:shelf_router/shelf_router.dart';
 
 import 'elegibilidade_parser.dart';
 import 'sessao_portal.dart';
+import 'util_texto.dart';
 
 class ValidadorApi {
   ValidadorApi({Logger? logger}) : _logger = logger ?? Logger();
@@ -18,21 +20,42 @@ class ValidadorApi {
   final Random _aleatorio = Random.secure();
   static const int _limiteSessoes = 10;
 
+  bool _loteEmAndamento = false;
+
+  /// Teto de itens por lote e de bytes de corpo (proteção contra abuso do
+  /// proxy aberto — cada item gera chamada real ao portal SulAmerica).
+  static const int _maxItensPorLote = 300;
+  static const int _maxBytesCorpo = 1 << 20; // 1 MB
+
+  /// Rate limit por IP nas rotas que tocam o portal (evita varredura e
+  /// bloqueio do F5 ASM em uso concorrente).
+  static const Set<String> _rotasDePortal = {
+    'api/login',
+    'api/beneficiario',
+    'api/autorizacao',
+    'api/consultas',
+  };
+  static const int _maxRateLimitPorJanela = 40;
+  static const Duration _janelaRateLimit = Duration(minutes: 1);
+
   late final Router _rotas = Router()
     ..post('/api/login', _login)
     ..post('/api/beneficiario', _beneficiario)
-    ..get('/api/autorizacao', _autorizacao)
+    ..get('/api/autorizacao', _senha)
     ..post('/api/consultas', _consultas)
     ..get('/api/status', _status)
     ..all('/<ignored|.*>', _naoEncontrado);
 
   Handler get handler => const Pipeline()
       .addMiddleware(ValidadorApi._cors())
+      .addMiddleware(ValidadorApi._rateLimitPortal())
       .addHandler(_rotas.call);
 
 
   Future<Response> _login(Request request) async {
-    final Map<String, dynamic>? corpo = await _lerJson(request);
+    final _LeituraJson leitura = await _lerJson(request);
+    if (leitura.excedeLimite) return _erroCorpoGrande();
+    final Map<String, dynamic>? corpo = leitura.valor;
     if (corpo == null) {
       return _erro('Corpo JSON invalido.', 400);
     }
@@ -84,7 +107,9 @@ class ValidadorApi {
   }
 
   Future<Response> _beneficiario(Request request) async {
-    final Map<String, dynamic>? corpo = await _lerJson(request);
+    final _LeituraJson leitura = await _lerJson(request);
+    if (leitura.excedeLimite) return _erroCorpoGrande();
+    final Map<String, dynamic>? corpo = leitura.valor;
     if (corpo == null) {
       return _erro('Corpo JSON invalido.', 400);
     }
@@ -98,7 +123,7 @@ class ValidadorApi {
     if (carteira == null || carteira.isEmpty) {
       return _erro('Campo carteira e obrigatorio.', 400);
     }
-    if (carteira.length != 20 || !RegExp(r'^\d+$').hasMatch(carteira)) {
+    if (!_carteiraValida(carteira)) {
       return _erro(
         'Carteira deve conter exatamente 20 digitos '
         '(segmentos 3-5-4-4-4).',
@@ -124,27 +149,33 @@ class ValidadorApi {
     });
   }
 
-  Future<Response> _autorizacao(Request request) async {
+  Future<Response> _senha(Request request) async {
     final String? token = request.url.queryParameters['token'];
-    final String? numeroVpp = request.url.queryParameters['numeroVpp'];
+    final String? senha = request.url.queryParameters['senha'];
     final SessaoPortal? sessao = token == null ? null : _sessoes[token];
 
     if (sessao == null) {
       return _erro('Token de sessao invalido ou ausente.', 401);
     }
-    if (numeroVpp == null || numeroVpp.isEmpty) {
-      return _erro('Parametro numeroVpp e obrigatorio.', 400);
+    if (senha == null || senha.isEmpty) {
+      return _erro('Parametro senha e obrigatorio.', 400);
+    }
+    if (!_senhaValida(senha)) {
+      return _erro(
+        'Senha invalida: deve ter exatamente 10 digitos comecando com 5.',
+        400,
+      );
     }
 
     final Map<String, dynamic>? dados = await sessao
-        .consultarAutorizacaoVpp(numeroVpp: numeroVpp);
+        .consultarSenha(senha: senha);
     if (dados == null) {
-      return _erro('Falha na consulta de autorizacao VPP.', 502);
+      return _erro('Falha na consulta ao portal SulAmerica.', 502);
     }
 
     // Resposta compacta: o cliente só precisa saber se há autorização e a
     // descricao do status — o JSON cru do portal não é devolvido.
-    final String? descricao = _extrairStatusVpp(dados);
+    final String? descricao = _extrairStatusSenha(dados);
     return _json({
       'status': 'ok',
       'encontrada': descricao != null,
@@ -156,7 +187,9 @@ class ValidadorApi {
   /// executa contra o portal com paralelismo controlado, devolvendo cada
   /// resultado na ordem da requisição — o cliente faz uma única chamada HTTP.
   Future<Response> _consultas(Request request) async {
-    final Map<String, dynamic>? corpo = await _lerJson(request);
+    final _LeituraJson leitura = await _lerJson(request);
+    if (leitura.excedeLimite) return _erroCorpoGrande();
+    final Map<String, dynamic>? corpo = leitura.valor;
     if (corpo == null) return _erro('Corpo JSON invalido.', 400);
 
     final SessaoPortal? sessao = _sessaoPorCorpo(corpo);
@@ -169,12 +202,27 @@ class ValidadorApi {
     if (consultas is! List || consultas.isEmpty) {
       return _erro('Campo consultas e obrigatorio.', 400);
     }
+    if (consultas.length > _maxItensPorLote) {
+      return _erro(
+        'Lote excede o limite de $_maxItensPorLote itens por requisicao.',
+        413,
+      );
+    }
+    if (_loteEmAndamento) {
+      return _erro('Ja existe um lote em andamento. Aguarde.', 429);
+    }
 
-    final List<Map<String, dynamic>> resultados = await _executarConsultas(
-      sessaoBase: sessao,
-      credenciais: token == null ? null : _credenciaisPorToken[token],
-      consultas: consultas,
-    );
+    _loteEmAndamento = true;
+    List<Map<String, dynamic>> resultados;
+    try {
+      resultados = await _executarConsultas(
+        sessaoBase: sessao,
+        credenciais: token == null ? null : _credenciaisPorToken[token],
+        consultas: consultas,
+      );
+    } finally {
+      _loteEmAndamento = false;
+    }
 
     // Reordena para a ordem da requisição original.
     final Map<String, Map<String, dynamic>> porChave = {
@@ -197,14 +245,14 @@ class ValidadorApi {
   /// A partir deste volume de elegibilidades vale criar sessões extras.
   static const int _minElegibilidadeParaMultiplasSessoes = 10;
 
-  /// Teto de consultas VPP simultâneas POR SESSÃO (GET sem estado de form,
-  /// leve). Distribuir também os VPPs entre as sessões evita concentrar os
-  /// 100 VPPs na sessão base.
-  static const int _limiteVppPorSessao = 3;
+  /// Teto de consultas de senha simultâneas POR SESSÃO (GET leve, sem estado
+  /// de form); distribuí-las entre as sessões evita concentrar as consultas
+  /// na sessão base.
+  static const int _limiteSenhaPorSessao = 3;
 
   /// Executa as consultas: elegibilidade é sempre serial POR SESSÃO (o form
   /// do portal tem estado); com muitas carteiras abre sessões extras (logins
-  /// em paralelo) e divide elegibilidade e VPPs entre todas as sessões.
+  /// em paralelo) e divide elegibilidade e consultas de senha entre todas as sessões.
   Future<List<Map<String, dynamic>>> _executarConsultas({
     required SessaoPortal sessaoBase,
     required _CredenciaisPortal? credenciais,
@@ -214,12 +262,11 @@ class ValidadorApi {
       for (final dynamic c in consultas)
         if ((c as Map)['tipo'] == 'elegibilidade') c,
     ];
-    final List<dynamic> vpps = [
+    final List<dynamic> senhas = [
       for (final dynamic c in consultas)
         if ((c as Map)['tipo'] != 'elegibilidade') c,
     ];
 
-    // Reúne as sessões (base + extras autenticadas) com logins EM PARALELO.
     final List<SessaoPortal> sessoes = [sessaoBase];
     if (credenciais != null &&
         elegibilidades.length >= _minElegibilidadeParaMultiplasSessoes) {
@@ -233,17 +280,15 @@ class ValidadorApi {
       }
     }
 
-    // Distribui elegibilidades (serial por sessão) e VPPs (pool por sessão)
-    // em round-robin por todas as sessões.
     final List<List<dynamic>> particoesEleg =
         List.generate(sessoes.length, (_) => <dynamic>[]);
-    final List<List<dynamic>> particoesVpp =
+    final List<List<dynamic>> particoesSenha =
         List.generate(sessoes.length, (_) => <dynamic>[]);
     for (int i = 0; i < elegibilidades.length; i++) {
       particoesEleg[i % sessoes.length].add(elegibilidades[i]);
     }
-    for (int i = 0; i < vpps.length; i++) {
-      particoesVpp[i % sessoes.length].add(vpps[i]);
+    for (int i = 0; i < senhas.length; i++) {
+      particoesSenha[i % sessoes.length].add(senhas[i]);
     }
 
     final List<Future<List<Map<String, dynamic>>>> trabalhos = [];
@@ -252,7 +297,8 @@ class ValidadorApi {
         _processarSessao(
           sessao: sessoes[i],
           fatiaElegibilidade: particoesEleg[i],
-          fatiaVpps: particoesVpp[i],
+          fatiaSenhas: particoesSenha[i],
+          credenciais: credenciais,
         ),
       );
     }
@@ -261,6 +307,12 @@ class ValidadorApi {
     for (final List<Map<String, dynamic>> parte
         in await Future.wait(trabalhos)) {
       resultados.addAll(parte);
+    }
+
+    // Sessões extras são descartáveis: libera as conexões após o lote
+    // (a base permanece para as próximas consultas do cliente).
+    for (final SessaoPortal extra in sessoes.skip(1)) {
+      await extra.encerrar();
     }
     return resultados;
   }
@@ -284,19 +336,25 @@ class ValidadorApi {
   }
 
   /// Uma sessão: elegibilidade da fatia uma a uma (serial, preserva o form);
-  /// os VPPs da fatia rodam em paralelo até [_limiteVppPorSessao].
+  /// as consultas de senha da fatia rodam em paralelo até [_limiteSenhaPorSessao].
   Future<List<Map<String, dynamic>>> _processarSessao({
     required SessaoPortal sessao,
     required List<dynamic> fatiaElegibilidade,
-    required List<dynamic> fatiaVpps,
+    required List<dynamic> fatiaSenhas,
+    required _CredenciaisPortal? credenciais,
   }) async {
     final List<Map<String, dynamic>> resultados = [];
     for (final dynamic item in fatiaElegibilidade) {
-      resultados.add(await _executarConsulta(sessao, item));
+      resultados.add(await _executarConsulta(sessao, item, credenciais));
     }
-    if (fatiaVpps.isNotEmpty) {
+    if (fatiaSenhas.isNotEmpty) {
       resultados.addAll(
-        await _processarEmParalelo(fatiaVpps, sessao, _limiteVppPorSessao),
+        await _processarEmParalelo(
+          fatiaSenhas,
+          sessao,
+          _limiteSenhaPorSessao,
+          credenciais,
+        ),
       );
     }
     return resultados;
@@ -308,6 +366,7 @@ class ValidadorApi {
     List<dynamic> consultas,
     SessaoPortal sessao,
     int limite,
+    _CredenciaisPortal? credenciais,
   ) async {
     final List<Map<String, dynamic>?> resultados =
         List<Map<String, dynamic>?>.filled(consultas.length, null);
@@ -317,8 +376,11 @@ class ValidadorApi {
       while (true) {
         final int indice = proximo++;
         if (indice >= consultas.length) return;
-        resultados[indice] =
-            await _executarConsulta(sessao, consultas[indice]);
+        resultados[indice] = await _executarConsulta(
+          sessao,
+          consultas[indice],
+          credenciais,
+        );
       }
     }
 
@@ -332,6 +394,7 @@ class ValidadorApi {
   Future<Map<String, dynamic>> _executarConsulta(
     SessaoPortal sessao,
     dynamic item,
+    _CredenciaisPortal? credenciais,
   ) async {
     final String? tipo = item is Map ? item['tipo'] as String? : null;
     final String? chave = item is Map ? item['chave'] as String? : null;
@@ -345,7 +408,7 @@ class ValidadorApi {
     }
 
     if (tipo == 'elegibilidade') {
-      if (chave.length != 20 || !RegExp(r'^\d+$').hasMatch(chave)) {
+      if (!_carteiraValida(chave)) {
         return {
           'chave': chave,
           'tipo': tipo,
@@ -353,8 +416,12 @@ class ValidadorApi {
           'erro': 'Carteira deve conter exatamente 20 digitos.',
         };
       }
-      final String? html = await sessao
-          .consultarBeneficiario(carteirinhaCompleta: chave);
+      final String? html = await _consultarComRecuperacao(
+        sessao: sessao,
+        credenciais: credenciais,
+        consulta: () =>
+            sessao.consultarBeneficiario(carteirinhaCompleta: chave),
+      );
       if (html == null) {
         return {
           'chave': chave,
@@ -369,7 +436,8 @@ class ValidadorApi {
         // ser carteira realmente não encontrada OU estado de sessão perdido.
         _logger.w(
           'Elegibilidade sem indicador | carteira ${_mascararChave(chave)} | '
-          'pagina: ${_resumirTexto(html)}',
+          'pagina: ${
+              resumirTexto(html.replaceAll(RegExp(r'<[^>]*>'), ' '))}',
         );
       }
       return {
@@ -381,22 +449,33 @@ class ValidadorApi {
       };
     }
 
-    if (tipo == 'autorizacaoVpp') {
-      final Map<String, dynamic>? dados = await sessao
-          .consultarAutorizacaoVpp(numeroVpp: chave);
+    if (tipo == 'senha') {
+      if (!_senhaValida(chave)) {
+        return {
+          'chave': chave,
+          'tipo': tipo,
+          'sucesso': false,
+          'erro': 'Senha invalida: deve ter exatamente 10 digitos comecando com 5.',
+        };
+      }
+      final Map<String, dynamic>? dados = await _consultarComRecuperacao(
+        sessao: sessao,
+        credenciais: credenciais,
+        consulta: () => sessao.consultarSenha(senha: chave),
+      );
       if (dados == null) {
         return {
           'chave': chave,
           'tipo': tipo,
           'sucesso': false,
-          'erro': 'Falha na consulta de autorizacao VPP.',
+          'erro': 'Falha na consulta ao portal SulAmerica.',
         };
       }
       return {
         'chave': chave,
         'tipo': tipo,
         'sucesso': true,
-        'statusVpp': _extrairStatusVpp(dados),
+        'statusSenha': _extrairStatusSenha(dados),
       };
     }
 
@@ -408,22 +487,48 @@ class ValidadorApi {
     };
   }
 
+  /// Recuperação de falha de consulta ao portal: sessão rejeitada (401/403)
+  /// renova o login com as credenciais retidas e repete a consulta 1x;
+  /// falha transitória (rede/timeout/5xx) faz nova tentativa após pausa
+  /// curta. Devolve o resultado da última tentativa (null quando a falha
+  /// persiste ou não há credenciais para renovar).
+  Future<T?> _consultarComRecuperacao<T>({
+    required SessaoPortal sessao,
+    required _CredenciaisPortal? credenciais,
+    required Future<T?> Function() consulta,
+  }) async {
+    final T? resultado = await consulta();
+    if (resultado != null) return resultado;
+
+    final int? status = sessao.ultimoStatusFalha;
+    final bool sessaoRejeitada =
+        ehFalhaDeSessaoPortal(status) || !sessao.autenticada;
+    if (sessaoRejeitada) {
+      if (credenciais == null) return null;
+      _logger.w(
+        'Sessao do portal rejeitada (HTTP $status); renovando login.',
+      );
+      final ResultadoLogin login = await sessao.login(
+        code: credenciais.code,
+        user: credenciais.user,
+        senha: credenciais.senha,
+      );
+      if (!login.autenticada) return null;
+    } else {
+      // Falha transitória: pausa curta antes de repetir (sem martelar o F5).
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+    }
+    return consulta();
+  }
+
   /// "primeiro.ultimo" da chave (não vaza dados sensíveis em log).
   String _mascararChave(String chave) => chave.length <= 5
       ? chave
       : '${chave.substring(0, 4)}…${chave.substring(chave.length - 2)}';
 
-  String _resumirTexto(String html) {
-    final String texto = html
-        .replaceAll(RegExp(r'<[^>]*>'), ' ')
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .trim();
-    return texto.length > 300 ? '${texto.substring(0, 300)}…' : texto;
-  }
-
   /// Descricao do status da autorização (ex.: "Autorizado", "Negado") a
   /// partir do JSON do portal; null quando não há registro com status.
-  String? _extrairStatusVpp(Map<String, dynamic> dados) {
+  String? _extrairStatusSenha(Map<String, dynamic> dados) {
     final dynamic registros = dados['registros'];
     if (registros is! List || registros.isEmpty) return null;
     for (final dynamic registro in registros) {
@@ -500,14 +605,74 @@ class ValidadorApi {
   }
 
 
-  Future<Map<String, dynamic>?> _lerJson(Request request) async {
-    try {
-      final String corpo = await request.readAsString();
-      if (corpo.isEmpty) return null;
-      return jsonDecode(corpo) as Map<String, dynamic>;
-    } catch (_) {
-      return null;
+  /// Fonte única das regras de formato: carteira com exatamente 20 dígitos e
+  /// senha com exatamente 10 dígitos começando com 5 (mesmas do app).
+  static bool _carteiraValida(String carteira) =>
+      carteira.length == 20 && RegExp(r'^\d+$').hasMatch(carteira);
+
+  static bool _senhaValida(String senha) =>
+      senha.length == 10 && senha.startsWith('5');
+
+  Future<_LeituraJson> _lerJson(Request request) async {
+    final int? informado = request.contentLength;
+    if (informado != null && informado > _maxBytesCorpo) {
+      return const _LeituraJson(null, excedeLimite: true);
     }
+    try {
+      final BytesBuilder acumulador = BytesBuilder(copy: false);
+      await for (final List<int> parte in request.read()) {
+        acumulador.add(parte);
+        if (acumulador.length > _maxBytesCorpo) {
+          return const _LeituraJson(null, excedeLimite: true);
+        }
+      }
+      final String corpo =
+          utf8.decode(acumulador.takeBytes(), allowMalformed: true);
+      if (corpo.trim().isEmpty) return const _LeituraJson(null);
+      return _LeituraJson(jsonDecode(corpo) as Map<String, dynamic>);
+    } catch (_) {
+      return const _LeituraJson(null);
+    }
+  }
+
+  Response _erroCorpoGrande() =>
+      _erro('Corpo excede o limite de ${_maxBytesCorpo ~/ (1 << 20)} MB.', 413);
+
+  static Middleware _rateLimitPortal() {
+    final Map<String, List<DateTime>> acessos = {};
+    return (Handler inner) => (Request request) async {
+          if (!_rotasDePortal.contains(request.url.path)) {
+            return inner(request);
+          }
+          final String ip = _ipDe(request);
+          final DateTime agora = DateTime.now();
+          final List<DateTime> recentes = (acessos[ip] ?? const [])
+              .where((t) => agora.difference(t) < _janelaRateLimit)
+              .toList();
+          if (recentes.length >= _maxRateLimitPorJanela) {
+            return Response(
+              429,
+              body: jsonEncode({
+                'status': 'erro',
+                'mensagem': 'Muitas requisicoes. Aguarde um instante.',
+              }),
+              headers: const {'content-type': 'application/json; charset=utf-8'},
+            );
+          }
+          recentes.add(agora);
+          acessos[ip] = recentes;
+          return inner(request);
+        };
+  }
+
+  static String _ipDe(Request request) {
+    final String? forward = request.headers['x-forwarded-for'];
+    if (forward != null && forward.isNotEmpty) {
+      return forward.split(',').first.trim();
+    }
+    final dynamic info = request.context['shelf.io.connection_info'];
+    if (info is HttpConnectionInfo) return info.remoteAddress.address;
+    return 'desconhecido';
   }
 
   Response _json(Map<String, dynamic> dados, {int statusCode = 200}) {
@@ -546,6 +711,22 @@ class ValidadorApi {
     };
   }
 }
+
+/// Resultado da leitura do corpo JSON: [valor] nulo quando vazio/parsing
+/// falhou; [excedeLimite] distingue o corpo acima de [_maxBytesCorpo]
+/// (413) do corpo malformado (400).
+class _LeituraJson {
+  const _LeituraJson(this.valor, {this.excedeLimite = false});
+
+  final Map<String, dynamic>? valor;
+  final bool excedeLimite;
+}
+
+/// Classifica a falha de consulta ao portal como rejeição de sessão
+/// (401/403 — F5 ASM ou sessão expirada): esses status merecem renovar o
+/// login; os demais (rede/timeout/5xx) são tratados como transitórios.
+bool ehFalhaDeSessaoPortal(int? status) => status == 401 || status == 403;
+
 /// Credenciais do prestador retidas em memória por token de sessão, usadas
 /// apenas para abrir sessões extras (paralelas) quando um lote tem muitas
 /// elegibilidades. Nunca são logadas e saem quando a sessão é removida.

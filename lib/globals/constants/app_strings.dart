@@ -69,7 +69,7 @@ class AppStrings {
   static const String erroNaoElegivel = 'Beneficiário não elegível';
   static const String erroCarteiraNaoEncontrada =
       'Carteira não encontrada no portal';
-  static const String erroVppSenhaInvalida = 'Senha inválida';
+  static const String erroSenhaInvalida = 'Senha inválida';
   static const String erroSenhaNaoEncontrada =
       'Senha não encontrada no portal';
   static const String erroLoginFalhou =
