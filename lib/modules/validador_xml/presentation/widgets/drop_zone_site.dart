@@ -1,4 +1,5 @@
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_dropzone/flutter_dropzone.dart';
@@ -37,70 +38,70 @@ class _DropZoneSiteState extends State<DropZoneSite> {
               const BoxConstraints(maxWidth: AppDimens.dropZoneLarguraMax),
           child: SizedBox(
             height: AppDimens.dropZoneAltura,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 120),
-              decoration: BoxDecoration(
-                color: _arrastandoArquivo
-                    ? AppColors.track
-                    : Colors.transparent,
-                borderRadius: BorderRadius.circular(AppDimens.radiusMd),
-                border: Border.all(
-                  color: AppColors.border,
-                  width: AppDimens.dropZoneBorda,
-                ),
+            child: CustomPaint(
+              // Borda tracejada: lê como uma linha de corte de formulário,
+              // não como um retângulo arredondado de upload de SaaS.
+              painter: _BordaTracejada(
+                cor: _arrastandoArquivo ? AppColors.navy : AppColors.border,
               ),
-              child: Stack(
-                children: [
-                  Positioned.fill(
-                    child: DropzoneView(
-                      onCreated: (controller) => _controller = controller,
-                      onHover: () => _definirArrasto(true),
-                      onLeave: () => _definirArrasto(false),
-                      onDropFile: (arquivo) {
-                        _definirArrasto(false);
-                        _processarArquivo(arquivo);
-                      },
-                    ),
-                  ),
-                  Positioned.fill(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: AppDimens.spaceLg,
-                        vertical: AppDimens.spaceXl,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 120),
+                color: _arrastandoArquivo
+                    ? AppColors.surfaceMuted
+                    : Colors.transparent,
+                child: Stack(
+                  children: [
+                    Positioned.fill(
+                      child: DropzoneView(
+                        onCreated: (controller) => _controller = controller,
+                        onHover: () => _definirArrasto(true),
+                        onLeave: () => _definirArrasto(false),
+                        onDropFile: (arquivo) {
+                          _definirArrasto(false);
+                          _processarArquivo(arquivo);
+                        },
                       ),
-                      child: MouseRegion(
-                        cursor: SystemMouseCursors.click,
-                        child: GestureDetector(
-                          behavior: HitTestBehavior.opaque,
-                          onTap: _selecionarPorClique,
-                          child: _arrastandoArquivo
-                              ? const Icon(
-                                  Icons.upload_file,
-                                  size: AppDimens.dropZoneIconeArrasto,
-                                  color: AppColors.textMuted,
-                                )
-                              : const Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(
-                                      Icons.cloud_upload,
-                                      size: AppDimens.dropZoneIcone,
-                                      color: AppColors.textLight,
-                                    ),
-                                    SizedBox(height: AppDimens.spaceMd),
-                                    TextoApp.corpo(
-                                      AppStrings.dropZoneTexto,
-                                      cor: AppColors.textLight,
-                                      alinhamento: TextAlign.center,
-                                      selecionavel: false,
-                                    ),
-                                  ],
-                                ),
+                    ),
+                    Positioned.fill(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: AppDimens.spaceLg,
+                          vertical: AppDimens.spaceXl,
+                        ),
+                        child: MouseRegion(
+                          cursor: SystemMouseCursors.click,
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTap: _selecionarPorClique,
+                            child: _arrastandoArquivo
+                                ? const Icon(
+                                    Icons.upload_outlined,
+                                    size: AppDimens.dropZoneIconeArrasto,
+                                    color: AppColors.navy,
+                                  )
+                                : const Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(
+                                        Icons.description_outlined,
+                                        size: AppDimens.dropZoneIcone,
+                                        color: AppColors.textLight,
+                                      ),
+                                      SizedBox(height: AppDimens.spaceMd),
+                                      TextoApp.corpo(
+                                        AppStrings.dropZoneTexto,
+                                        cor: AppColors.textLight,
+                                        alinhamento: TextAlign.center,
+                                        selecionavel: false,
+                                      ),
+                                    ],
+                                  ),
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
@@ -139,4 +140,38 @@ class _DropZoneSiteState extends State<DropZoneSite> {
     ScaffoldMessenger.maybeOf(context)
         ?.showSnackBar(SnackBar(content: SelectableText(mensagem)));
   }
+}
+
+/// Desenha um retângulo com borda tracejada (linha de corte de formulário).
+class _BordaTracejada extends CustomPainter {
+  const _BordaTracejada({required this.cor});
+
+  final Color cor;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final Paint tinta = Paint()
+      ..color = cor
+      ..strokeWidth = AppDimens.dropZoneBorda
+      ..style = PaintingStyle.stroke;
+    final Path contorno = Path()
+      ..addRect(Rect.fromLTWH(0, 0, size.width, size.height));
+    final Path tracejado = Path();
+    for (final ui.PathMetric metrica in contorno.computeMetrics()) {
+      double distancia = 0;
+      while (distancia < metrica.length) {
+        final double fim = distancia + AppDimens.dropZoneTraco;
+        tracejado.addPath(
+          metrica.extractPath(distancia, fim.clamp(0, metrica.length)),
+          Offset.zero,
+        );
+        distancia = fim + AppDimens.dropZoneVao;
+      }
+    }
+    canvas.drawPath(tracejado, tinta);
+  }
+
+  @override
+  bool shouldRepaint(covariant _BordaTracejada oldDelegate) =>
+      oldDelegate.cor != cor;
 }

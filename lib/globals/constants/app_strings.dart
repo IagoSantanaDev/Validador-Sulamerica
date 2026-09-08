@@ -13,6 +13,7 @@ class AppStrings {
   static const String uploadEnviandoArquivo = 'Enviando arquivo';
 
   static const String resultadoTitulo = 'Resultado da Validação';
+  static const String protocoloRotulo = 'Protocolo nº';
   static const String processadoEmPrefix = 'Processado em ';
   static const String processadoEmSufix = ' segundos';
   static const String validarOutroArquivo = 'Validar outro arquivo';

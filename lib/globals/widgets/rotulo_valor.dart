@@ -10,11 +10,16 @@ class RotuloValor extends StatelessWidget {
     required this.rotulo,
     required this.valor,
     this.larguraRotulo,
+    this.monoespacado = false,
   });
 
   final String rotulo;
   final String valor;
   final double? larguraRotulo;
+
+  /// true quando o valor é um código real (hash, protocolo, carteira,
+  /// senha) — nunca use para dar destaque a um valor comum.
+  final bool monoespacado;
 
   @override
   Widget build(BuildContext context) {
@@ -26,10 +31,9 @@ class RotuloValor extends StatelessWidget {
           child: TextoApp.corpo(rotulo, cor: AppColors.textMuted),
         ),
         Expanded(
-          child: TextoApp.corpo(
-            valor,
-            cor: AppColors.textPrimary,
-          ),
+          child: monoespacado
+              ? TextoApp.codigo(valor, cor: AppColors.textPrimary)
+              : TextoApp.corpo(valor, cor: AppColors.textPrimary),
         ),
       ],
     );

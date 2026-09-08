@@ -199,11 +199,13 @@ class GradeGuias extends StatelessWidget {
               RotuloValor(
                 rotulo: AppStrings.rotuloCarteira,
                 valor: guia.numeroCarteira ?? AppStrings.valorIndisponivel,
+                monoespacado: true,
               ),
               const SizedBox(height: AppDimens.spaceXs),
               RotuloValor(
                 rotulo: AppStrings.rotuloSenha,
                 valor: guia.senha ?? AppStrings.valorIndisponivel,
+                monoespacado: true,
               ),
               for (final ConsultaGuia consulta in guia.consultas) ...[
                 const SizedBox(height: AppDimens.spaceMd),

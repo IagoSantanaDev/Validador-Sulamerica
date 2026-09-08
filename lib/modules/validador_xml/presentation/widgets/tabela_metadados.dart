@@ -23,34 +23,42 @@ class TabelaMetadados extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final List<(String, String)> linhas = [
-      (AppStrings.metadadoNome, nomeArquivo ?? AppStrings.valorIndisponivel),
-      (AppStrings.metadadoTamanho, formatarTamanho(tamanhoArquivoBytes)),
-      (AppStrings.metadadoVersao, informacoes.versao ?? AppStrings.valorIndisponivel),
+    // O terceiro elemento marca quais valores são código real (hash, nº de
+    // lote) e por isso saem em monoespaçado.
+    final List<(String, String, bool)> linhas = [
+      (AppStrings.metadadoNome, nomeArquivo ?? AppStrings.valorIndisponivel, false),
+      (AppStrings.metadadoTamanho, formatarTamanho(tamanhoArquivoBytes), false),
+      (AppStrings.metadadoVersao, informacoes.versao ?? AppStrings.valorIndisponivel, false),
       (
         AppStrings.metadadoTipoTransacao,
         informacoes.tipoTransacao ?? AppStrings.valorIndisponivel,
+        false,
       ),
-      (AppStrings.metadadoHash, hashMd5 ?? AppStrings.valorIndisponivel),
+      (AppStrings.metadadoHash, hashMd5 ?? AppStrings.valorIndisponivel, true),
       (
         AppStrings.metadadoPrestador,
         informacoes.prestadorCnpjCpf ?? AppStrings.valorIndisponivel,
+        true,
       ),
       (
         AppStrings.metadadoOperadora,
         informacoes.operadoraRegistroANS ?? AppStrings.valorIndisponivel,
+        true,
       ),
       (
         AppStrings.metadadoNumeroLote,
         informacoes.numeroLote ?? AppStrings.valorIndisponivel,
+        true,
       ),
       (
         AppStrings.metadadoQtdGuias,
         informacoes.qtdGuias?.toString() ?? AppStrings.valorIndisponivel,
+        false,
       ),
       (
         AppStrings.metadadoValorTotalInformado,
         formatarMoeda(informacoes.valorTotalInformado),
+        false,
       ),
     ];
 
@@ -63,7 +71,11 @@ class TabelaMetadados extends StatelessWidget {
               horizontal: AppDimens.spaceMd,
               vertical: 10,
             ),
-            child: RotuloValor(rotulo: linhas[i].$1, valor: linhas[i].$2),
+            child: RotuloValor(
+              rotulo: linhas[i].$1,
+              valor: linhas[i].$2,
+              monoespacado: linhas[i].$3,
+            ),
           ),
       ],
     );

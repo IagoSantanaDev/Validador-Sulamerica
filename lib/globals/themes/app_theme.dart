@@ -6,29 +6,11 @@ import '../constants/app_dimens.dart';
 class AppTheme {
   const AppTheme._();
 
-  static List<BoxShadow> sombraDeSurface() => const [
-        BoxShadow(
-          color: AppColors.shadowRing,
-          blurRadius: 0,
-          spreadRadius: 1,
-        ),
-        BoxShadow(
-          color: AppColors.shadowLift,
-          blurRadius: 2,
-          offset: Offset(0, 1),
-        ),
-        BoxShadow(
-          color: AppColors.shadowAmbient,
-          blurRadius: 6,
-          offset: Offset(0, 2),
-        ),
-      ];
-
   static ThemeData light() {
     const ColorScheme scheme = ColorScheme.light(
-      primary: AppColors.primary,
+      primary: AppColors.navy,
       onPrimary: Colors.white,
-      secondary: AppColors.primary,
+      secondary: AppColors.petroleo,
       onSecondary: Colors.white,
       surface: AppColors.background,
       onSurface: AppColors.textPrimary,
@@ -42,28 +24,33 @@ class AppTheme {
       colorScheme: scheme,
       fontFamily: 'Roboto',
       textTheme: const TextTheme(
+        // Título de destaque: peso alto e leve compressão no lugar de um
+        // serifado — mantém a identidade só na tipografia sans já usada.
         displayLarge: TextStyle(
-          fontSize: 46,
-          fontWeight: FontWeight.w700,
-          color: AppColors.textPrimary,
+          fontSize: 34,
+          fontWeight: FontWeight.w800,
+          letterSpacing: -0.4,
+          height: 1.15,
+          color: AppColors.navy,
         ),
         headlineLarge: TextStyle(
-          fontSize: 28,
-          fontWeight: FontWeight.w700,
-          color: AppColors.textPrimary,
+          fontSize: 24,
+          fontWeight: FontWeight.w800,
+          letterSpacing: -0.2,
+          color: AppColors.navy,
         ),
         headlineMedium: TextStyle(
-          fontSize: 22,
+          fontSize: 20,
           fontWeight: FontWeight.w700,
           color: AppColors.textPrimary,
         ),
         titleLarge: TextStyle(
-          fontSize: 18,
+          fontSize: 17,
           fontWeight: FontWeight.w700,
           color: AppColors.textPrimary,
         ),
         titleMedium: TextStyle(
-          fontSize: 15.5,
+          fontSize: 15,
           fontWeight: FontWeight.w600,
           color: AppColors.textPrimary,
         ),
@@ -82,13 +69,33 @@ class AppTheme {
           fontWeight: FontWeight.w400,
           color: AppColors.textMuted,
         ),
+        // Reservado a dado/código real (hash, protocolo, carteira, senha) —
+        // nunca para rótulo decorativo.
+        labelLarge: TextStyle(
+          fontFamily: 'Courier New',
+          fontFamilyFallback: ['monospace'],
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
+          color: AppColors.textPrimary,
+        ),
+      ),
+      chipTheme: ChipThemeData(
+        backgroundColor: AppColors.surface,
+        selectedColor: AppColors.navy,
+        side: const BorderSide(color: AppColors.border),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppDimens.radiusSm),
+        ),
       ),
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
-          foregroundColor: AppColors.primary,
+          foregroundColor: AppColors.petroleo,
           minimumSize: const Size(0, 38),
           padding: const EdgeInsets.symmetric(
             horizontal: AppDimens.spaceSm,
+          ),
+          shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.all(Radius.circular(AppDimens.radiusSm)),
           ),
           textStyle: const TextStyle(
             fontSize: 14,
@@ -98,7 +105,7 @@ class AppTheme {
       ),
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
-        backgroundColor: AppColors.textPrimary,
+        backgroundColor: AppColors.navy,
         contentTextStyle: const TextStyle(color: Colors.white),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppDimens.radiusSm),

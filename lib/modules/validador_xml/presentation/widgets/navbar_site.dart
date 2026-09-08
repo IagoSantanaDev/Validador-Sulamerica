@@ -6,6 +6,8 @@ import '../../../../globals/constants/app_strings.dart';
 import '../../../../globals/widgets/icone_favicon.dart';
 import '../../../../globals/widgets/textos.dart';
 
+/// Estilo papel timbrado: fundo claro (o símbolo não lê bem sobre navy) com
+/// uma régua sólida na base, em vez da barra colorida cheia usual de SaaS.
 class NavbarSite extends StatelessWidget {
   const NavbarSite({super.key, this.onTituloTap});
 
@@ -15,9 +17,17 @@ class NavbarSite extends StatelessWidget {
   Widget build(BuildContext context) {
     return Material(
       color: AppColors.navbar,
-      child: SizedBox(
+      child: Container(
         width: double.infinity,
         height: AppDimens.navbarHeight,
+        decoration: const BoxDecoration(
+          border: Border(
+            bottom: BorderSide(
+              color: AppColors.navy,
+              width: AppDimens.navbarRegua,
+            ),
+          ),
+        ),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: AppDimens.spaceLg),
           child: Row(
@@ -32,7 +42,7 @@ class NavbarSite extends StatelessWidget {
                     SizedBox(width: AppDimens.spaceSm),
                     TextoApp.destaque(
                       AppStrings.tituloApp,
-                      cor: Colors.white,
+                      cor: AppColors.navy,
                       selecionavel: false,
                     ),
                   ],

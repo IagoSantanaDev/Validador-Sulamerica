@@ -1,21 +1,23 @@
 import 'package:flutter/material.dart';
 
+import '../constants/app_colors.dart';
 import '../constants/app_dimens.dart';
 import 'textos.dart';
 
+/// Aviso de status no estilo anotação de ficha: régua colorida na lateral
+/// sobre papel, sem preenchimento colorido nem sombra — evita o cartão
+/// "ícone + fundo tingido" repetido em qualquer dashboard genérico.
 class PainelStatus extends StatelessWidget {
   const PainelStatus({
     super.key,
     required this.icone,
     required this.cor,
-    required this.corFundo,
     required this.titulo,
     this.mensagem,
   });
 
   final IconData icone;
   final Color cor;
-  final Color corFundo;
   final String titulo;
   final String? mensagem;
 
@@ -23,10 +25,13 @@ class PainelStatus extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(AppDimens.spaceMd),
       decoration: BoxDecoration(
-        color: corFundo,
-        borderRadius: BorderRadius.circular(AppDimens.radiusCard),
+        color: AppColors.surface,
+        border: Border(left: BorderSide(color: cor, width: 4)),
+      ),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppDimens.spaceMd,
+        vertical: AppDimens.spaceSm,
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -37,9 +42,10 @@ class PainelStatus extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                TextoApp.tituloMedio(titulo, cor: cor),
+                if (titulo.isNotEmpty) TextoApp.tituloMedio(titulo, cor: cor),
                 if (mensagem != null) ...[
-                  const SizedBox(height: AppDimens.spaceXs),
+                  if (titulo.isNotEmpty)
+                    const SizedBox(height: AppDimens.itemIconeTop),
                   TextoApp.corpo(mensagem!),
                 ],
               ],

@@ -1,30 +1,33 @@
 import 'package:flutter/material.dart';
 
+/// Paleta ancorada nas duas únicas cores que já existiam no produto (o navy
+/// e o verde-azulado do símbolo em web/favicon.ico) e no papel de ficha de
+/// conferência/protocolo — não no azul-acinzentado e laranja genéricos de
+/// dashboard que estavam aqui antes.
 class AppColors {
   const AppColors._();
 
-  static const Color primary = Color(0xFFF57C00);
-  static const Color background = Color(0xFFF4F6F8);
-  static const Color navbar = Color(0xFFF57C00);
-  static const Color track = Color(0xFFEAEEF2);
+  static const Color navy = Color(0xFF0E3A63);
+  static const Color petroleo = Color(0xFF0E8377);
+
+  // "primary" e "navbar" seguem existindo como apelidos porque vários
+  // widgets já dependem desses nomes; ambos apontam para o navy do símbolo.
+  static const Color primary = navy;
+  static const Color navbar = surface;
+
+  static const Color background = Color(0xFFEEF2EE);
   static const Color surface = Color(0xFFFFFFFF);
-  static const Color surfaceMuted = Color(0xFFFAFBFD);
+  static const Color surfaceMuted = Color(0xFFF3F6F2);
+  static const Color track = Color(0xFFE2E9E1);
 
-  static const Color textPrimary = Color(0xFF1D2733);
-  static const Color textMuted = Color(0xFF5B6873);
-  static const Color textLight = Color(0xFF555555);
+  static const Color textPrimary = Color(0xFF16232B);
+  static const Color textMuted = Color(0xFF5B6660);
+  static const Color textLight = Color(0xFF3D4A44);
 
-  static const Color border = Color(0xFFD5DCE3);
+  static const Color border = Color(0xFFC9D3C8);
 
-  static const Color error = Color(0xFFC62828);
-  static const Color warning = Color(0xFFF0AD4E);
-  static const Color errorBackground = Color(0xFFFBEAEA);
-  static const Color success = Color(0xFF2E7D32);
-  static const Color successBackground = Color(0xFFE4F2E6);
+  static const Color error = Color(0xFF9C3B2E);
+  static const Color success = petroleo;
 
-  static const Color hoverLinha = Color(0x12000000);
-
-  static const Color shadowRing = Color(0x14000000);
-  static const Color shadowLift = Color(0x12000000);
-  static const Color shadowAmbient = Color(0x0D000000);
+  static const Color hoverLinha = Color(0x14163229);
 }
