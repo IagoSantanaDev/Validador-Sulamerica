@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../constants/app_colors.dart';
 
-enum TextoEstilo { titulo, tituloMedio, corpo, detalhe, destaque }
+enum TextoEstilo { titulo, tituloMedio, corpo, detalhe, destaque, codigo }
 
 class TextoApp extends StatelessWidget {
   const TextoApp._(
@@ -100,15 +100,31 @@ class TextoApp extends StatelessWidget {
           selecionavel: selecionavel,
         );
 
+  const TextoApp.codigo(
+    String texto, {
+    Key? key,
+    Color? cor,
+    TextAlign? alinhamento,
+    FontWeight? peso,
+    bool selecionavel = true,
+  }) : this._(
+          texto,
+          TextoEstilo.codigo,
+          key: key,
+          cor: cor,
+          alinhamento: alinhamento,
+          peso: peso,
+          selecionavel: selecionavel,
+        );
+
   final String texto;
   final TextoEstilo _estilo;
   final Color? cor;
   final TextAlign? alinhamento;
   final FontWeight? peso;
 
-  /// Quando true, o texto é selecionável/copiável (SelectableText). Em áreas
-  /// clicáveis (navbar, dropzone, linhas da grade) use false, pois o texto
-  /// selecionável captura o clique e mostra o cursor de texto (I-beam).
+  ///Quando true, o texto pode ser selecionado e copiado.
+  ///Em áreas clicáveis, use false para evitar que a seleção de texto atrapalhe os cliques.
   final bool selecionavel;
 
   @override
@@ -145,6 +161,13 @@ class TextoApp extends StatelessWidget {
         return const TextStyle(fontSize: 13, fontWeight: FontWeight.w400);
       case TextoEstilo.destaque:
         return const TextStyle(fontSize: 17, fontWeight: FontWeight.w600);
+      case TextoEstilo.codigo:
+        return const TextStyle(
+          fontFamily: 'Courier New',
+          fontFamilyFallback: ['monospace'],
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
+        );
     }
   }
 
@@ -154,6 +177,7 @@ class TextoApp extends StatelessWidget {
       case TextoEstilo.tituloMedio:
       case TextoEstilo.corpo:
       case TextoEstilo.destaque:
+      case TextoEstilo.codigo:
         return AppColors.textPrimary;
       case TextoEstilo.detalhe:
         return AppColors.textMuted;

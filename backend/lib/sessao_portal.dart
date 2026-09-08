@@ -9,8 +9,6 @@ import 'package:logger/logger.dart';
 
 import 'util_texto.dart';
 
-/// Motivo da falha ao autenticar no portal (para o proxy distinguir
-/// credencial inválida de bloqueio/resposta inesperada).
 enum MotivoFalhaLogin { credenciaisInvalidas, respostaInesperada, falhaRede }
 
 class ResultadoLogin {
@@ -24,7 +22,6 @@ class ResultadoLogin {
   final bool autenticada;
   final MotivoFalhaLogin? motivo;
 
-  /// Contexto da falha (ex.: tipo de DioException) para diagnóstico.
   final String? detalhe;
 }
 
@@ -94,8 +91,7 @@ class SessaoPortal {
     return true;
   }
 
-  static const String _userAgent =
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+  static const String _userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
       'AppleWebKit/537.36 (KHTML, like Gecko) '
       'Chrome/131.0.0.0 Safari/537.36';
 
@@ -171,7 +167,6 @@ class SessaoPortal {
         'Sec-Fetch-Mode': 'navigate',
         'Sec-Fetch-Dest': 'document',
       };
-
 
   Future<ResultadoLogin> login({
     required String code,
@@ -310,7 +305,6 @@ class SessaoPortal {
     return status != null ? '$tipo (HTTP $status): ${erro.message}' : tipo;
   }
 
-
   Future<String?> consultarBeneficiario({
     required String carteirinhaCompleta,
   }) async {
@@ -321,8 +315,7 @@ class SessaoPortal {
     }
 
     try {
-      final List<String> partes =
-          _dividirCarteirinha(carteirinhaCompleta);
+      final List<String> partes = _dividirCarteirinha(carteirinhaCompleta);
       final Map<String, String> campos = {..._camposConsulta};
       for (int indice = 0; indice < partes.length; indice++) {
         campos['codigo-beneficiario-${indice + 1}'] = partes[indice];
@@ -390,7 +383,6 @@ class SessaoPortal {
       return null;
     }
   }
-
 
   Future<Map<String, dynamic>?> consultarSenha({
     required String senha,

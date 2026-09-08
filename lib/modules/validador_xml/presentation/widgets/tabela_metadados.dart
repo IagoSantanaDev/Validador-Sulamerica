@@ -23,34 +23,48 @@ class TabelaMetadados extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final List<(String, String)> linhas = [
-      (AppStrings.metadadoNome, nomeArquivo ?? AppStrings.valorIndisponivel),
-      (AppStrings.metadadoTamanho, formatarTamanho(tamanhoArquivoBytes)),
-      (AppStrings.metadadoVersao, informacoes.versao ?? AppStrings.valorIndisponivel),
+    final List<(String, String, bool)> linhas = [
+      (
+        AppStrings.metadadoNome,
+        nomeArquivo ?? AppStrings.valorIndisponivel,
+        false
+      ),
+      (AppStrings.metadadoTamanho, formatarTamanho(tamanhoArquivoBytes), false),
+      (
+        AppStrings.metadadoVersao,
+        informacoes.versao ?? AppStrings.valorIndisponivel,
+        false
+      ),
       (
         AppStrings.metadadoTipoTransacao,
         informacoes.tipoTransacao ?? AppStrings.valorIndisponivel,
+        false,
       ),
-      (AppStrings.metadadoHash, hashMd5 ?? AppStrings.valorIndisponivel),
+      (AppStrings.metadadoHash, hashMd5 ?? AppStrings.valorIndisponivel, true),
       (
         AppStrings.metadadoPrestador,
         informacoes.prestadorCnpjCpf ?? AppStrings.valorIndisponivel,
+        true,
       ),
       (
         AppStrings.metadadoOperadora,
         informacoes.operadoraRegistroANS ?? AppStrings.valorIndisponivel,
+        true,
       ),
       (
         AppStrings.metadadoNumeroLote,
         informacoes.numeroLote ?? AppStrings.valorIndisponivel,
+        true,
       ),
       (
         AppStrings.metadadoQtdGuias,
         informacoes.qtdGuias?.toString() ?? AppStrings.valorIndisponivel,
+        false,
       ),
       (
         AppStrings.metadadoValorTotalInformado,
         formatarMoeda(informacoes.valorTotalInformado),
+        false,
       ),
     ];
 
@@ -61,9 +75,13 @@ class TabelaMetadados extends StatelessWidget {
             color: i.isOdd ? AppColors.surfaceMuted : null,
             padding: const EdgeInsets.symmetric(
               horizontal: AppDimens.spaceMd,
-              vertical: 10,
+              vertical: AppDimens.itemPaddingV,
             ),
-            child: RotuloValor(rotulo: linhas[i].$1, valor: linhas[i].$2),
+            child: RotuloValor(
+              rotulo: linhas[i].$1,
+              valor: linhas[i].$2,
+              monoespacado: linhas[i].$3,
+            ),
           ),
       ],
     );

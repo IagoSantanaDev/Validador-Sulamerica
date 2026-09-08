@@ -13,6 +13,7 @@ class AppStrings {
   static const String uploadEnviandoArquivo = 'Enviando arquivo';
 
   static const String resultadoTitulo = 'Resultado da Validação';
+  static const String protocoloRotulo = 'Protocolo nº';
   static const String processadoEmPrefix = 'Processado em ';
   static const String processadoEmSufix = ' segundos';
   static const String validarOutroArquivo = 'Validar outro arquivo';
@@ -35,6 +36,7 @@ class AppStrings {
   static const String falhaValidacaoTitulo = 'Não foi possível validar';
 
   static const String rotuloGuia = 'Guia';
+  static const String rotuloDetalhes = 'Detalhes';
   static const String rotuloCarteira = 'Carteira';
   static const String rotuloSenha = 'Senha';
   static const String rotuloBeneficiario = 'Beneficiário';
@@ -80,6 +82,5 @@ class AppStrings {
   static const String filtroTodos = 'Todas';
   static const String filtroSenha = 'Senha';
   static const String filtroCarteira = 'Carteira';
-  static const String filtroCredenciais = 'Credenciais';
   static const String filtroSemResultado = 'Nenhuma guia encontrada com este filtro.';
 }

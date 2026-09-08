@@ -10,11 +10,14 @@ class RotuloValor extends StatelessWidget {
     required this.rotulo,
     required this.valor,
     this.larguraRotulo,
+    this.monoespacado = false,
   });
 
   final String rotulo;
   final String valor;
   final double? larguraRotulo;
+
+  final bool monoespacado;
 
   @override
   Widget build(BuildContext context) {
@@ -26,10 +29,9 @@ class RotuloValor extends StatelessWidget {
           child: TextoApp.corpo(rotulo, cor: AppColors.textMuted),
         ),
         Expanded(
-          child: TextoApp.corpo(
-            valor,
-            cor: AppColors.textPrimary,
-          ),
+          child: monoespacado
+              ? TextoApp.codigo(valor, cor: AppColors.textPrimary)
+              : TextoApp.corpo(valor, cor: AppColors.textPrimary),
         ),
       ],
     );
