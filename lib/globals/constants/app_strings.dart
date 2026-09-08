@@ -36,6 +36,7 @@ class AppStrings {
   static const String falhaValidacaoTitulo = 'Não foi possível validar';
 
   static const String rotuloGuia = 'Guia';
+  static const String rotuloDetalhes = 'Detalhes';
   static const String rotuloCarteira = 'Carteira';
   static const String rotuloSenha = 'Senha';
   static const String rotuloBeneficiario = 'Beneficiário';

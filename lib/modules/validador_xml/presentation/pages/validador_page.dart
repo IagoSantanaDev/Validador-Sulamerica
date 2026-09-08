@@ -266,8 +266,9 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 CabecalhoResultado(
-                    identificador:
-                        _identificador ?? AppStrings.valorIndisponivel),
+                  identificador:
+                      _identificador ?? AppStrings.valorIndisponivel,
+                ),
                 const SizedBox(height: AppDimens.spaceLg),
                 CardSurface(
                   child: TabelaMetadados(
@@ -352,7 +353,7 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
         style: TextStyle(
           fontSize: 13,
           fontWeight: FontWeight.w600,
-          color: selecionado ? Colors.white : AppColors.textPrimary,
+          color: selecionado ? AppColors.surface : AppColors.textPrimary,
         ),
       ),
       selected: selecionado,

@@ -75,7 +75,7 @@ class TabelaMetadados extends StatelessWidget {
             color: i.isOdd ? AppColors.surfaceMuted : null,
             padding: const EdgeInsets.symmetric(
               horizontal: AppDimens.spaceMd,
-              vertical: 10,
+              vertical: AppDimens.itemPaddingV,
             ),
             child: RotuloValor(
               rotulo: linhas[i].$1,

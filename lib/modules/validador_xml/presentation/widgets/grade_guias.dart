@@ -113,7 +113,7 @@ class GradeGuias extends StatelessWidget {
           children: [
             _Celula(texto: ''),
             _Celula(texto: AppStrings.rotuloGuia, cabecalho: true),
-            _Celula(texto: 'Detalhes', cabecalho: true),
+            _Celula(texto: AppStrings.rotuloDetalhes, cabecalho: true),
           ],
         ),
         for (final LinhaGradeGuia linha in linhas) _linha(context, linha),
