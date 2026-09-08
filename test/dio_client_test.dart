@@ -6,9 +6,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:validador_xml_sulamerica/globals/network/app_exception.dart';
 import 'package:validador_xml_sulamerica/globals/network/dio_client.dart';
 
-/// Adapter falso que devolve uma resposta pré-definida, sem fazer
-/// nenhuma chamada de rede real — usado só para testar o mapeamento de
-/// [DioClient], não o comportamento do Dio em si.
 class _FakeHttpClientAdapter implements HttpClientAdapter {
   _FakeHttpClientAdapter({required this.statusCode, required this.corpo});
 
@@ -98,7 +95,8 @@ void main() {
       );
     });
 
-    test('mapeia status 500 para ErroServidorException com o statusCode', () async {
+    test('mapeia status 500 para ErroServidorException com o statusCode',
+        () async {
       final DioClient client = _criarClienteComRespostaFalsa(
         statusCode: 500,
         corpo: {'mensagem': 'falha interna'},

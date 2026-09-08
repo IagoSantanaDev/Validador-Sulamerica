@@ -7,7 +7,6 @@ import 'package:validador_xml_sulamerica/modules/validador_xml/data/models/guia_
 import 'package:validador_xml_sulamerica/modules/validador_xml/data/repositories/validador_guias_repository.dart';
 import 'package:validador_xml_sulamerica/modules/validador_xml/presentation/controllers/validador_controller.dart';
 
-/// Repositório falso: devolve um resultado pré-definido, sem parsing.
 class _FakeValidadorGuiasRepository implements ValidadorGuiasRepository {
   _FakeValidadorGuiasRepository(this.retorno);
 
