@@ -62,8 +62,7 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
 
   @override
   Widget build(BuildContext context) {
-    final ValidadorController controller =
-        context.watch<ValidadorController>();
+    final ValidadorController controller = context.watch<ValidadorController>();
 
     if (controller.nomeArquivo != null &&
         _ultimoValidadoNome != controller.nomeArquivo &&
@@ -141,14 +140,12 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
                             bytes: bytes,
                           ),
                 ),
-                if (c.status == StatusValidador.erro &&
-                    c.mensagemErro != null)
+                if (c.status == StatusValidador.erro && c.mensagemErro != null)
                   Padding(
                     padding: const EdgeInsets.only(top: AppDimens.spaceLg),
                     child: PainelStatus(
                       icone: Icons.error_outline,
                       cor: AppColors.error,
-                      corFundo: AppColors.errorBackground,
                       titulo: AppStrings.falhaValidacaoTitulo,
                       mensagem: c.mensagemErro,
                     ),
@@ -161,25 +158,24 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
     );
   }
 
-  /// Gate de conexão: o site só funciona quando a API está acessível E o
-  /// login no portal foi feito — qualquer falha bloqueia a validação e
-  /// mostra o motivo exato (API_URL, credenciais ausentes ou inválidas).
   Widget _painelConexao(ValidadorController c, EstadoConexao conexao) {
-    final (IconData icone, Color cor, Color corFundo, String titulo,
-            String mensagem, String? detalhe) =
-        switch (conexao) {
+    final (
+      IconData icone,
+      Color cor,
+      String titulo,
+      String mensagem,
+      String? detalhe
+    ) = switch (conexao) {
       EstadoConexao.verificando => (
-          Icons.cloud_sync,
+          Icons.sync,
           AppColors.primary,
-          AppColors.surfaceMuted,
           AppStrings.apiVerificandoTitulo,
           AppStrings.apiVerificandoMensagem,
           null,
         ),
       EstadoConexao.apiIndisponivel => (
-          Icons.cloud_off,
+          Icons.link_off,
           AppColors.error,
-          AppColors.errorBackground,
           AppStrings.apiIndisponivelTitulo,
           AppStrings.apiIndisponivelMensagem,
           AppStrings.apiIndisponivelDetalhe,
@@ -187,7 +183,6 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
       EstadoConexao.credenciaisAusentes => (
           Icons.key_off,
           AppColors.error,
-          AppColors.errorBackground,
           AppStrings.apiCredenciaisAusentesTitulo,
           AppStrings.apiCredenciaisAusentesMensagem,
           AppStrings.apiCredenciaisDetalhe,
@@ -195,15 +190,13 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
       EstadoConexao.credenciaisInvalidas => (
           Icons.lock_outline,
           AppColors.error,
-          AppColors.errorBackground,
           AppStrings.apiLoginFalhouTitulo,
           AppStrings.apiLoginFalhouMensagem,
           AppStrings.apiLoginFalhouDetalhe,
         ),
       EstadoConexao.pronto => (
-          Icons.cloud_done,
+          Icons.link,
           AppColors.success,
-          AppColors.successBackground,
           '',
           '',
           null,
@@ -222,7 +215,6 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
               PainelStatus(
                 icone: icone,
                 cor: cor,
-                corFundo: corFundo,
                 titulo: titulo,
                 mensagem: mensagem,
               ),
@@ -248,7 +240,6 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
 
   Widget _buildResultado(BuildContext context, ValidadorController c) {
     final List<GuiaValidada> comProblema = c.guiasComErro;
-    // Filtro opera por LINHA para não vazar erros de outro tipo.
     final List<LinhaGradeGuia> todasLinhas = [
       for (final GuiaValidada g in comProblema) ...linhasDeGuia(g),
     ];
@@ -274,7 +265,10 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                CabecalhoResultado(identificador: _identificador ?? AppStrings.valorIndisponivel),
+                CabecalhoResultado(
+                  identificador:
+                      _identificador ?? AppStrings.valorIndisponivel,
+                ),
                 const SizedBox(height: AppDimens.spaceLg),
                 CardSurface(
                   child: TabelaMetadados(
@@ -289,7 +283,6 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
                   const PainelStatus(
                     icone: Icons.check_circle_outline,
                     cor: AppColors.success,
-                    corFundo: AppColors.successBackground,
                     titulo: AppStrings.semErrosTitulo,
                     mensagem: AppStrings.semErrosDetalhe,
                   )
@@ -302,7 +295,6 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
                     const PainelStatus(
                       icone: Icons.filter_alt_off,
                       cor: AppColors.textMuted,
-                      corFundo: AppColors.surfaceMuted,
                       titulo: '',
                       mensagem: AppStrings.filtroSemResultado,
                     )
@@ -333,21 +325,39 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
       spacing: AppDimens.spaceSm,
       runSpacing: AppDimens.spaceXs,
       children: [
-        ChoiceChip(
-          label: const Text(AppStrings.filtroTodos),
-          selected: _filtroErro == null,
+        _chipFiltro(
+          rotulo: AppStrings.filtroTodos,
+          selecionado: _filtroErro == null,
           onSelected: (_) => setState(() => _filtroErro = null),
         ),
         for (final TipoErroGuia tipo in TipoErroGuia.values)
-          if (tipo != TipoErroGuia.credenciais)
-            ChoiceChip(
-              label: Text(rotuloTipoErro(tipo)),
-              selected: _filtroErro == tipo,
-              onSelected: (_) => setState(() {
-                _filtroErro = _filtroErro == tipo ? null : tipo;
-              }),
-            ),
+          _chipFiltro(
+            rotulo: rotuloTipoErro(tipo),
+            selecionado: _filtroErro == tipo,
+            onSelected: (_) => setState(() {
+              _filtroErro = _filtroErro == tipo ? null : tipo;
+            }),
+          ),
       ],
+    );
+  }
+
+  Widget _chipFiltro({
+    required String rotulo,
+    required bool selecionado,
+    required ValueChanged<bool> onSelected,
+  }) {
+    return ChoiceChip(
+      label: Text(
+        rotulo,
+        style: TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+          color: selecionado ? AppColors.surface : AppColors.textPrimary,
+        ),
+      ),
+      selected: selecionado,
+      onSelected: onSelected,
     );
   }
 

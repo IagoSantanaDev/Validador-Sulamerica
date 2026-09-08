@@ -15,9 +15,17 @@ class NavbarSite extends StatelessWidget {
   Widget build(BuildContext context) {
     return Material(
       color: AppColors.navbar,
-      child: SizedBox(
+      child: Container(
         width: double.infinity,
         height: AppDimens.navbarHeight,
+        decoration: const BoxDecoration(
+          border: Border(
+            bottom: BorderSide(
+              color: AppColors.navy,
+              width: AppDimens.navbarRegua,
+            ),
+          ),
+        ),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: AppDimens.spaceLg),
           child: Row(
@@ -32,7 +40,7 @@ class NavbarSite extends StatelessWidget {
                     SizedBox(width: AppDimens.spaceSm),
                     TextoApp.destaque(
                       AppStrings.tituloApp,
-                      cor: Colors.white,
+                      cor: AppColors.navy,
                       selecionavel: false,
                     ),
                   ],

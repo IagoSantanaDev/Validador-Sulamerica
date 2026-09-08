@@ -36,7 +36,7 @@ class BarraProgressoEnvio extends StatelessWidget {
                           alignment: Alignment.centerLeft,
                           child: FractionallySizedBox(
                             widthFactor: AppDimens.progressoFatorCheio,
-                            child: Container(color: AppColors.primary),
+                            child: Container(color: AppColors.petroleo),
                           ),
                         ),
                       ),

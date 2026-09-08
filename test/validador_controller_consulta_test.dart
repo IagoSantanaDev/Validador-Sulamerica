@@ -12,8 +12,6 @@ import 'package:validador_xml_sulamerica/modules/validador_xml/data/repositories
 import 'package:validador_xml_sulamerica/modules/validador_xml/data/services/sul_america_backend_service.dart';
 import 'package:validador_xml_sulamerica/modules/validador_xml/presentation/controllers/validador_controller.dart';
 
-/// Adapter de rede falso que responde /api/consultas a partir do CORPO do
-/// request (lote) e registra as chamadas feitas — sem rede real.
 class _FakeBatchAdapter implements HttpClientAdapter {
   _FakeBatchAdapter({
     this.statusAutorizacao = 'Autorizado',
@@ -94,53 +92,7 @@ class _FakeValidadorGuiasRepository implements ValidadorGuiasRepository {
   List<GuiaValidada> validarLote(String conteudoXml) => retorno;
 }
 
-/// Adapter para o fluxo individual (backend antigo): atende /api/login,
-/// /api/beneficiario e /api/autorizacao; 404 para o restante.
-class _FakeIndividualAdapter implements HttpClientAdapter {
-  _FakeIndividualAdapter();
 
-  final List<String> logChamadas = [];
-
-  @override
-  void close({bool force = false}) {}
-
-  @override
-  Future<ResponseBody> fetch(
-    RequestOptions options,
-    Stream<Uint8List>? requestStream,
-    Future<void>? cancelFuture,
-  ) async {
-    logChamadas.add(options.path);
-    switch (options.path) {
-      case '/api/login':
-        return _resposta(200, {'token': 'tok123'});
-      case '/api/beneficiario':
-        return _resposta(200, {
-          'status': 'ok',
-          'elegivel': true,
-          'rotuloElegibilidade': 'SIM',
-        });
-      case '/api/autorizacao':
-        return _resposta(200, {
-          'status': 'ok',
-          'encontrada': true,
-          'descricao': 'Autorizado',
-        });
-      default:
-        return _resposta(404, {'status': 'erro'});
-    }
-  }
-
-  ResponseBody _resposta(int status, Map<String, dynamic> corpo) {
-    return ResponseBody.fromBytes(
-      utf8.encode(jsonEncode(corpo)),
-      status,
-      headers: {
-        Headers.contentTypeHeader: [Headers.jsonContentType],
-      },
-    );
-  }
-}
 
 const GuiaTiss _guiaSemSenha = GuiaTiss(
   numeroGuiaPrestador: '111',
@@ -329,33 +281,14 @@ void main() {
       // elegibilidade no lote (único item enviado, sem VPP).
       expect(adapter.logChamadas, ['/api/login', '/api/consultas']);
       expect(adapter.consultasRecebidas, hasLength(1));
-      final List<String> descricoes =
-          controller.guiasComErro.single.consultas.map((c) => c.descricao).toList();
+      final List<String> descricoes = controller.guiasComErro.single.consultas
+          .map((c) => c.descricao)
+          .toList();
       expect(descricoes.any((d) => d.startsWith('Senha inválida')), isTrue);
       expect(descricoes, contains('Elegível: SIM'));
     });
 
-    test('fallback: sem /api/consultas usa o fluxo individual', () async {
-      final _FakeIndividualAdapter adapter = _FakeIndividualAdapter();
 
-      final ValidadorController controller = await _validar(
-        _controllerComGateway(
-          adapter: adapter,
-          retornoValidacao: const [
-            GuiaValidada(
-              guia: _guiaSemSenha,
-              erros: [ErroValidacao(campo: 'senha', mensagem: 'sem senha')],
-            ),
-          ],
-        ),
-      );
-
-      expect(controller.status, StatusValidador.concluido);
-      expect(adapter.logChamadas, contains('/api/login'));
-      expect(adapter.logChamadas, contains('/api/consultas'));
-      expect(adapter.logChamadas, contains('/api/beneficiario'));
-      expect(controller.guias.single.consulta?.descricao, 'Elegível: SIM');
-    });
 
     test('elegibilidade NÃO é um erro próprio no frontend', () async {
       final _FakeBatchAdapter adapter = _FakeBatchAdapter(elegivel: false);
