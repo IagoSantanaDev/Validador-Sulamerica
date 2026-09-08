@@ -9,11 +9,7 @@ import '../../../../globals/widgets/textos.dart';
 import '../../data/models/consulta_guia.dart';
 import '../../data/models/guia_validada.dart';
 
-/// Categorias de erro usadas no filtro da grade. Erros de consulta de senha
-/// (senha inválida, não encontrada, negada...) pertencem à categoria [senha];
-/// os de elegibilidade (não elegível, carteira não encontrada...) pertencem à
-/// categoria [carteira].
-enum TipoErroGuia { senha, carteira, credenciais }
+enum TipoErroGuia { senha, carteira }
 
 class LinhaGradeGuia {
   const LinhaGradeGuia({required this.guia, required this.detalhe});
@@ -25,11 +21,6 @@ class LinhaGradeGuia {
 bool _ehSenhaNaoInformada(String detalhe) =>
     detalhe.toLowerCase().contains('senha não informada');
 
-/// Expande uma guia problemática em linhas: um erro local por linha e, para
-/// cada CONSULTA que falhou (elegibilidade NÃO, senha inválida, consulta de senha
-/// negada...), uma linha adicional com o motivo. Consultas bem-sucedidas
-/// (Elegível: SIM, Senha: ok) NÃO viram linha — ficam no popup.
-/// A linha de "Senha não informada" é sempre a última.
 List<LinhaGradeGuia> linhasDeGuia(GuiaValidada guia) {
   final List<LinhaGradeGuia> linhas = [
     for (final erro in guia.erros)
@@ -49,9 +40,6 @@ List<LinhaGradeGuia> linhasDeGuia(GuiaValidada guia) {
   return linhas;
 }
 
-/// Agrupa as linhas por detalhe igual (guias com o mesmo detalhe ficam uma
-/// abaixo da outra, na ordem em que apareceram) e garante que o bloco de
-/// "senha não informada" vá para o final da grade.
 List<LinhaGradeGuia> agruparPorDetalhe(List<LinhaGradeGuia> linhas) {
   final Map<String, List<LinhaGradeGuia>> grupos = {};
   for (final LinhaGradeGuia linha in linhas) {
@@ -86,12 +74,6 @@ TipoErroGuia? tipoErroDeLinha(LinhaGradeGuia linha) {
 }
 
 TipoErroGuia _tipoDeConsulta(ConsultaGuia consulta) {
-  final String descricao = consulta.descricao;
-  if (descricao.contains('autenticar') ||
-      descricao.contains('Credenciais') ||
-      descricao.contains('credenciais')) {
-    return TipoErroGuia.credenciais;
-  }
   return consulta.tipo == TipoConsultaGuia.senha
       ? TipoErroGuia.senha
       : TipoErroGuia.carteira;
@@ -100,7 +82,6 @@ TipoErroGuia _tipoDeConsulta(ConsultaGuia consulta) {
 String rotuloTipoErro(TipoErroGuia tipo) => switch (tipo) {
       TipoErroGuia.senha => AppStrings.filtroSenha,
       TipoErroGuia.carteira => AppStrings.filtroCarteira,
-      TipoErroGuia.credenciais => AppStrings.filtroCredenciais,
     };
 
 class GradeGuias extends StatelessWidget {
@@ -140,8 +121,6 @@ class GradeGuias extends StatelessWidget {
     );
   }
 
-  /// Linha da grade: as três células compartilham o estado de hover para a
-  /// linha inteira escurecer junta; todas respondem ao clique.
   TableRow _linha(BuildContext context, LinhaGradeGuia linha) {
     final ValueNotifier<bool> hover = ValueNotifier<bool>(false);
     final GuiaValidada guia = linha.guia;

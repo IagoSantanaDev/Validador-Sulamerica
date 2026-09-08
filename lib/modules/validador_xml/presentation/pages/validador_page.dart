@@ -330,20 +330,17 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
           onSelected: (_) => setState(() => _filtroErro = null),
         ),
         for (final TipoErroGuia tipo in TipoErroGuia.values)
-          if (tipo != TipoErroGuia.credenciais)
-            _chipFiltro(
-              rotulo: rotuloTipoErro(tipo),
-              selecionado: _filtroErro == tipo,
-              onSelected: (_) => setState(() {
-                _filtroErro = _filtroErro == tipo ? null : tipo;
-              }),
-            ),
+          _chipFiltro(
+            rotulo: rotuloTipoErro(tipo),
+            selecionado: _filtroErro == tipo,
+            onSelected: (_) => setState(() {
+              _filtroErro = _filtroErro == tipo ? null : tipo;
+            }),
+          ),
       ],
     );
   }
 
-  /// Cor do rótulo resolvida aqui (e não no ChipThemeData) porque
-  /// labelStyle do tema não varia por estado nesta versão do Flutter.
   Widget _chipFiltro({
     required String rotulo,
     required bool selecionado,

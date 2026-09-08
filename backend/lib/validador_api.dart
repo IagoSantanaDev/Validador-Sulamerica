@@ -31,8 +31,6 @@ class ValidadorApi {
   /// bloqueio do F5 ASM em uso concorrente).
   static const Set<String> _rotasDePortal = {
     'api/login',
-    'api/beneficiario',
-    'api/autorizacao',
     'api/consultas',
   };
   static const int _maxRateLimitPorJanela = 40;
@@ -40,8 +38,6 @@ class ValidadorApi {
 
   late final Router _rotas = Router()
     ..post('/api/login', _login)
-    ..post('/api/beneficiario', _beneficiario)
-    ..get('/api/autorizacao', _senha)
     ..post('/api/consultas', _consultas)
     ..get('/api/status', _status)
     ..all('/<ignored|.*>', _naoEncontrado);
@@ -104,83 +100,6 @@ class ValidadorApi {
     );
     _logger.i('Sessao criada para o prestador code=$code (mascarado).');
     return _json({'token': token, 'autenticada': true});
-  }
-
-  Future<Response> _beneficiario(Request request) async {
-    final _LeituraJson leitura = await _lerJson(request);
-    if (leitura.excedeLimite) return _erroCorpoGrande();
-    final Map<String, dynamic>? corpo = leitura.valor;
-    if (corpo == null) {
-      return _erro('Corpo JSON invalido.', 400);
-    }
-
-    final SessaoPortal? sessao = _sessaoPorCorpo(corpo);
-    if (sessao == null) {
-      return _erro('Token de sessao invalido ou ausente.', 401);
-    }
-
-    final String? carteira = corpo['carteira'] as String?;
-    if (carteira == null || carteira.isEmpty) {
-      return _erro('Campo carteira e obrigatorio.', 400);
-    }
-    if (!_carteiraValida(carteira)) {
-      return _erro(
-        'Carteira deve conter exatamente 20 digitos '
-        '(segmentos 3-5-4-4-4).',
-        400,
-      );
-    }
-
-    final String? html = await sessao.consultarBeneficiario(
-      carteirinhaCompleta: carteira,
-    );
-    if (html == null) {
-      return _erro('Falha na consulta ao portal SulAmerica.', 502);
-    }
-
-    return _json({
-      'status': 'ok',
-      // Elegibilidade extraída do elegibilidade-resultado.htm (SIM/NÃO);
-      // null quando o portal não renderiza o resultado (carteira não
-      // encontrada). O html original não é devolvido ao cliente: só o
-      // indicador importa e reduz o payload da rede.
-      'elegivel': extrairElegivel(html),
-      'rotuloElegibilidade': extrairRotuloElegibilidade(html),
-    });
-  }
-
-  Future<Response> _senha(Request request) async {
-    final String? token = request.url.queryParameters['token'];
-    final String? senha = request.url.queryParameters['senha'];
-    final SessaoPortal? sessao = token == null ? null : _sessoes[token];
-
-    if (sessao == null) {
-      return _erro('Token de sessao invalido ou ausente.', 401);
-    }
-    if (senha == null || senha.isEmpty) {
-      return _erro('Parametro senha e obrigatorio.', 400);
-    }
-    if (!_senhaValida(senha)) {
-      return _erro(
-        'Senha invalida: deve ter exatamente 10 digitos comecando com 5.',
-        400,
-      );
-    }
-
-    final Map<String, dynamic>? dados = await sessao
-        .consultarSenha(senha: senha);
-    if (dados == null) {
-      return _erro('Falha na consulta ao portal SulAmerica.', 502);
-    }
-
-    // Resposta compacta: o cliente só precisa saber se há autorização e a
-    // descricao do status — o JSON cru do portal não é devolvido.
-    final String? descricao = _extrairStatusSenha(dados);
-    return _json({
-      'status': 'ok',
-      'encontrada': descricao != null,
-      'descricao': descricao,
-    });
   }
 
   /// Consulta em lote: recebe várias solicitações (elegibilidade/vpp) e

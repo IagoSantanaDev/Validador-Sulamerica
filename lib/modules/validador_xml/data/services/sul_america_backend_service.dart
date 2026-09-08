@@ -1,7 +1,6 @@
 import '../../../../globals/network/dio_client.dart';
 import '../../../../globals/network/result.dart';
 import '../models/consulta_lote.dart';
-import '../models/resultado_consulta_beneficiario.dart';
 
 class SulAmericaBackendService {
   SulAmericaBackendService(this._dio);
@@ -17,29 +16,6 @@ class SulAmericaBackendService {
       '/api/login',
       corpo: {'code': code, 'user': user, 'senha': senha},
       parser: (dados) => (dados as Map)['token'] as String,
-    );
-  }
-
-  Future<Result<ResultadoConsultaBeneficiario>> consultarBeneficiario({
-    required String token,
-    required String carteira,
-  }) {
-    return _dio.post<ResultadoConsultaBeneficiario>(
-      '/api/beneficiario',
-      corpo: {'token': token, 'carteira': carteira},
-      parser: (dados) =>
-          ResultadoConsultaBeneficiario.fromJson(dados as Map<String, dynamic>),
-    );
-  }
-
-  Future<Result<Map<String, dynamic>>> consultarSenha({
-    required String token,
-    required String senha,
-  }) {
-    return _dio.get<Map<String, dynamic>>(
-      '/api/autorizacao',
-      parametrosConsulta: { 'token': token, 'senha': senha},
-      parser: (dados) => (dados as Map).cast<String, dynamic>(),
     );
   }
 

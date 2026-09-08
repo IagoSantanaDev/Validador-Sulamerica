@@ -14,15 +14,12 @@ import '../../data/repositories/regras/regra_senha_prefixo.dart';
 import '../../data/models/consulta_lote.dart';
 import '../../data/models/guia_validada.dart';
 import '../../data/models/informacoes_lote.dart';
-import '../../data/models/resultado_consulta_beneficiario.dart';
 import '../../data/repositories/validador_guias_repository.dart';
 import '../../data/repositories/validador_guias_repository_impl.dart';
 import '../../data/services/sul_america_backend_service.dart';
 
 enum StatusValidador { semArquivo, arquivoPronto, validando, concluido, erro }
 
-/// Pré-requisitos de conexão antes de liberar o site: API acessível + login
-/// no portal SulAmérica.
 enum EstadoConexao {
   verificando,
   apiIndisponivel,
@@ -53,8 +50,6 @@ class ValidadorController extends ChangeNotifier {
 
   String? _tokenSessao;
 
-  /// Pré-requisito de conexão: o site só funciona com a API acessível e com
-  /// login no portal (sem isso, validação local fica bloqueada).
   EstadoConexao _estadoConexao = EstadoConexao.verificando;
 
   EstadoConexao get estadoConexao => _estadoConexao;
@@ -103,12 +98,6 @@ class ValidadorController extends ChangeNotifier {
     }
     notifyListeners();
   }
-
-  /// Dedupe intra-lote: a mesma carteira/senha repetida no mesmo arquivo é
-  /// consultada uma única vez (resultado idêntico no mesmo instante). O cache
-  /// é limpo a cada validação — não envelhece dados entre lotes.
-  final Map<String, ConsultaGuia> _cacheElegibilidade = {};
-  final Map<String, ConsultaGuia> _cacheSenha = {};
 
   StatusValidador _status = StatusValidador.semArquivo;
   String? _nomeArquivo;
@@ -210,9 +199,6 @@ class ValidadorController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Consulta o portal (via /api/consultas em lote) para as guias do lote:
-  /// elegibilidade pela carteira SEMPRE que ela for válida; consulta de senha
-  /// quando a senha for válida. Falhas estruturais viram erros na guia.
   Future<List<GuiaValidada>> _consultarGuias(
     List<GuiaValidada> guias,
   ) async {
@@ -226,28 +212,31 @@ class ValidadorController extends ChangeNotifier {
       final String? carteira = guia.numeroCarteira;
       final List<ConsultaGuia> errosLocais = [];
       if (senha != null && senha.isNotEmpty && !_senhaValida(senha)) {
-        errosLocais.add(ConsultaGuia(
-          tipo: TipoConsultaGuia.senha,
-          sucesso: false,
-          descricao: '${AppStrings.erroSenhaInvalida} ($senha)',
-        ),);
+        errosLocais.add(
+          ConsultaGuia(
+            tipo: TipoConsultaGuia.senha,
+            sucesso: false,
+            descricao: '${AppStrings.erroSenhaInvalida} ($senha)',
+          ),
+        );
       }
       if (carteira != null &&
           carteira.isNotEmpty &&
           !_carteiraValida(carteira)) {
-        errosLocais.add(ConsultaGuia(
-          tipo: TipoConsultaGuia.elegibilidade,
-          sucesso: false,
-          descricao: '${AppStrings.erroCarteiraInvalida} ($carteira)',
-        ),);
+        errosLocais.add(
+          ConsultaGuia(
+            tipo: TipoConsultaGuia.elegibilidade,
+            sucesso: false,
+            descricao: '${AppStrings.erroCarteiraInvalida} ($carteira)',
+          ),
+        );
       }
       if (errosLocais.isNotEmpty) {
         base[i] = GuiaValidada(
           guia: guia.guia,
-          erros:
-              senha != null && senha.isNotEmpty && !_senhaValida(senha)
-                  ? guia.erros.where((e) => e.campo != 'senha').toList()
-                  : guia.erros,
+          erros: senha != null && senha.isNotEmpty && !_senhaValida(senha)
+              ? guia.erros.where((e) => e.campo != 'senha').toList()
+              : guia.erros,
           consultas: errosLocais,
         );
       }
@@ -280,8 +269,7 @@ class ValidadorController extends ChangeNotifier {
     final Result<List<ResultadoConsultaLote>> resultado =
         await service.consultarLote(token: token, consultas: itens);
 
-    final List<GuiaValidada>? comConsultas =
-        resultado.fold<List<GuiaValidada>?>(
+    return resultado.fold<List<GuiaValidada>>(
       onSuccess: (resultados) {
         final Map<String, ConsultaGuia> porChave = {
           for (final ResultadoConsultaLote r in resultados)
@@ -298,34 +286,45 @@ class ValidadorController extends ChangeNotifier {
         }
         return acumulado;
       },
-      onFailure: (_) => null,
+      onFailure: (erro) {
+        final ConsultaGuia erroConsulta = ConsultaGuia(
+          sucesso: false,
+          descricao: 'Consulta em lote falhou: $erro',
+        );
+        return [
+          for (final GuiaValidada guia in base)
+            _anexarConsulta(guia, erroConsulta),
+        ];
+      },
     );
-
-    if (comConsultas != null) return comConsultas;
-
-    // Fallback: backend sem /api/consultas (deploy antigo) — fluxo
-    // individual, com dedupe intra-lote.
-    return _consultarGuiasIndividualmente(service, token, base);
   }
 
   static bool _carteiraValida(String carteira) =>
       carteira.length == 20 && RegExp(r'^\d+$').hasMatch(carteira);
 
+  static bool _senhaValida(String senha) =>
+      senha.length == RegraSenhaPrefixo.tamanhoExato &&
+      senha.startsWith(RegraSenhaPrefixo.prefixoObrigatorio);
+
   List<ConsultaLoteItem> _itensDeConsulta(GuiaValidada guia) {
     final List<ConsultaLoteItem> itens = [];
     final String? carteira = guia.numeroCarteira;
     if (carteira != null && carteira.isNotEmpty && _carteiraValida(carteira)) {
-      itens.add(ConsultaLoteItem(
-        tipo: TipoConsultaGuia.elegibilidade,
-        chave: carteira,
-      ),);
+      itens.add(
+        ConsultaLoteItem(
+          tipo: TipoConsultaGuia.elegibilidade,
+          chave: carteira,
+        ),
+      );
     }
     final String? senha = guia.senha;
     if (senha != null && _senhaValida(senha)) {
-      itens.add(ConsultaLoteItem(
-        tipo: TipoConsultaGuia.senha,
-        chave: senha,
-      ),);
+      itens.add(
+        ConsultaLoteItem(
+          tipo: TipoConsultaGuia.senha,
+          chave: senha,
+        ),
+      );
     }
     return itens;
   }
@@ -350,9 +349,6 @@ class ValidadorController extends ChangeNotifier {
     return _consultaSenha(r.statusSenha, senha: r.chave);
   }
 
-  /// Erro próprio para elegibilidade: SIM = ok; NÃO = erro; sem indicador =
-  /// carteira não encontrada (erro); falha de transporte também é erro.
-  /// A carteira é incluída no texto do erro para identificar o que falhou.
   ConsultaGuia _consultaElegibilidade(
     bool? elegivel, {
     required String carteira,
@@ -384,84 +380,22 @@ class ValidadorController extends ChangeNotifier {
     };
   }
 
-  /// Fluxo individual (uma requisição por consulta) usado quando o backend
-  /// ainda não expõe /api/consultas.
-  Future<List<GuiaValidada>> _consultarGuiasIndividualmente(
-    SulAmericaBackendService service,
-    String token,
-    List<GuiaValidada> guias,
-  ) async {
-    _cacheElegibilidade.clear();
-    _cacheSenha.clear();
-    final List<GuiaValidada> comConsultas = [];
-    for (final GuiaValidada guia in guias) {
-      GuiaValidada atual = guia;
-      for (final ConsultaLoteItem item in _itensDeConsulta(atual)) {
-        final ConsultaGuia consulta =
-            item.tipo == TipoConsultaGuia.elegibilidade
-                ? await _consultarElegibilidadeItem(service, token, item.chave)
-                : await _consultarSenhaItem(service, token, item.chave);
-        atual = _anexarConsulta(atual, consulta);
-      }
-      comConsultas.add(atual);
-    }
-    return comConsultas;
-  }
-
-  static bool _senhaValida(String senha) =>
-      senha.length == RegraSenhaPrefixo.tamanhoExato &&
-      senha.startsWith(RegraSenhaPrefixo.prefixoObrigatorio);
-
-  Future<ConsultaGuia> _consultarElegibilidadeItem(
-    SulAmericaBackendService service,
-    String token,
-    String carteira,
-  ) async {
-    final ConsultaGuia? naCache = _cacheElegibilidade[carteira];
-    if (naCache != null) return naCache;
-
-    final Result<ResultadoConsultaBeneficiario> resultado =
-        await service.consultarBeneficiario(token: token, carteira: carteira);
-
-    final ConsultaGuia consulta = resultado.fold<ConsultaGuia>(
-      onSuccess: (res) =>
-          _consultaElegibilidade(res.elegivel, carteira: carteira),
-      onFailure: (erro) => ConsultaGuia(
-        tipo: TipoConsultaGuia.elegibilidade,
-        sucesso: false,
-        descricao: 'Consulta de elegibilidade falhou: $erro',
-      ),
+  ConsultaGuia _consultaSenha(String? descricao, {required String senha}) {
+    final bool autorizada = _descricaoAutorizada(descricao);
+    return ConsultaGuia(
+      tipo: TipoConsultaGuia.senha,
+      sucesso: autorizada,
+      descricao: autorizada
+          ? 'Senha: ok'
+          : descricao == null
+              ? '${AppStrings.erroSenhaNaoEncontrada} ($senha)'
+              : 'Senha: $descricao ($senha)',
     );
-    _cacheElegibilidade[carteira] = consulta;
-    return consulta;
   }
 
-  Future<ConsultaGuia> _consultarSenhaItem(
-    SulAmericaBackendService service,
-    String token,
-    String senha,
-  ) async {
-    final ConsultaGuia? naCache = _cacheSenha[senha];
-    if (naCache != null) return naCache;
+  static bool _descricaoAutorizada(String? descricao) =>
+      descricao != null && descricao.toLowerCase().contains('autorizado');
 
-    final Result<Map<String, dynamic>> resultado =
-        await service.consultarSenha(token: token, senha: senha);
-
-    final ConsultaGuia consulta = resultado.fold<ConsultaGuia>(
-      onSuccess: (dados) =>
-          _consultaSenha(dados['descricao'] as String?, senha: senha),
-      onFailure: (erro) => ConsultaGuia(
-        tipo: TipoConsultaGuia.senha,
-        sucesso: false,
-        descricao: 'Consulta de senha falhou: $erro',
-      ),
-    );
-    _cacheSenha[senha] = consulta;
-    return consulta;
-  }
-
-  /// Retorna (token, motivoDeErro): token nulo com motivo quando a sessão
-  /// não pôde ser obtida (credenciais ausentes ou login rejeitado).
   Future<(String?, String?)> _obterTokenSessao(
     SulAmericaBackendService service,
   ) async {
@@ -492,27 +426,6 @@ class ValidadorController extends ChangeNotifier {
       onFailure: (_) => (null, AppStrings.erroLoginFalhou),
     );
   }
-
-  /// Monta o resultado da autorização (senha) a partir da descrição do status
-  /// do portal. Autorizada quando a descrição CONTÉM "autorizado". Senha com
-  /// formato válido mas SEM status no portal = "Senha não encontrada no
-  /// portal" — diferente de formato inválido (Senha inválida), tratado na
-  /// pré-validação.
-  ConsultaGuia _consultaSenha(String? descricao, {required String senha}) {
-    final bool autorizada = _descricaoAutorizada(descricao);
-    return ConsultaGuia(
-      tipo: TipoConsultaGuia.senha,
-      sucesso: autorizada,
-      descricao: autorizada
-          ? 'Senha: ok'
-          : descricao == null
-              ? '${AppStrings.erroSenhaNaoEncontrada} ($senha)'
-              : 'Senha: $descricao ($senha)',
-    );
-  }
-
-  static bool _descricaoAutorizada(String? descricao) =>
-      descricao != null && descricao.toLowerCase().contains('autorizado');
 
   GuiaValidada _anexarConsulta(GuiaValidada guia, ConsultaGuia consulta) =>
       GuiaValidada(

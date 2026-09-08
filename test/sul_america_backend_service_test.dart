@@ -5,11 +5,10 @@ import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:validador_xml_sulamerica/globals/network/app_exception.dart';
 import 'package:validador_xml_sulamerica/globals/network/dio_client.dart';
+import 'package:validador_xml_sulamerica/modules/validador_xml/data/models/consulta_guia.dart';
+import 'package:validador_xml_sulamerica/modules/validador_xml/data/models/consulta_lote.dart';
 import 'package:validador_xml_sulamerica/modules/validador_xml/data/services/sul_america_backend_service.dart';
 
-/// Adapter falso que devolve uma resposta pré-definida — sem chamada de
-/// rede real (inclusive permite testar o mapeamento de erros do proxy,
-/// que responde com status HTTP 4xx/5xx e corpo JSON).
 class _FakeHttpClientAdapter implements HttpClientAdapter {
   _FakeHttpClientAdapter({required this.statusCode, required this.corpo});
 
@@ -67,56 +66,57 @@ void main() {
       );
     });
 
-    test('consulta de beneficiário parseia elegivel/rotulo', () async {
+    test('consultarLote parseia resultados de elegibilidade e senha', () async {
       final servico = _servico(
         statusCode: 200,
         corpo: {
           'status': 'ok',
-          'elegivel': true,
-          'rotuloElegibilidade': 'SIM',
+          'resultados': [
+            {
+              'chave': '58201824004384300010',
+              'tipo': 'elegibilidade',
+              'sucesso': true,
+              'elegivel': true,
+              'rotuloElegibilidade': 'SIM',
+            },
+            {
+              'chave': '5056654786',
+              'tipo': 'senha',
+              'sucesso': true,
+              'statusSenha': 'Autorizado parcialmente',
+            },
+          ],
         },
       );
 
-      final resultado = await servico.consultarBeneficiario(
+      final resultado = await servico.consultarLote(
         token: 'a1b2c3d4',
-        carteira: '58201824004384300010',
+        consultas: const [
+          ConsultaLoteItem(
+            tipo: TipoConsultaGuia.elegibilidade,
+            chave: '58201824004384300010',
+          ),
+          ConsultaLoteItem(
+            tipo: TipoConsultaGuia.senha,
+            chave: '5056654786',
+          ),
+        ],
       );
 
       resultado.fold(
-        onSuccess: (res) {
-          expect(res.elegivel, isTrue);
-          expect(res.rotuloElegibilidade, 'SIM');
-          expect(res.temResultadoElegibilidade, isTrue);
+        onSuccess: (itens) {
+          expect(itens, hasLength(2));
+          expect(itens[0].tipo, TipoConsultaGuia.elegibilidade);
+          expect(itens[0].elegivel, isTrue);
+          expect(itens[1].tipo, TipoConsultaGuia.senha);
+          expect(itens[1].statusSenha, 'Autorizado parcialmente');
         },
         onFailure: (erro) => fail('Esperava sucesso, veio: $erro'),
       );
     });
 
-    test('consulta sem resultado de elegibilidade devolve null', () async {
-      final servico = _servico(
-        statusCode: 200,
-        corpo: {
-          'status': 'ok',
-          'elegivel': null,
-          'rotuloElegibilidade': null,
-        },
-      );
-
-      final resultado = await servico.consultarBeneficiario(
-        token: 'a1b2c3d4',
-        carteira: '99999999999999999999',
-      );
-
-      resultado.fold(
-        onSuccess: (res) {
-          expect(res.elegivel, isNull);
-          expect(res.temResultadoElegibilidade, isFalse);
-        },
-        onFailure: (erro) => fail('Esperava sucesso, veio: $erro'),
-      );
-    });
-
-    test('login com 401 (senha errada) mapeia NaoAutorizadoException', () async {
+    test('login com 401 (senha errada) mapeia NaoAutorizadoException',
+        () async {
       final servico = _servico(
         statusCode: 401,
         corpo: {'status': 'erro', 'mensagem': 'Falha ao autenticar'},
@@ -131,30 +131,6 @@ void main() {
       resultado.fold(
         onSuccess: (_) => fail('Esperava falha'),
         onFailure: (erro) => expect(erro, isA<NaoAutorizadoException>()),
-      );
-    });
-
-    test('autorização VPP devolve a descrição compacta do backend', () async {
-      final servico = _servico(
-        statusCode: 200,
-        corpo: {
-          'status': 'ok',
-          'encontrada': true,
-          'descricao': 'Autorizado parcialmente',
-        },
-      );
-
-      final resultado = await servico.consultarSenha(
-        token: 'a1b2c3d4',
-        senha: '5056654786',
-      );
-
-      resultado.fold(
-        onSuccess: (dados) {
-          expect(dados['descricao'], 'Autorizado parcialmente');
-          expect(dados['encontrada'], isTrue);
-        },
-        onFailure: (erro) => fail('Esperava sucesso, veio: $erro'),
       );
     });
   });
