@@ -100,8 +100,6 @@ class TextoApp extends StatelessWidget {
           selecionavel: selecionavel,
         );
 
-  /// Para dado real que é literalmente um código (hash, nº de protocolo,
-  /// carteira, senha) — nunca para rótulo comum.
   const TextoApp.codigo(
     String texto, {
     Key? key,
@@ -125,9 +123,8 @@ class TextoApp extends StatelessWidget {
   final TextAlign? alinhamento;
   final FontWeight? peso;
 
-  /// Quando true, o texto é selecionável/copiável (SelectableText). Em áreas
-  /// clicáveis (navbar, dropzone, linhas da grade) use false, pois o texto
-  /// selecionável captura o clique e mostra o cursor de texto (I-beam).
+  ///Quando true, o texto pode ser selecionado e copiado.
+  ///Em áreas clicáveis, use false para evitar que a seleção de texto atrapalhe os cliques.
   final bool selecionavel;
 
   @override

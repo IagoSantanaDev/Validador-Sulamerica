@@ -3,8 +3,6 @@ import 'package:flutter/material.dart';
 import '../constants/app_colors.dart';
 import '../constants/app_dimens.dart';
 
-/// Superfície de conteúdo no estilo de folha de papel: contorno fino e sem
-/// sombra, em vez do cartão flutuante com sombra difusa de dashboard.
 class CardSurface extends StatelessWidget {
   const CardSurface({
     super.key,

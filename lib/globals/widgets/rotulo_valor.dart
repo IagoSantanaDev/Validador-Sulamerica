@@ -17,8 +17,6 @@ class RotuloValor extends StatelessWidget {
   final String valor;
   final double? larguraRotulo;
 
-  /// true quando o valor é um código real (hash, protocolo, carteira,
-  /// senha) — nunca use para dar destaque a um valor comum.
   final bool monoespacado;
 
   @override

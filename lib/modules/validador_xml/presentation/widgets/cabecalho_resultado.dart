@@ -16,8 +16,6 @@ class CabecalhoResultado extends StatelessWidget {
       children: [
         const TextoApp.titulo(AppStrings.resultadoTitulo),
         const SizedBox(height: AppDimens.spaceSm),
-        // Protocolo em monoespaçado dentro de um selo com contorno — é um
-        // código real (não um rótulo decorativo).
         Container(
           padding: const EdgeInsets.symmetric(
             horizontal: AppDimens.spaceSm,

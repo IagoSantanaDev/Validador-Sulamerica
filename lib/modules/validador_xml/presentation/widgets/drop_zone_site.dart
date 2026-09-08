@@ -15,8 +15,7 @@ class DropZoneSite extends StatefulWidget {
     required this.onArquivoSelecionado,
   });
 
-  final void Function(String nomeArquivo, Uint8List bytes)
-      onArquivoSelecionado;
+  final void Function(String nomeArquivo, Uint8List bytes) onArquivoSelecionado;
 
   @override
   State<DropZoneSite> createState() => _DropZoneSiteState();
@@ -39,8 +38,6 @@ class _DropZoneSiteState extends State<DropZoneSite> {
           child: SizedBox(
             height: AppDimens.dropZoneAltura,
             child: CustomPaint(
-              // Borda tracejada: lê como uma linha de corte de formulário,
-              // não como um retângulo arredondado de upload de SaaS.
               painter: _BordaTracejada(
                 cor: _arrastandoArquivo ? AppColors.navy : AppColors.border,
               ),
@@ -142,7 +139,6 @@ class _DropZoneSiteState extends State<DropZoneSite> {
   }
 }
 
-/// Desenha um retângulo com borda tracejada (linha de corte de formulário).
 class _BordaTracejada extends CustomPainter {
   const _BordaTracejada({required this.cor});
 

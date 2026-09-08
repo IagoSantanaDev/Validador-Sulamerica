@@ -1,17 +1,11 @@
 import 'package:flutter/material.dart';
 
-/// Paleta ancorada nas duas únicas cores que já existiam no produto (o navy
-/// e o verde-azulado do símbolo em web/favicon.ico) e no papel de ficha de
-/// conferência/protocolo — não no azul-acinzentado e laranja genéricos de
-/// dashboard que estavam aqui antes.
 class AppColors {
   const AppColors._();
 
   static const Color navy = Color(0xFF0E3A63);
   static const Color petroleo = Color(0xFF0E8377);
 
-  // "primary" e "navbar" seguem existindo como apelidos porque vários
-  // widgets já dependem desses nomes; ambos apontam para o navy do símbolo.
   static const Color primary = navy;
   static const Color navbar = surface;
 

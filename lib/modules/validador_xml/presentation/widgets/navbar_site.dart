@@ -6,8 +6,6 @@ import '../../../../globals/constants/app_strings.dart';
 import '../../../../globals/widgets/icone_favicon.dart';
 import '../../../../globals/widgets/textos.dart';
 
-/// Estilo papel timbrado: fundo claro (o símbolo não lê bem sobre navy) com
-/// uma régua sólida na base, em vez da barra colorida cheia usual de SaaS.
 class NavbarSite extends StatelessWidget {
   const NavbarSite({super.key, this.onTituloTap});
 

@@ -23,12 +23,18 @@ class TabelaMetadados extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // O terceiro elemento marca quais valores são código real (hash, nº de
-    // lote) e por isso saem em monoespaçado.
     final List<(String, String, bool)> linhas = [
-      (AppStrings.metadadoNome, nomeArquivo ?? AppStrings.valorIndisponivel, false),
+      (
+        AppStrings.metadadoNome,
+        nomeArquivo ?? AppStrings.valorIndisponivel,
+        false
+      ),
       (AppStrings.metadadoTamanho, formatarTamanho(tamanhoArquivoBytes), false),
-      (AppStrings.metadadoVersao, informacoes.versao ?? AppStrings.valorIndisponivel, false),
+      (
+        AppStrings.metadadoVersao,
+        informacoes.versao ?? AppStrings.valorIndisponivel,
+        false
+      ),
       (
         AppStrings.metadadoTipoTransacao,
         informacoes.tipoTransacao ?? AppStrings.valorIndisponivel,

@@ -8,8 +8,6 @@ class AppDimens {
   static const double spaceXl = 32;
   static const double spaceXxl = 64;
 
-  // Cantos quase retos em todo o app: tratamento único e deliberado de
-  // ficha de papel, não o raio de 12px genérico de card de SaaS.
   static const double radiusSm = 2;
   static const double radiusMd = 2;
   static const double radiusCard = 2;

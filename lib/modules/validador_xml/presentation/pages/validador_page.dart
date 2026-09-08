@@ -62,8 +62,7 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
 
   @override
   Widget build(BuildContext context) {
-    final ValidadorController controller =
-        context.watch<ValidadorController>();
+    final ValidadorController controller = context.watch<ValidadorController>();
 
     if (controller.nomeArquivo != null &&
         _ultimoValidadoNome != controller.nomeArquivo &&
@@ -141,8 +140,7 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
                             bytes: bytes,
                           ),
                 ),
-                if (c.status == StatusValidador.erro &&
-                    c.mensagemErro != null)
+                if (c.status == StatusValidador.erro && c.mensagemErro != null)
                   Padding(
                     padding: const EdgeInsets.only(top: AppDimens.spaceLg),
                     child: PainelStatus(
@@ -160,13 +158,14 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
     );
   }
 
-  /// Gate de conexão: o site só funciona quando a API está acessível E o
-  /// login no portal foi feito — qualquer falha bloqueia a validação e
-  /// mostra o motivo exato (API_URL, credenciais ausentes ou inválidas).
   Widget _painelConexao(ValidadorController c, EstadoConexao conexao) {
-    final (IconData icone, Color cor, String titulo, String mensagem,
-            String? detalhe) =
-        switch (conexao) {
+    final (
+      IconData icone,
+      Color cor,
+      String titulo,
+      String mensagem,
+      String? detalhe
+    ) = switch (conexao) {
       EstadoConexao.verificando => (
           Icons.sync,
           AppColors.primary,
@@ -241,7 +240,6 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
 
   Widget _buildResultado(BuildContext context, ValidadorController c) {
     final List<GuiaValidada> comProblema = c.guiasComErro;
-    // Filtro opera por LINHA para não vazar erros de outro tipo.
     final List<LinhaGradeGuia> todasLinhas = [
       for (final GuiaValidada g in comProblema) ...linhasDeGuia(g),
     ];
@@ -267,7 +265,9 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                CabecalhoResultado(identificador: _identificador ?? AppStrings.valorIndisponivel),
+                CabecalhoResultado(
+                    identificador:
+                        _identificador ?? AppStrings.valorIndisponivel),
                 const SizedBox(height: AppDimens.spaceLg),
                 CardSurface(
                   child: TabelaMetadados(

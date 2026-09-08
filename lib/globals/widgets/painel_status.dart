@@ -4,9 +4,6 @@ import '../constants/app_colors.dart';
 import '../constants/app_dimens.dart';
 import 'textos.dart';
 
-/// Aviso de status no estilo anotação de ficha: régua colorida na lateral
-/// sobre papel, sem preenchimento colorido nem sombra — evita o cartão
-/// "ícone + fundo tingido" repetido em qualquer dashboard genérico.
 class PainelStatus extends StatelessWidget {
   const PainelStatus({
     super.key,

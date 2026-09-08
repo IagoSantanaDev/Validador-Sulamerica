@@ -24,8 +24,6 @@ class AppTheme {
       colorScheme: scheme,
       fontFamily: 'Roboto',
       textTheme: const TextTheme(
-        // Título de destaque: peso alto e leve compressão no lugar de um
-        // serifado — mantém a identidade só na tipografia sans já usada.
         displayLarge: TextStyle(
           fontSize: 34,
           fontWeight: FontWeight.w800,
@@ -69,8 +67,6 @@ class AppTheme {
           fontWeight: FontWeight.w400,
           color: AppColors.textMuted,
         ),
-        // Reservado a dado/código real (hash, protocolo, carteira, senha) —
-        // nunca para rótulo decorativo.
         labelLarge: TextStyle(
           fontFamily: 'Courier New',
           fontFamilyFallback: ['monospace'],
