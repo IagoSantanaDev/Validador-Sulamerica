@@ -45,26 +45,13 @@ class AppStrings {
 
   static const String apiVerificandoTitulo = 'Conectando à API';
   static const String apiVerificandoMensagem =
-      'Verificando conexão e autenticando no portal...';
+      'Verificando conexão com o servidor intermediário...';
   static const String apiIndisponivelTitulo = 'API indisponível';
   static const String apiIndisponivelMensagem =
       'Não foi possível conectar ao servidor intermediário.';
   static const String apiIndisponivelDetalhe =
       'Confira se a variável API_URL está configurada no build '
       '(ex.: API_URL=https://seu-backend.onrender.com).';
-  static const String apiCredenciaisAusentesTitulo = 'Credenciais não configuradas';
-  static const String apiCredenciaisAusentesMensagem =
-      'PORTAL_CODE, PORTAL_USER e PORTAL_SENHA não estão definidos '
-      'no build da aplicação.';
-  static const String apiCredenciaisDetalhe =
-      'Defina PORTAL_CODE, PORTAL_USER e PORTAL_SENHA nas variáveis de '
-      'ambiente do build (Cloudflare Pages → Environment variables).';
-  static const String apiLoginFalhouTitulo = 'Falha no login no portal';
-  static const String apiLoginFalhouMensagem =
-      'As credenciais foram rejeitadas pelo portal. Confira '
-      'PORTAL_CODE, PORTAL_USER e PORTAL_SENHA.';
-  static const String apiLoginFalhouDetalhe =
-      'Confira os valores das variáveis PORTAL_* e tente novamente.';
   static const String apiTentarNovamente = 'Tentar novamente';
 
   static const String erroCarteiraInvalida = 'Número da carteira inválido';
@@ -75,9 +62,9 @@ class AppStrings {
   static const String erroSenhaNaoEncontrada =
       'Senha não encontrada no portal';
   static const String erroLoginFalhou =
-      'Falha ao autenticar no portal (confira PORTAL_CODE/USER/SENHA).';
+      'Falha ao autenticar no portal (credenciais rejeitadas).';
   static const String erroCredenciaisAusentes =
-      'Credenciais do portal não configuradas (PORTAL_CODE/USER/SENHA).';
+      'Prestador não cadastrado (ver RegraCredenciaisPortal).';
 
   static const String filtroTodos = 'Todas';
   static const String filtroSenha = 'Senha';

@@ -180,20 +180,6 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
           AppStrings.apiIndisponivelMensagem,
           AppStrings.apiIndisponivelDetalhe,
         ),
-      EstadoConexao.credenciaisAusentes => (
-          Icons.key_off,
-          AppColors.error,
-          AppStrings.apiCredenciaisAusentesTitulo,
-          AppStrings.apiCredenciaisAusentesMensagem,
-          AppStrings.apiCredenciaisDetalhe,
-        ),
-      EstadoConexao.credenciaisInvalidas => (
-          Icons.lock_outline,
-          AppColors.error,
-          AppStrings.apiLoginFalhouTitulo,
-          AppStrings.apiLoginFalhouMensagem,
-          AppStrings.apiLoginFalhouDetalhe,
-        ),
       EstadoConexao.pronto => (
           Icons.link,
           AppColors.success,
