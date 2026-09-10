@@ -10,6 +10,7 @@ import '../../../../globals/network/result.dart';
 import '../../data/datasources/xml_lote_guias_datasource.dart';
 import '../../data/datasources/xml_lote_guias_exceptions.dart';
 import '../../data/models/consulta_guia.dart';
+import '../../data/repositories/regras/regra_credenciais_portal.dart';
 import '../../data/repositories/regras/regra_senha_prefixo.dart';
 import '../../data/models/consulta_lote.dart';
 import '../../data/models/guia_validada.dart';
@@ -35,11 +36,13 @@ class ValidadorController extends ChangeNotifier {
     String? codigoPrestador,
     String? usuarioPrestador,
     String? senhaPrestador,
+    RegraCredenciaisPortal? regraCredenciais,
   })  : _repository = repository ?? ValidadorGuiasRepositoryImpl(),
         _service = service ?? _servicePadrao(),
         _codigoPrestador = codigoPrestador ?? AppConfig.portalCode,
         _usuarioPrestador = usuarioPrestador ?? AppConfig.portalUser,
-        _senhaPrestador = senhaPrestador ?? AppConfig.portalSenha;
+        _senhaPrestador = senhaPrestador ?? AppConfig.portalSenha,
+        _regraCredenciais = regraCredenciais ?? const RegraCredenciaisPortal();
 
   final ValidadorGuiasRepository _repository;
   final XmlLoteGuiasDatasource _datasource = const XmlLoteGuiasDatasource();
@@ -47,12 +50,23 @@ class ValidadorController extends ChangeNotifier {
   final String? _codigoPrestador;
   final String? _usuarioPrestador;
   final String? _senhaPrestador;
+  final RegraCredenciaisPortal _regraCredenciais;
 
   String? _tokenSessao;
+  // Code do prestador autenticado no _tokenSessao atual; usado para saber
+  // se a sessao em cache serve para o prestador do lote em validacao ou se
+  // e preciso logar de novo com outras credenciais (ver RegraCredenciaisPortal).
+  String? _codePrestadorDoToken;
 
   EstadoConexao _estadoConexao = EstadoConexao.verificando;
 
   EstadoConexao get estadoConexao => _estadoConexao;
+
+  CredenciaisPortal get _credenciaisPadrao => CredenciaisPortal(
+        code: _codigoPrestador ?? '',
+        user: _usuarioPrestador ?? '',
+        senha: _senhaPrestador ?? '',
+      );
 
   Future<void> verificarDisponibilidadeApi() async {
     final SulAmericaBackendService? service = _service;
@@ -92,6 +106,7 @@ class ValidadorController extends ChangeNotifier {
     );
     if (login is Success<String>) {
       _tokenSessao = login.valor;
+      _codePrestadorDoToken = code;
       _estadoConexao = EstadoConexao.pronto;
     } else {
       _estadoConexao = EstadoConexao.credenciaisInvalidas;
@@ -162,8 +177,12 @@ class ValidadorController extends ChangeNotifier {
           _datasource.extrairInformacoesDoLote(conteudoXml);
       final List<GuiaValidada> resultadoBruto =
           await Future(() => _repository.validarLote(conteudoXml));
+      final CredenciaisPortal credenciais = _regraCredenciais.resolver(
+        informacoes.prestadorCnpjCpf,
+        credenciaisPadrao: _credenciaisPadrao,
+      );
       final List<GuiaValidada> comConsultas =
-          await _consultarGuias(resultadoBruto);
+          await _consultarGuias(resultadoBruto, credenciais);
 
       _resultado = _ordenarPorNumeroGuia(comConsultas);
       _informacoes = informacoes;
@@ -201,6 +220,7 @@ class ValidadorController extends ChangeNotifier {
 
   Future<List<GuiaValidada>> _consultarGuias(
     List<GuiaValidada> guias,
+    CredenciaisPortal credenciais,
   ) async {
     final SulAmericaBackendService? service = _service;
     if (service == null || guias.isEmpty) return guias;
@@ -255,7 +275,7 @@ class ValidadorController extends ChangeNotifier {
     if (itens.isEmpty) return base;
 
     final (String? token, String? motivoErro) =
-        await _obterTokenSessao(service);
+        await _obterTokenSessao(service, credenciais);
     if (token == null) {
       final ConsultaGuia erro = ConsultaGuia(
         sucesso: false,
@@ -398,29 +418,27 @@ class ValidadorController extends ChangeNotifier {
 
   Future<(String?, String?)> _obterTokenSessao(
     SulAmericaBackendService service,
+    CredenciaisPortal credenciais,
   ) async {
+    // Ver comentário de _codePrestadorDoToken: token só serve para o code
+    // que autenticou.
     final String? tokenAtual = _tokenSessao;
-    if (tokenAtual != null) return (tokenAtual, null);
-    final String? code = _codigoPrestador;
-    final String? user = _usuarioPrestador;
-    final String? senha = _senhaPrestador;
-    if (code == null ||
-        code.isEmpty ||
-        user == null ||
-        user.isEmpty ||
-        senha == null ||
-        senha.isEmpty) {
+    if (tokenAtual != null && _codePrestadorDoToken == credenciais.code) {
+      return (tokenAtual, null);
+    }
+    if (!credenciais.completas) {
       return (null, AppStrings.erroCredenciaisAusentes);
     }
 
     final Result<String> resultado = await service.login(
-      code: code,
-      user: user,
-      senha: senha,
+      code: credenciais.code,
+      user: credenciais.user,
+      senha: credenciais.senha,
     );
     return resultado.fold<(String?, String?)>(
       onSuccess: (token) {
         _tokenSessao = token;
+        _codePrestadorDoToken = credenciais.code;
         return (token, null);
       },
       onFailure: (_) => (null, AppStrings.erroLoginFalhou),

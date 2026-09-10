@@ -108,9 +108,11 @@ Definidas em tempo de build com `--dart-define`. Sem credenciais, o app não lib
 | Variável | Descrição |
 |---|---|
 | `API_URL` | URL da API intermediária. Padrão `http://localhost:8080` |
-| `PORTAL_CODE` | Código do prestador no portal SulAmérica |
-| `PORTAL_USER` | Usuário do prestador |
-| `PORTAL_SENHA` | Senha do prestador |
+| `PORTAL_CODE` | Código do prestador padrão no portal SulAmérica |
+| `PORTAL_USER` | Usuário do prestador padrão |
+| `PORTAL_SENHA` | Senha do prestador padrão |
+| `PORTAL_CODE_CEMED` / `PORTAL_USER_CEMED` / `PORTAL_SENHA_CEMED` | Credenciais do prestador CNPJ/codigoPrestadorNaOperadora `27372066000673` (ver `RegraCredenciaisPortal`) |
+| `PORTAL_CODE_HSR` / `PORTAL_USER_HSR` / `PORTAL_SENHA_HSR` | Credenciais do prestador CNPJ/codigoPrestadorNaOperadora `27372066000169` |
 
 ## Deploy
 
@@ -127,7 +129,9 @@ flutter build web --release \
   --dart-define=API_URL=https://validador-api.onrender.com \
   --dart-define=PORTAL_CODE=SEU_CODE \
   --dart-define=PORTAL_USER=SEU_USER \
-  --dart-define=PORTAL_SENHA=SEU_SENHA
+  --dart-define=PORTAL_SENHA=SEU_SENHA \
+  --dart-define=PORTAL_CODE_CEMED=... --dart-define=PORTAL_USER_CEMED=... --dart-define=PORTAL_SENHA_CEMED=... \
+  --dart-define=PORTAL_CODE_HSR=... --dart-define=PORTAL_USER_HSR=... --dart-define=PORTAL_SENHA_HSR=...
 
 npx wrangler pages deploy build/web --project-name validador-tiss
 ```
