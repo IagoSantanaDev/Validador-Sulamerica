@@ -37,14 +37,24 @@ class XmlLoteGuiasDatasource {
           documento,
           const ['identificacaoTransacao', 'tipoTransacao'],
         ),
+        // identificacaoPrestador no TISS e um choice (CNPJ | CPF |
+        // codigoPrestadorNaOperadora); tenta os tres antes de desistir.
         prestadorCnpjCpf:
             _textoPrimeiro(documento, const ['identificacaoPrestador', 'CNPJ']) ??
                 _textoPrimeiro(
                   documento,
                   const ['identificacaoPrestador', 'CPF'],
                 ) ??
+                _textoPrimeiro(
+                  documento,
+                  const ['identificacaoPrestador', 'codigoPrestadorNaOperadora'],
+                ) ??
                 _textoPrimeiro(documento, const ['origem', 'CNPJ']) ??
-                _textoPrimeiro(documento, const ['origem', 'CPF']),
+                _textoPrimeiro(documento, const ['origem', 'CPF']) ??
+                _textoPrimeiro(
+                  documento,
+                  const ['origem', 'codigoPrestadorNaOperadora'],
+                ),
         operadoraRegistroANS:
             _textoPrimeiro(documento, const ['destino', 'registroANS']),
         numeroLote: _textoPrimeiro(documento, const ['numeroLote']),

@@ -99,18 +99,17 @@ flutter pub get
 flutter run -d chrome --dart-define=API_URL=http://localhost:8080
 ```
 
-Com `API_URL` apontando para o backend local e credenciais do portal definidas, o site autentica e libera a validação.
+Com `API_URL` apontando para o backend local, o site já libera a tela de upload — o login em si só acontece depois que um arquivo é carregado, com a credencial do prestador daquele lote (ver `RegraCredenciaisPortal`).
 
 ## Variáveis de build do frontend
 
-Definidas em tempo de build com `--dart-define`. Sem credenciais, o app não libera a validação: a página de conexão explica o que falta.
+Definidas em tempo de build com `--dart-define`. Não há mais um prestador "padrão": um lote de um CNPJ/codigoPrestadorNaOperadora sem credencial cadastrada abaixo simplesmente não consegue autenticar (erro fica só naquele lote, a tela de conexão não é afetada).
 
 | Variável | Descrição |
 |---|---|
 | `API_URL` | URL da API intermediária. Padrão `http://localhost:8080` |
-| `PORTAL_CODE` | Código do prestador no portal SulAmérica |
-| `PORTAL_USER` | Usuário do prestador |
-| `PORTAL_SENHA` | Senha do prestador |
+| `PORTAL_CODE_CEMED` / `PORTAL_USER_CEMED` / `PORTAL_SENHA_CEMED` | Credenciais do prestador CNPJ/codigoPrestadorNaOperadora `27372066000673` (ver `RegraCredenciaisPortal`) |
+| `PORTAL_CODE_HSR` / `PORTAL_USER_HSR` / `PORTAL_SENHA_HSR` | Credenciais do prestador CNPJ/codigoPrestadorNaOperadora `27372066000169` |
 
 ## Deploy
 
@@ -125,9 +124,8 @@ Para criar: no dashboard do Render, New +, Blueprint, e selecione o repositório
 ```bash
 flutter build web --release \
   --dart-define=API_URL=https://validador-api.onrender.com \
-  --dart-define=PORTAL_CODE=SEU_CODE \
-  --dart-define=PORTAL_USER=SEU_USER \
-  --dart-define=PORTAL_SENHA=SEU_SENHA
+  --dart-define=PORTAL_CODE_CEMED=... --dart-define=PORTAL_USER_CEMED=... --dart-define=PORTAL_SENHA_CEMED=... \
+  --dart-define=PORTAL_CODE_HSR=... --dart-define=PORTAL_USER_HSR=... --dart-define=PORTAL_SENHA_HSR=...
 
 npx wrangler pages deploy build/web --project-name validador-tiss
 ```

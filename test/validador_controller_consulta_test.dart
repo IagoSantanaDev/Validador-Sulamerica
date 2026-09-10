@@ -8,9 +8,23 @@ import 'package:validador_xml_sulamerica/modules/validador_xml/data/models/consu
 import 'package:validador_xml_sulamerica/modules/validador_xml/data/models/erro_validacao.dart';
 import 'package:validador_xml_sulamerica/modules/validador_xml/data/models/guia_tiss.dart';
 import 'package:validador_xml_sulamerica/modules/validador_xml/data/models/guia_validada.dart';
+import 'package:validador_xml_sulamerica/modules/validador_xml/data/repositories/regras/regra_credenciais_portal.dart';
 import 'package:validador_xml_sulamerica/modules/validador_xml/data/repositories/validador_guias_repository.dart';
 import 'package:validador_xml_sulamerica/modules/validador_xml/data/services/sul_america_backend_service.dart';
 import 'package:validador_xml_sulamerica/modules/validador_xml/presentation/controllers/validador_controller.dart';
+
+// Testes não dependem de nenhum prestador real cadastrado em
+// RegraCredenciaisPortal: fixam a credencial resolvida via subclasse, já
+// que o XML de teste (`<lote/>`) não tem identificacaoPrestador.
+class _RegraCredenciaisFixa extends RegraCredenciaisPortal {
+  const _RegraCredenciaisFixa(this._credenciais);
+
+  final CredenciaisPortal? _credenciais;
+
+  @override
+  CredenciaisPortal? resolver(String? identificadorPrestador) =>
+      _credenciais;
+}
 
 class _FakeBatchAdapter implements HttpClientAdapter {
   _FakeBatchAdapter({
@@ -123,12 +137,14 @@ ValidadorController _controllerComGateway({
   final SulAmericaBackendService service = SulAmericaBackendService(
     DioClient(baseUrl: 'http://localhost:8080', dio: dio),
   );
+  final CredenciaisPortal? credenciais =
+      (code == null || user == null || senha == null)
+          ? null
+          : CredenciaisPortal(code: code, user: user, senha: senha);
   return ValidadorController(
     repository: _FakeValidadorGuiasRepository(retornoValidacao),
     service: service,
-    codigoPrestador: code,
-    usuarioPrestador: user,
-    senhaPrestador: senha,
+    regraCredenciais: _RegraCredenciaisFixa(credenciais),
   );
 }
 

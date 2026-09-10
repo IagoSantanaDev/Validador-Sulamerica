@@ -78,7 +78,7 @@ class ValidadorApi {
       final String mensagem = switch (resultado.motivo) {
         MotivoFalhaLogin.credenciaisInvalidas =>
           'Credenciais invalidas para o portal SulAmerica. '
-          'Confira PORTAL_CODE, PORTAL_USER e PORTAL_SENHA.',
+          'Confira o code/user/senha enviados no corpo da requisicao.',
         MotivoFalhaLogin.falhaRede =>
           'Falha de rede ao acessar o portal SulAmerica. '
           'Detalhe: ${resultado.detalhe ?? 'sem detalhe'}.',
