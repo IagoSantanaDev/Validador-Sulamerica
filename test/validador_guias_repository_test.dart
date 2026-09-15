@@ -116,5 +116,18 @@ void main() {
 
       expect(resultado.single.temErro, isFalse);
     });
+
+    test('preserva carteira e senha exatamente como aparecem no XML', () {
+      const String carteiraLiteral = ' 557888884823194700 20 ';
+      const String senhaLiteral = ' 5056430843 ';
+      final String xml = _xmlComSenhaValida
+          .replaceFirst('55788888482319470020', carteiraLiteral)
+          .replaceFirst('5056430843', senhaLiteral);
+
+      final resultado = repository.validarLote(xml);
+
+      expect(resultado.single.guia.numeroCarteira, carteiraLiteral);
+      expect(resultado.single.guia.senha, senhaLiteral);
+    });
   });
 }
