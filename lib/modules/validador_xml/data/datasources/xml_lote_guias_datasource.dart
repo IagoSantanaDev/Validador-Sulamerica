@@ -113,11 +113,11 @@ class XmlLoteGuiasDatasource {
 
     return GuiaTiss(
       numeroGuiaPrestador: numeroGuia,
-      numeroCarteira: _textoDoFilhoAninhado(
+      numeroCarteira: _textoLiteralDoFilhoAninhado(
         guiaElement,
         const ['dadosBeneficiario', 'numeroCarteira'],
       ),
-      senha: _textoDeElementoDescendente(guiaElement, 'senha'),
+      senha: _textoLiteralDeElementoDescendente(guiaElement, 'senha'),
       nomeBeneficiario: _textoDoFilhoAninhado(
             guiaElement,
             const ['dadosBeneficiario', 'nomeBeneficiario'],
@@ -152,10 +152,42 @@ class XmlLoteGuiasDatasource {
     return texto.isEmpty ? null : texto;
   }
 
+  String? _textoLiteralDoFilhoAninhado(
+    XmlElement raiz,
+    List<String> caminho,
+  ) {
+    XmlElement atual = raiz;
+    for (final String tag in caminho) {
+      XmlElement? proximo;
+      for (final XmlElement filho in atual.childElements) {
+        if (filho.name.local == tag) {
+          proximo = filho;
+          break;
+        }
+      }
+      if (proximo == null) return null;
+      atual = proximo;
+    }
+    final String texto = atual.innerText;
+    return texto.isEmpty ? null : texto;
+  }
+
   String? _textoDeElementoDescendente(XmlElement raiz, String nomeLocal) {
     for (final XmlElement elemento
         in raiz.findAllElements(nomeLocal, namespace: '*')) {
       final String texto = elemento.innerText.trim();
+      if (texto.isNotEmpty) return texto;
+    }
+    return null;
+  }
+
+  String? _textoLiteralDeElementoDescendente(
+    XmlElement raiz,
+    String nomeLocal,
+  ) {
+    for (final XmlElement elemento
+        in raiz.findAllElements(nomeLocal, namespace: '*')) {
+      final String texto = elemento.innerText;
       if (texto.isNotEmpty) return texto;
     }
     return null;

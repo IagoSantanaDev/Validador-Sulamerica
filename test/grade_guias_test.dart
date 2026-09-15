@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:validador_xml_sulamerica/modules/validador_xml/data/models/consulta_guia.dart';
 import 'package:validador_xml_sulamerica/modules/validador_xml/data/models/erro_validacao.dart';
@@ -166,5 +167,36 @@ void main() {
 
       expect(tipoErroDeLinha(linha), TipoErroGuia.senha);
     });
+  });
+
+  testWidgets('exibe carteira e senha sem alterar espacos', (tester) async {
+    const String carteiraLiteral = ' 557888884823194700 20 ';
+    const String senhaLiteral = ' 5056430843 ';
+    const GuiaTiss guiaComEspacos = GuiaTiss(
+      numeroGuiaPrestador: '222',
+      numeroCarteira: carteiraLiteral,
+      senha: senhaLiteral,
+    );
+
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: GradeGuias(
+            linhas: [
+              LinhaGradeGuia(
+                guia: GuiaValidada(guia: guiaComEspacos, erros: []),
+                detalhe: 'Senha invalida',
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.byIcon(Icons.cancel));
+    await tester.pumpAndSettle();
+
+    expect(find.text(carteiraLiteral), findsOneWidget);
+    expect(find.text(senhaLiteral), findsOneWidget);
   });
 }
