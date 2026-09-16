@@ -1,4 +1,3 @@
-/// Representa um procedimento executado dentro de uma guia TISS.
 class Procedimento {
   const Procedimento({
     required this.codigo,

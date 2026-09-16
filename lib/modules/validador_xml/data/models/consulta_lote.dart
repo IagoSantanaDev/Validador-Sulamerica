@@ -1,6 +1,5 @@
 import 'consulta_guia.dart';
 
-/// Item de consulta enviado ao backend em lote (/api/consultas).
 class ConsultaLoteItem {
   const ConsultaLoteItem({required this.tipo, required this.chave});
 

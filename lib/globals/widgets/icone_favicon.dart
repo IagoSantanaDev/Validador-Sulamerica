@@ -4,8 +4,6 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-/// O Flutter não decodifica ICO diretamente, então o PNG embutido no
-/// favicon (web/favicon.ico) é extraído e decodificado.
 class IconeFavicon extends StatelessWidget {
   const IconeFavicon({super.key, this.tamanho = 40});
 

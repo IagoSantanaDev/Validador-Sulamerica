@@ -14,7 +14,6 @@ void main() {
 
     final Uint8List png = IconeFavicon.extrairPng(bytes);
 
-    // A imagem embutida deve ser PNG (assinatura padrão).
     expect(png.length, greaterThan(0));
     expect(
       png.sublist(0, 4),

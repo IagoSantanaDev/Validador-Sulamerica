@@ -25,8 +25,6 @@ class ResultadoLogin {
   final String? detalhe;
 }
 
-/// Cliente do portal Lumis. O login exige GET inicial na pagina (senão o F5
-/// ASM responde 403 sem o cookie NSC_*), e a consulta de senha exige sessão (401 sem login).
 class SessaoPortal {
   SessaoPortal({
     Dio? dio,
@@ -40,17 +38,9 @@ class SessaoPortal {
       receiveTimeout: const Duration(seconds: 30),
       sendTimeout: const Duration(seconds: 30),
       validateStatus: (status) => status != null && status < 500,
-      // O login retorna 302 (Location: /prestador/) apos autenticar; o
-      // redirect deve ser seguido manualmente (GET) para chegar na pagina
-      // autenticada e confirmar a sessao.
       followRedirects: false,
     );
-    // Workaround F5/CDN: o portal envia cadeia com cert self-signed que o
-    // root store do container rejeita (CERTIFICATE_VERIFY_FAILED). O
-    // badCertificateCallback do HttpClient tolera a cadeia e o
-    // validateCertificate avalia o certificado final — ambos restritos ao
-    // host do portal; qualquer outro destino mantém a verificação padrão.
-    // Só aplica quando o Dio não foi injetado.
+
     if (dio == null) {
       _dio.httpClientAdapter = IOHttpClientAdapter(
         createHttpClient: () {
@@ -66,9 +56,6 @@ class SessaoPortal {
 
   static const String hostPortal = 'saude.sulamericaseguros.com.br';
 
-  /// Aceita o certificado somente quando o host é o próprio portal (caso
-  /// F5/CDN com cadeia não confiável pela CA pública). Qualquer outro host
-  /// permanece com a validação padrão.
   static bool aceitarCertificadoDoPortal(
     X509Certificate? certificate,
     String host,
@@ -76,8 +63,6 @@ class SessaoPortal {
   ) =>
       host == hostPortal;
 
-  /// `validateCertificate` do adapter: chamado apenas quando a validação CA
-  /// falhou; registra e aceita o cert do portal (uso exclusivo de integração).
   bool _validarCertificadoDoPortal(
     X509Certificate? certificate,
     String host,
@@ -130,8 +115,6 @@ class SessaoPortal {
     'lumII': '8A61F4123F589847013F590540AE113E',
   };
 
-  // Segmentos reais da carteirinha (3-5-4-4-4 digitos); nao dividir em
-  // partes iguais — o portal exige os segmentos originais da numeracao.
   static const List<int> _tamanhosSegmentosCarteirinha = [3, 5, 4, 4, 4];
 
   final Dio _dio;
@@ -141,9 +124,6 @@ class SessaoPortal {
   bool _autenticada = false;
   String _codigoPrestador = '100000015513';
 
-  /// Status HTTP da última falha de consulta; null quando a última consulta
-  /// foi bem-sucedida ou falhou por rede/timeout. Usado para distinguir
-  /// sessão rejeitada (401/403) de falha transitória e renovar o login.
   static const int _statusFalhaSessao = 401;
   int? _ultimoStatusFalha;
 
@@ -208,9 +188,6 @@ class SessaoPortal {
         ),
       );
 
-      // 302 = login aceito: o portal redireciona para /prestador/.
-      // Segue o redirect via GET (com a sessao) para confirmar a pagina
-      // autenticada — comportamento identico ao de um navegador.
       if (resposta.statusCode == 302) {
         final String? destino = resposta.headers.value('location');
         if (destino == null) {
@@ -262,9 +239,6 @@ class SessaoPortal {
         );
       }
 
-      // HTTP 200 sem redirect: o portal devolveu a propria pagina de login
-      // (credenciais rejeitadas) ou uma pagina de erro — confirma logando
-      // um trecho do corpo para diagnostico.
       final String corpo = resposta.data ?? '';
       _autenticada = corpo.toLowerCase().contains('logout');
       final int quantidadeCookies =
@@ -330,9 +304,6 @@ class SessaoPortal {
         ),
       );
 
-      // A consulta valida retorna 302 para a pagina de resultado
-      // (elegibilidade-resultado.htm). Segue o redirect via GET (com a
-      // sessao) e devolve o HTML final — comportamento de navegador.
       if (resposta.statusCode == 302) {
         final String? destino = resposta.headers.value('location');
         if (destino == null) {
@@ -441,8 +412,6 @@ class SessaoPortal {
         return null;
       }
 
-      // O portal devolve text/plain com charset ISO-8859-1; tenta UTF-8
-      // primeiro e cai para Latin-1 (mesma heuristica do app).
       final String corpo = _decodificarCorpo(resposta.data ?? []);
       final dynamic json = jsonDecode(corpo);
       if (json is! Map<String, dynamic>) {
@@ -489,8 +458,6 @@ class SessaoPortal {
     return partes;
   }
 
-  /// Libera as conexões HTTP desta sessão (usada para sessões extras
-  /// descartáveis após o lote; a sessão base permanece para o cliente).
   Future<void> encerrar() async {
     _dio.close();
   }

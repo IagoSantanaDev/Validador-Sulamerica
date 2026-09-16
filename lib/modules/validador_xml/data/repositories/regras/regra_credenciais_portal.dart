@@ -14,9 +14,6 @@ class CredenciaisPortal {
   bool get completas => code.isNotEmpty && user.isNotEmpty && senha.isNotEmpty;
 }
 
-/// Prestadores fora de [_credenciaisPorPrestador] não têm credencial: não
-/// existe mais um prestador "padrão" (ver histórico de PORTAL_CODE/USER/
-/// SENHA) — cada lote autentica com a conta do próprio prestador.
 class RegraCredenciaisPortal {
   const RegraCredenciaisPortal();
 
@@ -36,8 +33,6 @@ class RegraCredenciaisPortal {
     ),
   };
 
-  // Apenas digitos: o XML pode trazer o identificador do prestador sem
-  // mascara (formato mais comum no codigoPrestadorNaOperadora).
   CredenciaisPortal? resolver(String? identificadorPrestador) {
     final String chave = _apenasDigitos(identificadorPrestador);
     return _credenciaisPorPrestador[chave];

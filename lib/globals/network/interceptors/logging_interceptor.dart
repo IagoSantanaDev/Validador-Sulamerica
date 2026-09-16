@@ -9,7 +9,6 @@ class LoggingInterceptor extends Interceptor {
   @override
   void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
     if (kDebugMode) {
-      // ignore: avoid_print
       print('[HTTP] -> ${options.method} ${_urlDe(options)}');
     }
     handler.next(options);
@@ -18,13 +17,11 @@ class LoggingInterceptor extends Interceptor {
   @override
   void onResponse(Response response, ResponseInterceptorHandler handler) {
     if (kDebugMode) {
-      // ignore: avoid_print
       print(
         '[HTTP] <- ${response.requestOptions.method} '
         '${_urlDe(response.requestOptions)} -> ${response.statusCode}',
       );
-      // O corpo do login contém o token da sessão — não logar; as respostas
-      // de consulta carregam dados do beneficiário (carteira/senha) — PII.
+
       if (!_urlDe(response.requestOptions).contains('/api/login') &&
           !_urlDe(response.requestOptions).contains('/api/consultas') &&
           !_urlDe(response.requestOptions).contains('/api/beneficiario') &&
@@ -39,7 +36,7 @@ class LoggingInterceptor extends Interceptor {
   void onError(DioException err, ErrorInterceptorHandler handler) {
     if (kDebugMode) {
       final int? status = err.response?.statusCode;
-      // ignore: avoid_print
+
       print(
         '[HTTP] x ${err.requestOptions.method} '
         '${_urlDe(err.requestOptions)} -> ${status ?? err.type}',
@@ -64,7 +61,7 @@ class LoggingInterceptor extends Interceptor {
   void _logarCorpo(String rotulo, dynamic dados) {
     final String? texto = _resumir(dados);
     if (texto == null) return;
-    // ignore: avoid_print
+
     print('[HTTP] $rotulo: $texto');
   }
 

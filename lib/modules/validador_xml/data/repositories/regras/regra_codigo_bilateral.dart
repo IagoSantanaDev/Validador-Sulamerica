@@ -2,7 +2,6 @@ import '../../models/erro_validacao.dart';
 import '../../models/guia_tiss.dart';
 import 'regra_validacao.dart';
 
-/// Impede cobrança em quantidade maior que 1 para códigos bilaterais.
 class RegraCodigoBilateral extends RegraValidacao {
   const RegraCodigoBilateral();
 

@@ -13,9 +13,6 @@ import 'package:validador_xml_sulamerica/modules/validador_xml/data/repositories
 import 'package:validador_xml_sulamerica/modules/validador_xml/data/services/sul_america_backend_service.dart';
 import 'package:validador_xml_sulamerica/modules/validador_xml/presentation/controllers/validador_controller.dart';
 
-// Testes não dependem de nenhum prestador real cadastrado em
-// RegraCredenciaisPortal: fixam a credencial resolvida via subclasse, já
-// que o XML de teste (`<lote/>`) não tem identificacaoPrestador.
 class _RegraCredenciaisFixa extends RegraCredenciaisPortal {
   const _RegraCredenciaisFixa(this._credenciais);
 
@@ -80,7 +77,6 @@ class _FakeBatchAdapter implements HttpClientAdapter {
         ];
         return _resposta(200, {'status': 'ok', 'resultados': resultados});
       default:
-        // Rota inexistente: dispara o fallback individual nos testes.
         return _resposta(404, {'status': 'erro', 'mensagem': 'nao encontrado'});
     }
   }
@@ -179,9 +175,7 @@ void main() {
       );
 
       expect(controller.status, StatusValidador.concluido);
-      // Login + uma única chamada de lote; sem chamadas individuais. A guia
-      // sem senha recebe 1 item (elegibilidade); a com senha, 2 (carteira +
-      // VPP).
+
       expect(adapter.logChamadas, ['/api/login', '/api/consultas']);
       expect(adapter.consultasRecebidas, hasLength(3));
 
@@ -290,8 +284,7 @@ void main() {
       );
 
       expect(controller.status, StatusValidador.concluido);
-      // Senha inválida vira erro local; a carteira válida ainda consulta a
-      // elegibilidade no lote (único item enviado, sem VPP).
+
       expect(adapter.logChamadas, ['/api/login', '/api/consultas']);
       expect(adapter.consultasRecebidas, hasLength(1));
       final List<String> descricoes = controller.guiasComErro.single.consultas

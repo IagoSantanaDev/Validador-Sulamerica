@@ -22,13 +22,9 @@ class ValidadorApi {
 
   bool _loteEmAndamento = false;
 
-  /// Teto de itens por lote e de bytes de corpo (proteção contra abuso do
-  /// proxy aberto — cada item gera chamada real ao portal SulAmerica).
   static const int _maxItensPorLote = 300;
-  static const int _maxBytesCorpo = 1 << 20; // 1 MB
+  static const int _maxBytesCorpo = 1 << 20;
 
-  /// Rate limit por IP nas rotas que tocam o portal (evita varredura e
-  /// bloqueio do F5 ASM em uso concorrente).
   static const Set<String> _rotasDePortal = {
     'api/login',
     'api/consultas',
@@ -91,8 +87,7 @@ class ValidadorApi {
     }
 
     final String token = _novoToken(sessao);
-    // Retém as credenciais apenas para abrir sessões extras (logins), em
-    // memória, e as remove junto com a sessão.
+
     _credenciaisPorToken[token] = _CredenciaisPortal(
       code: code,
       user: user,
@@ -102,9 +97,6 @@ class ValidadorApi {
     return _json({'token': token, 'autenticada': true});
   }
 
-  /// Consulta em lote: recebe várias solicitações (elegibilidade/vpp) e
-  /// executa contra o portal com paralelismo controlado, devolvendo cada
-  /// resultado na ordem da requisição — o cliente faz uma única chamada HTTP.
   Future<Response> _consultas(Request request) async {
     final _LeituraJson leitura = await _lerJson(request);
     if (leitura.excedeLimite) return _erroCorpoGrande();
@@ -143,7 +135,6 @@ class ValidadorApi {
       _loteEmAndamento = false;
     }
 
-    // Reordena para a ordem da requisição original.
     final Map<String, Map<String, dynamic>> porChave = {
       for (final Map<String, dynamic> r in resultados)
         '${r['tipo']}|${r['chave']}': r,
@@ -157,21 +148,12 @@ class ValidadorApi {
     });
   }
 
-  /// Nº máximo de sessões do portal usadas em paralelo num lote (1 por lote
-  /// pequeno + extras via login quando há muitas elegibilidades).
   static const int _limiteSessoesParalelas = 10;
 
-  /// A partir deste volume de elegibilidades vale criar sessões extras.
   static const int _minElegibilidadeParaMultiplasSessoes = 10;
 
-  /// Teto de consultas de senha simultâneas POR SESSÃO (GET leve, sem estado
-  /// de form); distribuí-las entre as sessões evita concentrar as consultas
-  /// na sessão base.
   static const int _limiteSenhaPorSessao = 3;
 
-  /// Executa as consultas: elegibilidade é sempre serial POR SESSÃO (o form
-  /// do portal tem estado); com muitas carteiras abre sessões extras (logins
-  /// em paralelo) e divide elegibilidade e consultas de senha entre todas as sessões.
   Future<List<Map<String, dynamic>>> _executarConsultas({
     required SessaoPortal sessaoBase,
     required _CredenciaisPortal? credenciais,
@@ -228,8 +210,6 @@ class ValidadorApi {
       resultados.addAll(parte);
     }
 
-    // Sessões extras são descartáveis: libera as conexões após o lote
-    // (a base permanece para as próximas consultas do cliente).
     for (final SessaoPortal extra in sessoes.skip(1)) {
       await extra.encerrar();
     }
@@ -254,8 +234,6 @@ class ValidadorApi {
     return null;
   }
 
-  /// Uma sessão: elegibilidade da fatia uma a uma (serial, preserva o form);
-  /// as consultas de senha da fatia rodam em paralelo até [_limiteSenhaPorSessao].
   Future<List<Map<String, dynamic>>> _processarSessao({
     required SessaoPortal sessao,
     required List<dynamic> fatiaElegibilidade,
@@ -279,8 +257,6 @@ class ValidadorApi {
     return resultados;
   }
 
-  /// Pool de workers nativo (sem dependência): processa [consultas] com até
-  /// [limite] requisições simultâneas, preservando a ordem dos resultados.
   Future<List<Map<String, dynamic>>> _processarEmParalelo(
     List<dynamic> consultas,
     SessaoPortal sessao,
@@ -351,8 +327,6 @@ class ValidadorApi {
       }
       final bool? elegivel = extrairElegivel(html);
       if (elegivel == null) {
-        // Diagnóstico: o portal voltou sem o bloco de elegibilidade — pode
-        // ser carteira realmente não encontrada OU estado de sessão perdido.
         _logger.w(
           'Elegibilidade sem indicador | carteira ${_mascararChave(chave)} | '
           'pagina: ${resumirTexto(html.replaceAll(RegExp(r'<[^>]*>'), ' '))}',
@@ -406,11 +380,6 @@ class ValidadorApi {
     };
   }
 
-  /// Recuperação de falha de consulta ao portal: sessão rejeitada (401/403)
-  /// renova o login com as credenciais retidas e repete a consulta 1x;
-  /// falha transitória (rede/timeout/5xx) faz nova tentativa após pausa
-  /// curta. Devolve o resultado da última tentativa (null quando a falha
-  /// persiste ou não há credenciais para renovar).
   Future<T?> _consultarComRecuperacao<T>({
     required SessaoPortal sessao,
     required _CredenciaisPortal? credenciais,
@@ -434,19 +403,15 @@ class ValidadorApi {
       );
       if (!login.autenticada) return null;
     } else {
-      // Falha transitória: pausa curta antes de repetir (sem martelar o F5).
       await Future<void>.delayed(const Duration(milliseconds: 500));
     }
     return consulta();
   }
 
-  /// "primeiro.ultimo" da chave (não vaza dados sensíveis em log).
   String _mascararChave(String chave) => chave.length <= 5
       ? chave
       : '${chave.substring(0, 4)}…${chave.substring(chave.length - 2)}';
 
-  /// Descricao do status da autorização (ex.: "Autorizado", "Negado") a
-  /// partir do JSON do portal; null quando não há registro com status.
   String? _extrairStatusSenha(Map<String, dynamic> dados) {
     final dynamic registros = dados['registros'];
     if (registros is! List || registros.isEmpty) return null;
@@ -469,9 +434,6 @@ class ValidadorApi {
     });
   }
 
-  /// GET simples (sem headers de navegador) ao portal para saber se o
-  /// servidor consegue abrir conexão com ele — distingue bloqueio de rede
-  /// (F5 ASM / datacenter) de falha de autenticação.
   Future<Map<String, dynamic>> _testarAlcancePortal() async {
     final HttpClient http = HttpClient()
       ..connectionTimeout = const Duration(seconds: 10)
@@ -522,8 +484,6 @@ class ValidadorApi {
     return token == null ? null : _sessoes[token];
   }
 
-  /// Fonte única das regras de formato: carteira com exatamente 20 dígitos e
-  /// senha com exatamente 10 dígitos começando com 5 (mesmas do app).
   static bool _carteiraValida(String carteira) =>
       carteira.length == 20 && RegExp(r'^\d+$').hasMatch(carteira);
 
@@ -610,9 +570,6 @@ class ValidadorApi {
   }
 
   static Middleware _cors() {
-    // Lida em runtime (Platform.environment) para permitir configurar via
-    // `fly secrets set CORS_ORIGIN=...`; default aberto pois o token vai no
-    // corpo/query (sem cookie cross-origin).
     const String origemPadrao = '*';
     return (Handler inner) {
       final String origemPermitida =
@@ -634,9 +591,6 @@ class ValidadorApi {
   }
 }
 
-/// Resultado da leitura do corpo JSON: [valor] nulo quando vazio/parsing
-/// falhou; [excedeLimite] distingue o corpo acima de [_maxBytesCorpo]
-/// (413) do corpo malformado (400).
 class _LeituraJson {
   const _LeituraJson(this.valor, {this.excedeLimite = false});
 
@@ -644,14 +598,8 @@ class _LeituraJson {
   final bool excedeLimite;
 }
 
-/// Classifica a falha de consulta ao portal como rejeição de sessão
-/// (401/403 — F5 ASM ou sessão expirada): esses status merecem renovar o
-/// login; os demais (rede/timeout/5xx) são tratados como transitórios.
 bool ehFalhaDeSessaoPortal(int? status) => status == 401 || status == 403;
 
-/// Credenciais do prestador retidas em memória por token de sessão, usadas
-/// apenas para abrir sessões extras (paralelas) quando um lote tem muitas
-/// elegibilidades. Nunca são logadas e saem quando a sessão é removida.
 class _CredenciaisPortal {
   const _CredenciaisPortal({
     required this.code,

@@ -5,8 +5,6 @@ import '../models/procedimento.dart';
 import '../models/informacoes_lote.dart';
 import 'xml_lote_guias_exceptions.dart';
 
-/// Parsing do XML de lote de guias TISS (apenas extração, sem regra de
-/// negócio). `namespace: '*'` casa tags qualificadas com o prefixo ans:.
 class XmlLoteGuiasDatasource {
   const XmlLoteGuiasDatasource();
 
@@ -36,8 +34,6 @@ class XmlLoteGuiasDatasource {
           documento,
           const ['identificacaoTransacao', 'tipoTransacao'],
         ),
-        // identificacaoPrestador no TISS e um choice (CNPJ | CPF |
-        // codigoPrestadorNaOperadora); tenta os tres antes de desistir.
         prestadorCnpjCpf: _textoPrimeiro(
               documento,
               const ['identificacaoPrestador', 'CNPJ'],
@@ -73,8 +69,6 @@ class XmlLoteGuiasDatasource {
     }
   }
 
-  /// Soma todos os `<ans:valorTotalGeral>` do lote. Retorna null quando não
-  /// há nenhum valor numérico válido.
   String? _somarValorTotalGeral(XmlDocument documento) {
     final List<XmlElement> totais =
         documento.findAllElements('valorTotalGeral', namespace: '*').toList();
