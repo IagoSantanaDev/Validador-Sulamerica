@@ -252,8 +252,7 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 CabecalhoResultado(
-                  identificador:
-                      _identificador ?? AppStrings.valorIndisponivel,
+                  identificador: _identificador ?? AppStrings.valorIndisponivel,
                 ),
                 const SizedBox(height: AppDimens.spaceLg),
                 CardSurface(

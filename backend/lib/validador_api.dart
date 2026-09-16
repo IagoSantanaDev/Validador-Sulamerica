@@ -47,7 +47,6 @@ class ValidadorApi {
       .addMiddleware(ValidadorApi._rateLimitPortal())
       .addHandler(_rotas.call);
 
-
   Future<Response> _login(Request request) async {
     final _LeituraJson leitura = await _lerJson(request);
     if (leitura.excedeLimite) return _erroCorpoGrande();
@@ -78,13 +77,14 @@ class ValidadorApi {
       final String mensagem = switch (resultado.motivo) {
         MotivoFalhaLogin.credenciaisInvalidas =>
           'Credenciais invalidas para o portal SulAmerica. '
-          'Confira o code/user/senha enviados no corpo da requisicao.',
+              'Confira o code/user/senha enviados no corpo da requisicao.',
         MotivoFalhaLogin.falhaRede =>
           'Falha de rede ao acessar o portal SulAmerica. '
-          'Detalhe: ${resultado.detalhe ?? 'sem detalhe'}.',
-        MotivoFalhaLogin.respostaInesperada || null =>
+              'Detalhe: ${resultado.detalhe ?? 'sem detalhe'}.',
+        MotivoFalhaLogin.respostaInesperada ||
+        null =>
           'O portal SulAmerica respondeu de forma inesperada '
-          '(possivel bloqueio do F5 ASM).',
+              '(possivel bloqueio do F5 ASM).',
       };
       _logger.w('Login recusado: $mensagem');
       return _erro(mensagem, 401);
@@ -355,8 +355,7 @@ class ValidadorApi {
         // ser carteira realmente não encontrada OU estado de sessão perdido.
         _logger.w(
           'Elegibilidade sem indicador | carteira ${_mascararChave(chave)} | '
-          'pagina: ${
-              resumirTexto(html.replaceAll(RegExp(r'<[^>]*>'), ' '))}',
+          'pagina: ${resumirTexto(html.replaceAll(RegExp(r'<[^>]*>'), ' '))}',
         );
       }
       return {
@@ -374,7 +373,8 @@ class ValidadorApi {
           'chave': chave,
           'tipo': tipo,
           'sucesso': false,
-          'erro': 'Senha invalida: deve ter exatamente 10 digitos comecando com 5.',
+          'erro':
+              'Senha invalida: deve ter exatamente 10 digitos comecando com 5.',
         };
       }
       final Map<String, dynamic>? dados = await _consultarComRecuperacao(
@@ -480,9 +480,8 @@ class ValidadorApi {
       final HttpClientRequest requisicao = await http
           .getUrl(Uri.parse('https://saude.sulamericaseguros.com.br/'))
           .timeout(const Duration(seconds: 10));
-      final HttpClientResponse resposta = await requisicao
-          .close()
-          .timeout(const Duration(seconds: 10));
+      final HttpClientResponse resposta =
+          await requisicao.close().timeout(const Duration(seconds: 10));
       return {
         'alcançavel': true,
         'status': resposta.statusCode,
@@ -501,7 +500,6 @@ class ValidadorApi {
     return _erro('Rota nao encontrada.', 404);
   }
 
-
   String _novoToken(SessaoPortal sessao) {
     if (_sessoes.length >= _limiteSessoes) {
       final String antiga = _sessoes.keys.first;
@@ -514,7 +512,8 @@ class ValidadorApi {
   }
 
   String _gerarToken() {
-    final List<int> bytes = List<int>.generate(16, (_) => _aleatorio.nextInt(256));
+    final List<int> bytes =
+        List<int>.generate(16, (_) => _aleatorio.nextInt(256));
     return bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
   }
 
@@ -522,7 +521,6 @@ class ValidadorApi {
     final String? token = corpo['token'] as String?;
     return token == null ? null : _sessoes[token];
   }
-
 
   /// Fonte única das regras de formato: carteira com exatamente 20 dígitos e
   /// senha com exatamente 10 dígitos começando com 5 (mesmas do app).
@@ -575,7 +573,9 @@ class ValidadorApi {
                 'status': 'erro',
                 'mensagem': 'Muitas requisicoes. Aguarde um instante.',
               }),
-              headers: const {'content-type': 'application/json; charset=utf-8'},
+              headers: const {
+                'content-type': 'application/json; charset=utf-8',
+              },
             );
           }
           recentes.add(agora);
@@ -603,7 +603,10 @@ class ValidadorApi {
   }
 
   Response _erro(String mensagem, int statusCode) {
-    return _json({'status': 'erro', 'mensagem': mensagem}, statusCode: statusCode);
+    return _json(
+      {'status': 'erro', 'mensagem': mensagem},
+      statusCode: statusCode,
+    );
   }
 
   static Middleware _cors() {

@@ -16,7 +16,8 @@ class BarraProgressoEnvio extends StatelessWidget {
       child: FractionallySizedBox(
         widthFactor: AppDimens.dropZoneMaxWidth,
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: AppDimens.dropZoneLarguraMax),
+          constraints:
+              const BoxConstraints(maxWidth: AppDimens.dropZoneLarguraMax),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [

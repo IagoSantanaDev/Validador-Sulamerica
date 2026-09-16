@@ -18,8 +18,7 @@ String formatarMoeda(String? valor) {
   final bool negativo = numero < 0;
   final double absoluto = numero.abs();
   final String inteira = absoluto.floor().toString();
-  final int centavos =
-      (absoluto * 100).round() - absoluto.floor() * 100;
+  final int centavos = (absoluto * 100).round() - absoluto.floor() * 100;
 
   final StringBuffer inteiraAgrupada = StringBuffer();
   for (int i = 0; i < inteira.length; i++) {

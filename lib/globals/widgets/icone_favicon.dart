@@ -19,11 +19,10 @@ class IconeFavicon extends StatelessWidget {
 
   static Future<ui.Image> _decodificarFavicon() async {
     final ByteData dados = await rootBundle.load('web/favicon.ico');
-    final Uint8List bytes = dados.buffer
-        .asUint8List(dados.offsetInBytes, dados.lengthInBytes);
+    final Uint8List bytes =
+        dados.buffer.asUint8List(dados.offsetInBytes, dados.lengthInBytes);
 
-    final ui.Codec codec =
-        await ui.instantiateImageCodec(extrairPng(bytes));
+    final ui.Codec codec = await ui.instantiateImageCodec(extrairPng(bytes));
     final ui.FrameInfo frame = await codec.getNextFrame();
     return frame.image;
   }

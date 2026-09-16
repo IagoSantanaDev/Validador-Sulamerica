@@ -22,8 +22,7 @@ class _RegraCredenciaisFixa extends RegraCredenciaisPortal {
   final CredenciaisPortal? _credenciais;
 
   @override
-  CredenciaisPortal? resolver(String? identificadorPrestador) =>
-      _credenciais;
+  CredenciaisPortal? resolver(String? identificadorPrestador) => _credenciais;
 }
 
 class _FakeBatchAdapter implements HttpClientAdapter {
@@ -105,8 +104,6 @@ class _FakeValidadorGuiasRepository implements ValidadorGuiasRepository {
   @override
   List<GuiaValidada> validarLote(String conteudoXml) => retorno;
 }
-
-
 
 const GuiaTiss _guiaSemSenha = GuiaTiss(
   numeroGuiaPrestador: '111',
@@ -303,8 +300,6 @@ void main() {
       expect(descricoes.any((d) => d.startsWith('Senha inválida')), isTrue);
       expect(descricoes, contains('Elegível: SIM'));
     });
-
-
 
     test('elegibilidade NÃO é um erro próprio no frontend', () async {
       final _FakeBatchAdapter adapter = _FakeBatchAdapter(elegivel: false);
