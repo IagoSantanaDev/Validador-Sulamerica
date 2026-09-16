@@ -2,6 +2,7 @@ import '../datasources/xml_lote_guias_datasource.dart';
 import '../models/erro_validacao.dart';
 import '../models/guia_tiss.dart';
 import '../models/guia_validada.dart';
+import 'regras/regra_codigo_bilateral.dart';
 import 'regras/regra_senha_prefixo.dart';
 import 'regras/regra_validacao.dart';
 import 'validador_guias_repository.dart';
@@ -11,7 +12,11 @@ class ValidadorGuiasRepositoryImpl implements ValidadorGuiasRepository {
     XmlLoteGuiasDatasource? datasource,
     List<RegraValidacao>? regras,
   })  : _datasource = datasource ?? const XmlLoteGuiasDatasource(),
-        _regras = regras ?? const [RegraSenhaPrefixo()];
+        _regras = regras ??
+            const [
+              RegraSenhaPrefixo(),
+              RegraCodigoBilateral(),
+            ];
 
   final XmlLoteGuiasDatasource _datasource;
   final List<RegraValidacao> _regras;
