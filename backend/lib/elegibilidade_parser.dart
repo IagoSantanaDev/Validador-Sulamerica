@@ -1,8 +1,6 @@
 library;
 
 String? extrairRotuloElegibilidade(String html) {
-  // Permite `&nbsp;`/entidades entre o label e a tag e captura o valor
-  // dentro do <span> (qualquer classe: atencao, ok, etc.).
   final RegExp padrao = RegExp(
     r'<strong>\s*Eleg[ií]vel:[^<]*?</strong>\s*<span[^>]*>\s*([^<]+?)\s*</span>',
     caseSensitive: false,

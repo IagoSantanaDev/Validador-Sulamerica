@@ -13,3 +13,4 @@ web/*.js.map
 .gsd/
 debug/
 .artifacts/
+.agents/

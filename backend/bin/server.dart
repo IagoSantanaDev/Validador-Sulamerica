@@ -9,8 +9,7 @@ Future<void> main() async {
   final Logger logger = Logger();
 
   final String host = Platform.environment['HOST'] ?? '0.0.0.0';
-  final int porta =
-      int.tryParse(Platform.environment['PORT'] ?? '') ?? 8080;
+  final int porta = int.tryParse(Platform.environment['PORT'] ?? '') ?? 8080;
 
   final ValidadorApi api = ValidadorApi(logger: logger);
 

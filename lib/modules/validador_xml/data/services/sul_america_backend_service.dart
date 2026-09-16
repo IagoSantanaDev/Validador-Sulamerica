@@ -26,8 +26,6 @@ class SulAmericaBackendService {
     );
   }
 
-  /// Consulta em lote: envia todas as solicitações (elegibilidade/senha) de uma
-  /// única vez ao backend, que executa contra o portal e devolve os resultados.
   Future<Result<List<ResultadoConsultaLote>>> consultarLote({
     required String token,
     required List<ConsultaLoteItem> consultas,

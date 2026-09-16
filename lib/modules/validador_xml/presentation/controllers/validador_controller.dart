@@ -37,19 +37,13 @@ class ValidadorController extends ChangeNotifier {
   final RegraCredenciaisPortal _regraCredenciais;
 
   String? _tokenSessao;
-  // Code do prestador autenticado no _tokenSessao atual; usado para saber
-  // se a sessao em cache serve para o prestador do lote em validacao ou se
-  // e preciso logar de novo com outras credenciais (ver RegraCredenciaisPortal).
+
   String? _codePrestadorDoToken;
 
   EstadoConexao _estadoConexao = EstadoConexao.verificando;
 
   EstadoConexao get estadoConexao => _estadoConexao;
 
-  // Não há mais um prestador "padrão": cada lote autentica com a
-  // credencial do seu próprio identificacaoPrestador (RegraCredenciaisPortal).
-  // Por isso o startup só confirma que a API está no ar — o login em si só
-  // acontece depois que um arquivo é carregado e o prestador é conhecido.
   Future<void> verificarDisponibilidadeApi() async {
     final SulAmericaBackendService? service = _service;
     _estadoConexao = EstadoConexao.verificando;
@@ -374,8 +368,7 @@ class ValidadorController extends ChangeNotifier {
     if (credenciais == null || !credenciais.completas) {
       return (null, AppStrings.erroCredenciaisAusentes);
     }
-    // Ver comentário de _codePrestadorDoToken: token só serve para o code
-    // que autenticou.
+
     final String? tokenAtual = _tokenSessao;
     if (tokenAtual != null && _codePrestadorDoToken == credenciais.code) {
       return (tokenAtual, null);

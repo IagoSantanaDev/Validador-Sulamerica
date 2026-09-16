@@ -9,12 +9,11 @@ void main() {
 
   test('favicon.ico embute um PNG 256x256 extraível e decodificável', () async {
     final ByteData dados = await rootBundle.load('web/favicon.ico');
-    final Uint8List bytes = dados.buffer
-        .asUint8List(dados.offsetInBytes, dados.lengthInBytes);
+    final Uint8List bytes =
+        dados.buffer.asUint8List(dados.offsetInBytes, dados.lengthInBytes);
 
     final Uint8List png = IconeFavicon.extrairPng(bytes);
 
-    // A imagem embutida deve ser PNG (assinatura padrão).
     expect(png.length, greaterThan(0));
     expect(
       png.sublist(0, 4),

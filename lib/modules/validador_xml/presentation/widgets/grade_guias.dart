@@ -9,7 +9,7 @@ import '../../../../globals/widgets/textos.dart';
 import '../../data/models/consulta_guia.dart';
 import '../../data/models/guia_validada.dart';
 
-enum TipoErroGuia { senha, carteira }
+enum TipoErroGuia { senha, carteira, procedimento }
 
 class LinhaGradeGuia {
   const LinhaGradeGuia({required this.guia, required this.detalhe});
@@ -69,6 +69,7 @@ TipoErroGuia? tipoErroDeLinha(LinhaGradeGuia linha) {
     if (erro.mensagem != detalhe) continue;
     if (erro.campo == 'senha') return TipoErroGuia.senha;
     if (erro.campo == 'numeroCarteira') return TipoErroGuia.carteira;
+    if (erro.campo == 'procedimentos') return TipoErroGuia.procedimento;
   }
   return null;
 }
@@ -82,6 +83,7 @@ TipoErroGuia _tipoDeConsulta(ConsultaGuia consulta) {
 String rotuloTipoErro(TipoErroGuia tipo) => switch (tipo) {
       TipoErroGuia.senha => AppStrings.filtroSenha,
       TipoErroGuia.carteira => AppStrings.filtroCarteira,
+      TipoErroGuia.procedimento => AppStrings.filtroProcedimento,
     };
 
 class GradeGuias extends StatelessWidget {
@@ -186,6 +188,30 @@ class GradeGuias extends StatelessWidget {
                 valor: guia.senha ?? AppStrings.valorIndisponivel,
                 monoespacado: true,
               ),
+              for (final erro in guia.erros) ...[
+                const SizedBox(height: AppDimens.spaceMd),
+                Builder(
+                  builder: (ctx) {
+                    String valor = erro.mensagem;
+                    if (erro.campo == 'procedimentos') {
+                      final pList = guia.guia.procedimentos
+                          .where((p) => erro.mensagem.contains(p.codigo));
+                      if (pList.isNotEmpty) {
+                        final p = pList.first;
+                        valor = '${p.codigo} = ${p.quantidade}';
+                      }
+                    }
+                    return RotuloValor(
+                      rotulo: erro.campo == 'procedimentos'
+                          ? AppStrings.filtroProcedimento
+                          : erro.campo == 'senha'
+                              ? AppStrings.rotuloSenha
+                              : AppStrings.rotuloCarteira,
+                      valor: valor,
+                    );
+                  },
+                ),
+              ],
               for (final ConsultaGuia consulta in guia.consultas) ...[
                 const SizedBox(height: AppDimens.spaceMd),
                 RotuloValor(
