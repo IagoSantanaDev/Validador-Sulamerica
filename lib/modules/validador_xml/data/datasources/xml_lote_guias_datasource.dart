@@ -1,19 +1,17 @@
 import 'package:xml/xml.dart';
 
 import '../models/guia_tiss.dart';
+import '../models/procedimento.dart';
 import '../models/informacoes_lote.dart';
 import 'xml_lote_guias_exceptions.dart';
 
-/// Parsing do XML de lote de guias TISS (apenas extração, sem regra de
-/// negócio). `namespace: '*'` casa tags qualificadas com o prefixo ans:.
 class XmlLoteGuiasDatasource {
   const XmlLoteGuiasDatasource();
 
   List<GuiaTiss> extrairGuias(String conteudoXml) {
     final XmlDocument documento = _parsear(conteudoXml);
-    final List<XmlElement> elementosGuia = documento
-        .findAllElements('guiaSP-SADT', namespace: '*')
-        .toList();
+    final List<XmlElement> elementosGuia =
+        documento.findAllElements('guiaSP-SADT', namespace: '*').toList();
 
     if (elementosGuia.isEmpty) {
       throw const NenhumaGuiaEncontradaException(
@@ -26,9 +24,8 @@ class XmlLoteGuiasDatasource {
   InformacoesLote extrairInformacoesDoLote(String conteudoXml) {
     try {
       final XmlDocument documento = _parsear(conteudoXml);
-      final List<XmlElement> guias = documento
-          .findAllElements('guiaSP-SADT', namespace: '*')
-          .toList();
+      final List<XmlElement> guias =
+          documento.findAllElements('guiaSP-SADT', namespace: '*').toList();
 
       return InformacoesLote(
         versao: _textoPrimeiro(documento, const ['Padrao']) ??
@@ -37,24 +34,24 @@ class XmlLoteGuiasDatasource {
           documento,
           const ['identificacaoTransacao', 'tipoTransacao'],
         ),
-        // identificacaoPrestador no TISS e um choice (CNPJ | CPF |
-        // codigoPrestadorNaOperadora); tenta os tres antes de desistir.
-        prestadorCnpjCpf:
-            _textoPrimeiro(documento, const ['identificacaoPrestador', 'CNPJ']) ??
-                _textoPrimeiro(
-                  documento,
-                  const ['identificacaoPrestador', 'CPF'],
-                ) ??
-                _textoPrimeiro(
-                  documento,
-                  const ['identificacaoPrestador', 'codigoPrestadorNaOperadora'],
-                ) ??
-                _textoPrimeiro(documento, const ['origem', 'CNPJ']) ??
-                _textoPrimeiro(documento, const ['origem', 'CPF']) ??
-                _textoPrimeiro(
-                  documento,
-                  const ['origem', 'codigoPrestadorNaOperadora'],
-                ),
+        prestadorCnpjCpf: _textoPrimeiro(
+              documento,
+              const ['identificacaoPrestador', 'CNPJ'],
+            ) ??
+            _textoPrimeiro(
+              documento,
+              const ['identificacaoPrestador', 'CPF'],
+            ) ??
+            _textoPrimeiro(
+              documento,
+              const ['identificacaoPrestador', 'codigoPrestadorNaOperadora'],
+            ) ??
+            _textoPrimeiro(documento, const ['origem', 'CNPJ']) ??
+            _textoPrimeiro(documento, const ['origem', 'CPF']) ??
+            _textoPrimeiro(
+              documento,
+              const ['origem', 'codigoPrestadorNaOperadora'],
+            ),
         operadoraRegistroANS:
             _textoPrimeiro(documento, const ['destino', 'registroANS']),
         numeroLote: _textoPrimeiro(documento, const ['numeroLote']),
@@ -72,12 +69,9 @@ class XmlLoteGuiasDatasource {
     }
   }
 
-  /// Soma todos os `<ans:valorTotalGeral>` do lote. Retorna null quando não
-  /// há nenhum valor numérico válido.
   String? _somarValorTotalGeral(XmlDocument documento) {
-    final List<XmlElement> totais = documento
-        .findAllElements('valorTotalGeral', namespace: '*')
-        .toList();
+    final List<XmlElement> totais =
+        documento.findAllElements('valorTotalGeral', namespace: '*').toList();
     if (totais.isEmpty) return null;
 
     double soma = 0;
@@ -123,7 +117,33 @@ class XmlLoteGuiasDatasource {
             const ['dadosBeneficiario', 'nomeBeneficiario'],
           ) ??
           _textoDeElementoDescendente(guiaElement, 'nomeBeneficiario'),
+      procedimentos: _extrairProcedimentos(guiaElement),
     );
+  }
+
+  List<Procedimento> _extrairProcedimentos(XmlElement guiaElement) {
+    final List<XmlElement> elementos = guiaElement
+        .findAllElements('procedimentoExecutado', namespace: '*')
+        .toList();
+
+    final List<Procedimento> resultado = [];
+    for (final XmlElement elemento in elementos) {
+      final String? codigo = _textoDoFilhoAninhado(
+        elemento,
+        const ['procedimento', 'codigoProcedimento'],
+      );
+      if (codigo == null || codigo.isEmpty) continue;
+
+      final String? quantidadeTexto =
+          _textoDoFilhoAninhado(elemento, const ['quantidadeExecutada']);
+      final int quantidade = int.tryParse(quantidadeTexto ?? '') ?? 1;
+
+      resultado.add(
+        Procedimento(codigo: codigo, quantidade: quantidade),
+      );
+    }
+
+    return resultado;
   }
 
   String? _textoPrimeiro(XmlDocument documento, List<String> caminho) {

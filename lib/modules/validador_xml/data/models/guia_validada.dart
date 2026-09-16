@@ -12,18 +12,12 @@ class GuiaValidada {
   final GuiaTiss guia;
   final List<ErroValidacao> erros;
 
-  /// Resultados das consultas ao portal para esta guia (elegibilidade e/ou
-  /// consulta de senha) — a guia pode ter até duas consultas; nula nas guias
-  /// não consultadas.
   final List<ConsultaGuia> consultas;
 
   bool get temErro => erros.isNotEmpty;
 
   bool get temFalhaConsulta => consultas.any((c) => !c.sucesso);
 
-  /// Primeira consulta com falha; se nenhuma falhou, a primeira consulta;
-  /// null quando a guia não foi consultada. A visão completa fica em
-  /// [consultas] (elegibilidade + senha).
   ConsultaGuia? get consulta {
     if (consultas.isEmpty) return null;
     for (final ConsultaGuia c in consultas) {

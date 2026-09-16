@@ -59,8 +59,7 @@ class AppStrings {
   static const String erroCarteiraNaoEncontrada =
       'Carteira não encontrada no portal';
   static const String erroSenhaInvalida = 'Senha inválida';
-  static const String erroSenhaNaoEncontrada =
-      'Senha não encontrada no portal';
+  static const String erroSenhaNaoEncontrada = 'Senha não encontrada no portal';
   static const String erroLoginFalhou =
       'Falha ao autenticar no portal (credenciais rejeitadas).';
   static const String erroCredenciaisAusentes =
@@ -69,5 +68,7 @@ class AppStrings {
   static const String filtroTodos = 'Todas';
   static const String filtroSenha = 'Senha';
   static const String filtroCarteira = 'Carteira';
-  static const String filtroSemResultado = 'Nenhuma guia encontrada com este filtro.';
+  static const String filtroProcedimento = 'Procedimento';
+  static const String filtroSemResultado =
+      'Nenhuma guia encontrada com este filtro.';
 }

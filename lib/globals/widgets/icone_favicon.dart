@@ -4,8 +4,6 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-/// O Flutter não decodifica ICO diretamente, então o PNG embutido no
-/// favicon (web/favicon.ico) é extraído e decodificado.
 class IconeFavicon extends StatelessWidget {
   const IconeFavicon({super.key, this.tamanho = 40});
 
@@ -19,11 +17,10 @@ class IconeFavicon extends StatelessWidget {
 
   static Future<ui.Image> _decodificarFavicon() async {
     final ByteData dados = await rootBundle.load('web/favicon.ico');
-    final Uint8List bytes = dados.buffer
-        .asUint8List(dados.offsetInBytes, dados.lengthInBytes);
+    final Uint8List bytes =
+        dados.buffer.asUint8List(dados.offsetInBytes, dados.lengthInBytes);
 
-    final ui.Codec codec =
-        await ui.instantiateImageCodec(extrairPng(bytes));
+    final ui.Codec codec = await ui.instantiateImageCodec(extrairPng(bytes));
     final ui.FrameInfo frame = await codec.getNextFrame();
     return frame.image;
   }

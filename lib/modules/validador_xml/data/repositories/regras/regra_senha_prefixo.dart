@@ -5,8 +5,6 @@ import 'regra_validacao.dart';
 class RegraSenhaPrefixo extends RegraValidacao {
   const RegraSenhaPrefixo();
 
-  /// Regra única da senha exibida ao cliente: começa com 5 e tem
-  /// exatamente 10 dígitos (fonte para o front validar antes da API).
   static const String prefixoObrigatorio = '5';
   static const int tamanhoExato = 10;
 

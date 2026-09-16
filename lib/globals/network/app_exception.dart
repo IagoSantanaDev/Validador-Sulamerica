@@ -24,7 +24,8 @@ class NaoAutorizadoException extends AppException {
 }
 
 class RecursoNaoEncontradoException extends AppException {
-  const RecursoNaoEncontradoException() : super('Recurso não encontrado (404).');
+  const RecursoNaoEncontradoException()
+      : super('Recurso não encontrado (404).');
 }
 
 class ErroServidorException extends AppException {
