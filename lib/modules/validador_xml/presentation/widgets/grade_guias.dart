@@ -188,6 +188,30 @@ class GradeGuias extends StatelessWidget {
                 valor: guia.senha ?? AppStrings.valorIndisponivel,
                 monoespacado: true,
               ),
+              for (final erro in guia.erros) ...[
+                const SizedBox(height: AppDimens.spaceMd),
+                Builder(
+                  builder: (ctx) {
+                    String valor = erro.mensagem;
+                    if (erro.campo == 'procedimentos') {
+                      final pList = guia.guia.procedimentos
+                          .where((p) => erro.mensagem.contains(p.codigo));
+                      if (pList.isNotEmpty) {
+                        final p = pList.first;
+                        valor = '${p.codigo} = ${p.quantidade}';
+                      }
+                    }
+                    return RotuloValor(
+                      rotulo: erro.campo == 'procedimentos'
+                          ? AppStrings.filtroProcedimento
+                          : erro.campo == 'senha'
+                              ? AppStrings.rotuloSenha
+                              : AppStrings.rotuloCarteira,
+                      valor: valor,
+                    );
+                  },
+                ),
+              ],
               for (final ConsultaGuia consulta in guia.consultas) ...[
                 const SizedBox(height: AppDimens.spaceMd),
                 RotuloValor(
