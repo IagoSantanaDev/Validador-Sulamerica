@@ -19,16 +19,16 @@ Não edite modelo/datasource, `RegraCodigoBilateral`, controller, UI, README ou 
 
 ## Pré-condições E Contrato
 
-- Siga `.agents/AGENTS.md` e `debug/KAN-07/PLANO.md`. WF01 precisa estar integrado: use `GuiaTiss.solicitante.numeroConselho` para a regra de CRM.
+- Siga `.agents/AGENTS.md` e `debug/KAN-07/PLANO.md`. A Regra 1 consome `GuiaTiss.solicitante.numeroConselho` conforme o contrato de WF01.
 - Leia os padrões `RegraValidacao`, `ErroValidacao` e registro no repository antes de decidir a assinatura.
-- Consulte Context7 para decisões de linguagem/pacote usadas; não adicione dependência. A lista é dado de domínio, não deve ser lida em runtime.
+- Consulte Context7 para decisões de linguagem/pacote usadas; não adicione dependência. A lista VPP é dado de domínio e não deve ser lida em runtime.
 - Regra CRM conta exatamente o valor extraído; não faz `trim`, remove zero ou normaliza dígitos. Valor ausente/vazio não dispara erro. Comprimento maior que 5 gera campo `crm` e mensagem conforme o plano.
 - Regra VPP gera no máximo um erro por guia sem senha, contendo todos os códigos aplicáveis. A mensagem não contém a substring `senha não informada`. Uma guia sem código VPP não é afetada.
 - `RegraSenhaPrefixo` não gera o erro duplicado de senha obrigatória quando a regra VPP se aplica. Não compartilhe a lista com `RegraCodigoBilateral`.
 
 ## Execução
 
-1. Verifique a pré-condição WF01 e descubra como o projeto representa senha ausente e código de procedimento.
+1. Confirme o contrato do campo literal de WF01 e descubra como o projeto representa senha ausente e códigos de procedimento.
 2. Leia `procedimentos_vpp_sim.json` com parser JSON no teste/geração, compare a contagem informada (2.792), unicidade e conteúdo. Não copie o JSON inteiro como fixture e não o abra para despejar dados no log.
 3. Consulte Context7 antes de definir codificação/representação do conjunto. Gere estrutura Dart imutável, lookup O(1), sem leitura de arquivo no runtime e sem dependência nova. Mantenha o payload de dados compacto; o limite de 500 linhas aplica-se a código de produção, não a testes.
 4. Implemente e registre as regras seguindo o repository atual. Mantenha `RegraCodigoBilateral` inalterada.
