@@ -22,6 +22,7 @@ class RegraCodigoBilateral extends RegraValidacao {
     '41101081',
     '41101103',
     '41101480',
+    '40901114',
   };
 
   @override
