@@ -16,7 +16,5 @@ Future<void> main() async {
   final server = await io.serve(api.handler, host, porta);
   logger.i('API intermediaria SulAmerica em '
       'http://${server.address.host}:${server.port}');
-  logger.i('Rotas: POST /api/login | POST /api/beneficiario | '
-      'GET /api/autorizacao?senha= | POST /api/consultas | '
-      'GET /api/status');
+  logger.i('Rotas: POST /api/login | POST /api/consultas | GET /api/status');
 }
