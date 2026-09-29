@@ -27,7 +27,11 @@ class ValidadorGuiasRepositoryImpl implements ValidadorGuiasRepository {
 
   @override
   List<GuiaValidada> validarLote(String conteudoXml) {
-    final List<GuiaTiss> guias = _datasource.extrairGuias(conteudoXml);
+    return validarGuias(_datasource.extrairGuias(conteudoXml));
+  }
+
+  @override
+  List<GuiaValidada> validarGuias(List<GuiaTiss> guias) {
     return guias.map(_aplicarRegras).toList();
   }
 

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -92,6 +93,33 @@ void main() {
       resultado.fold(
         onSuccess: (_) => fail('Esperava falha'),
         onFailure: (erro) => expect(erro, isA<NaoAutorizadoException>()),
+      );
+    });
+
+    test('não registra o corpo de erro do endpoint de login', () async {
+      final DioClient client = _criarClienteComRespostaFalsa(
+        statusCode: 401,
+        corpo: {'mensagem': 'PORTAL_SENHA_PRIVADA'},
+      );
+      final List<String> linhasLog = [];
+
+      await runZoned<Future<void>>(
+        () async {
+          await client.post<dynamic>(
+            '/api/login',
+            corpo: {'identificadorPrestador': '27372066000673'},
+            parser: (dados) => dados,
+          );
+        },
+        zoneSpecification: ZoneSpecification(
+          print: (self, parent, zone, linha) => linhasLog.add(linha),
+        ),
+      );
+
+      expect(linhasLog.join('\n'), isNot(contains('PORTAL_SENHA_PRIVADA')));
+      expect(
+        linhasLog.join('\n'),
+        contains('-> POST https://exemplo.com/api/login'),
       );
     });
 

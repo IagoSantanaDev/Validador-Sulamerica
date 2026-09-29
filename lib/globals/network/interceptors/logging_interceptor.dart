@@ -9,7 +9,7 @@ class LoggingInterceptor extends Interceptor {
   @override
   void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
     if (kDebugMode) {
-      print('[HTTP] -> ${options.method} ${_urlDe(options)}');
+      debugPrint('[HTTP] -> ${options.method} ${_urlDe(options)}');
     }
     handler.next(options);
   }
@@ -17,7 +17,7 @@ class LoggingInterceptor extends Interceptor {
   @override
   void onResponse(Response response, ResponseInterceptorHandler handler) {
     if (kDebugMode) {
-      print(
+      debugPrint(
         '[HTTP] <- ${response.requestOptions.method} '
         '${_urlDe(response.requestOptions)} -> ${response.statusCode}',
       );
@@ -37,7 +37,7 @@ class LoggingInterceptor extends Interceptor {
     if (kDebugMode) {
       final int? status = err.response?.statusCode;
 
-      print(
+      debugPrint(
         '[HTTP] x ${err.requestOptions.method} '
         '${_urlDe(err.requestOptions)} -> ${status ?? err.type}',
       );
@@ -48,7 +48,8 @@ class LoggingInterceptor extends Interceptor {
 
   void _logarCorpoSemPii(RequestOptions options, String rotulo, dynamic dados) {
     final String url = _urlDe(options);
-    if (url.contains('/api/consultas') ||
+    if (url.contains('/api/login') ||
+        url.contains('/api/consultas') ||
         url.contains('/api/beneficiario') ||
         url.contains('/api/autorizacao')) {
       return;
@@ -62,7 +63,7 @@ class LoggingInterceptor extends Interceptor {
     final String? texto = _resumir(dados);
     if (texto == null) return;
 
-    print('[HTTP] $rotulo: $texto');
+    debugPrint('[HTTP] $rotulo: $texto');
   }
 
   String? _resumir(dynamic dados) {
