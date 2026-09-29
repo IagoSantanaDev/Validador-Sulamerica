@@ -2,6 +2,7 @@ import 'package:xml/xml.dart';
 
 import '../models/guia_tiss.dart';
 import '../models/procedimento.dart';
+import '../models/profissional_solicitante.dart';
 import '../models/informacoes_lote.dart';
 import 'xml_lote_guias_exceptions.dart';
 
@@ -117,8 +118,22 @@ class XmlLoteGuiasDatasource {
             const ['dadosBeneficiario', 'nomeBeneficiario'],
           ) ??
           _textoDeElementoDescendente(guiaElement, 'nomeBeneficiario'),
+      solicitante: _extrairSolicitante(guiaElement),
       procedimentos: _extrairProcedimentos(guiaElement),
     );
+  }
+
+  ProfissionalSolicitante? _extrairSolicitante(XmlElement guiaElement) {
+    final String? numeroConselho = _textoLiteralDoFilhoAninhado(
+      guiaElement,
+      const [
+        'dadosSolicitante',
+        'profissionalSolicitante',
+        'numeroConselhoProfissional',
+      ],
+    );
+    if (numeroConselho == null) return null;
+    return ProfissionalSolicitante(numeroConselho: numeroConselho);
   }
 
   List<Procedimento> _extrairProcedimentos(XmlElement guiaElement) {
