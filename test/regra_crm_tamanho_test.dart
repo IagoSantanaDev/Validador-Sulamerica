@@ -1,0 +1,58 @@
+import 'package:flutter_test/flutter_test.dart';
+import 'package:validador_xml_sulamerica/modules/validador_xml/data/models/guia_tiss.dart';
+import 'package:validador_xml_sulamerica/modules/validador_xml/data/models/procedimento.dart';
+import 'package:validador_xml_sulamerica/modules/validador_xml/data/models/profissional_solicitante.dart';
+import 'package:validador_xml_sulamerica/modules/validador_xml/data/repositories/regras/regra_crm_tamanho.dart';
+
+class _GuiaStub implements GuiaTiss {
+  const _GuiaStub(this.solicitante);
+
+  @override
+  final ProfissionalSolicitante? solicitante;
+
+  @override
+  String get numeroGuiaPrestador => '';
+
+  @override
+  String? get numeroCarteira => null;
+
+  @override
+  String? get senha => null;
+
+  @override
+  String? get nomeBeneficiario => null;
+
+  @override
+  List<Procedimento> get procedimentos => const [];
+}
+
+void main() {
+  const RegraCrmTamanho regra = RegraCrmTamanho();
+
+  GuiaTiss guiaComCrm(String? numeroConselho) =>
+      _GuiaStub(ProfissionalSolicitante(numeroConselho: numeroConselho));
+
+  test('aceita CRM literal com quatro ou cinco caracteres', () {
+    expect(regra.validar(guiaComCrm('1234')), isNull);
+    expect(regra.validar(guiaComCrm('12345')), isNull);
+  });
+
+  test('rejeita seis caracteres sem remover zero à esquerda', () {
+    for (final String crm in ['123456', '014481']) {
+      final erro = regra.validar(guiaComCrm(crm));
+
+      expect(erro?.campo, 'crm');
+      expect(erro?.mensagem, 'CRM deve ter no máximo 5 dígitos (014481)');
+    }
+  });
+
+  test('não valida CRM ausente ou vazio', () {
+    expect(regra.validar(guiaComCrm(null)), isNull);
+    expect(regra.validar(guiaComCrm('')), isNull);
+  });
+
+  test('conta espaços como caracteres, sem trim', () {
+    expect(regra.validar(guiaComCrm(' 123 ')), isNull);
+    expect(regra.validar(guiaComCrm(' 1234 '))?.campo, 'crm');
+  });
+}
