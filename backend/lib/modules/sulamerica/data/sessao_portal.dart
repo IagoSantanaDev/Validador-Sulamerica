@@ -7,7 +7,7 @@ import 'package:dio/io.dart';
 import 'package:dio_cookie_manager/dio_cookie_manager.dart';
 import 'package:logger/logger.dart';
 
-import 'util_texto.dart';
+import 'package:validador_backend/util_texto.dart';
 
 enum MotivoFalhaLogin { credenciaisInvalidas, respostaInesperada, falhaRede }
 

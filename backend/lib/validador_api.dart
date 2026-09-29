@@ -6,9 +6,9 @@ import 'dart:typed_data';
 import 'package:logger/logger.dart';
 import 'package:shelf/shelf.dart';
 import 'package:shelf_router/shelf_router.dart';
+import 'package:validador_backend/modules/sulamerica/data/sessao_portal.dart';
 
 import 'elegibilidade_parser.dart';
-import 'sessao_portal.dart';
 import 'util_texto.dart';
 
 class ValidadorApi {
