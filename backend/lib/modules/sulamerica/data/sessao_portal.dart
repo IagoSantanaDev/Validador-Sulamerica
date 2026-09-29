@@ -34,8 +34,9 @@ class SessaoPortal {
     String? fingerprintEsperado,
   })  : _dio = dio ?? Dio(),
         _cookieJar = cookieJar ?? CookieJar(),
-        _fingerprint = fingerprintEsperado ??
-            Platform.environment['PORTAL_CERT_FINGERPRINT_SHA256'],
+        _fingerprint = _normalizarFingerprint(
+          fingerprintEsperado ?? Platform.environment[_variavelFingerprint],
+        ),
         _logger = logger ?? Logger() {
     _dio.options = _dio.options.copyWith(
       connectTimeout: const Duration(seconds: 15),
@@ -60,9 +61,40 @@ class SessaoPortal {
 
   static const String hostPortal = 'saude.sulamericaseguros.com.br';
 
+  /// Nome da variavel de ambiente com o fingerprint do certificado do portal.
+  static const String _variavelFingerprint = 'PORTAL_CERT_FINGERPRINT_SHA256';
+
+  /// SHA256 em hex tem 64 caracteres.
+  static final RegExp _formatoFingerprint = RegExp(r'^[0-9a-fA-F]{64}$');
+
+  /// Normaliza o fingerprint vindo da configuracao.
+  ///
+  /// Ausente, vazio ou so espacos significam "nao configurado" e caem na
+  /// validacao de CA padrao. Tratar vazio como ausente evita que uma variavel
+  /// vazia no secret store vire pinning contra uma string que nunca casa,
+  /// derrubando toda conexao com o portal.
+  ///
+  /// Presente porem malformado falha a criacao da sessao em vez de degradar:
+  /// ignorar em silencio tiraria o pinning sem nenhum sinal, e aceitar o valor
+  /// quebrado falharia na comparacao, atribuindo a queda a um possivel MITM.
+  /// O erro cita a variavel e o formato esperado, nunca o valor.
+  static String? _normalizarFingerprint(String? bruto) {
+    final String? valor = bruto?.trim();
+    if (valor == null || valor.isEmpty) return null;
+
+    if (!_formatoFingerprint.hasMatch(valor)) {
+      throw ArgumentError(
+        'deve ser o SHA256 em hexadecimal, 64 caracteres, sem dois-pontos '
+        '(ex.: "9f2c...b71e"). O valor configurado esta malformado.',
+        _variavelFingerprint,
+      );
+    }
+    return valor.toLowerCase();
+  }
+
   /// Fingerprint SHA256 (hex, minusculas) do certificado do portal,
   /// configurado via `PORTAL_CERT_FINGERPRINT_SHA256`. Permite rotacionar
-  /// sem alterar codigo. Ausente => validacao de CA padrao.
+  /// sem alterar codigo. Ausente ou vazio => validacao de CA padrao.
   final String? _fingerprint;
 
   /// Callback do HttpClient para aceitar certificados durante o handshake.
@@ -83,7 +115,7 @@ class SessaoPortal {
   ///
   /// Estrategia:
   /// - Se `PORTAL_CERT_FINGERPRINT_SHA256` esta configurado: pinning SHA256.
-  /// - Caso contrario: validacao de CA padrao (rejeita self-signed).
+  /// - Ausente ou vazio: validacao de CA padrao (rejeita self-signed).
   bool validarCertificado(
     X509Certificate? certificate,
     String host,
@@ -108,8 +140,7 @@ class SessaoPortal {
 
     final String fingerprintCalculado =
         sha256.convert(certificate.der).toString();
-    final bool confere =
-        fingerprintCalculado.toLowerCase() == fingerprint.trim().toLowerCase();
+    final bool confere = fingerprintCalculado == fingerprint;
 
     if (!confere) {
       _logger.e(
