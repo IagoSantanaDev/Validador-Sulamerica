@@ -44,15 +44,13 @@ Os detalhes abaixo foram validados contra o portal em produção e precisam cont
 - A consulta de beneficiário também redireciona (302 para `elegibilidade-resultado.htm`); o backend segue o redirect e devolve o HTML final.
 - A consulta de autorização é um GET em `ajax-controller.jsp` com `metodo=autorizador-pesquisar-solicitacoes` e o campo `numero-vpp` (a senha de 10 dígitos do beneficiário). O portal devolve `text/plain` em ISO-8859-1; o backend tenta UTF-8 e cai para Latin-1. Esse endpoint exige sessão autenticada (401 sem login).
 - A carteirinha é enviada nos segmentos originais 3-5-4-4-4 (campos `codigo-beneficiario-1` a `codigo-beneficiario-5`), não dividida em partes iguais.
-- O certificado TLS do portal tem cadeia com self-signed que a CA pública dos containers rejeita. O backend aceita a cadeia somente para o host `saude.sulamericaseguros.com.br`; qualquer outro host mantém a verificação padrão.
+- O certificado TLS do portal tem cadeia com self-signed que a CA pública dos containers rejeita. O backend aceita a cadeia sem validação de CA quando o host é exatamente `saude.sulamericaseguros.com.br`; qualquer outro host mantém a verificação padrão. Isso significa que a conexão com o portal **não** tem garantia de identidade do servidor: ela se apoia apenas no hostname. É uma exceção conhecida, não um desenho final.
 
 ## Endpoints
 
 | Método | Rota | Corpo / Query | Descrição |
 |---|---|---|---|
-| POST | `/api/login` | `{code, user, senha}` | Autentica no portal e devolve `{token}` |
-| POST | `/api/beneficiario` | `{token, carteira}` | Elegibilidade de uma carteira; devolve `{status, elegivel, rotuloElegibilidade}` |
-| GET | `/api/autorizacao` | `?token=&senha=` | Status da autorização pela senha; devolve `{status, encontrada, descricao}` |
+| POST | `/api/login` | `{code, user, senha}` | Autentica no portal e devolve `{token, autenticada: true}` |
 | POST | `/api/consultas` | `{token, consultas: [{tipo, chave}]}` | Consultas em lote; devolve `{status, resultados}` na ordem da requisição |
 | GET | `/api/status` | nenhum | Health check: sessões ativas e teste de alcance do portal |
 
@@ -63,7 +61,7 @@ Regras de negócio aplicadas no servidor, espelhando o app:
 - Carteira precisa ter exatamente 20 dígitos.
 - Senha precisa ter exatamente 10 dígitos e começar com 5.
 - Elegibilidade é lida da página de resultado (`elegivel` `true` ou `false`); `null` quando o portal volta para a página de identificação, o que acontece quando a carteira não é encontrada.
-- A resposta de `/api/autorizacao` traz só a descrição do status (ex.: "Autorizado", "Negado") ou `descricao: null` quando não há registro. O backend não repassa o JSON cru do portal.
+- O item de resultado de tipo `senha` devolve `statusSenha` com a descrição do status (ex.: "Autorizado", "Negado") ou `null` quando não há registro. O backend não repassa o JSON cru do portal.
 - O app considera a senha autorizada quando a descrição contém "autorizado".
 
 ### Exemplos
@@ -94,7 +92,7 @@ Execução contra o portal:
 |---|---|---|
 | Itens por lote | 300 | 413 |
 | Tamanho do corpo | 1 MB | 413 |
-| Rate limit por IP nas rotas do portal | 40 por minuto | 429 |
+| Rate limit nas rotas do portal (`/api/login`, `/api/consultas`) | 40 por minuto | 429 |
 | Lotes simultâneos | 1 | 429 |
 | Sessões ativas | 10 (a mais antiga é descartada) | nova sessão substitui a antiga |
 
@@ -104,6 +102,7 @@ Tokens de sessão são gerados com `Random.secure()`. Sem credenciais válidas, 
 
 - A senha do prestador nunca é logada e não persiste; as credenciais ficam retidas em memória por token, apenas para abrir sessões extras, e saem junto com a sessão.
 - Logs registram método, rota e status, nunca corpo nem credenciais. Chaves (carteira/senha) aparecem mascaradas, ex.: `5820...10`.
+- O rate limit identifica o cliente pelo primeiro valor de `X-Forwarded-For` quando o header existe, caindo para o endereço de conexão (`shelf.io.connection_info`). Atrás de um proxy, `X-Forwarded-For` é controlado por quem o envia, então um cliente pode forjar o próprio identificador e escapar do limite. O destino é contar apenas pelo endereço de conexão real.
 - Em produção: rodar atrás de TLS e restringir `CORS_ORIGIN` e a rede de acesso à API.
 
 ## Deploy (Render free tier)

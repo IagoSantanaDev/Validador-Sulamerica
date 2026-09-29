@@ -51,7 +51,7 @@ Um detalhe operacional validado: o login no portal precisa começar com um GET n
 
 ## Como funciona a validação
 
-1. O site abre e verifica a API (`/api/status`) e autentica no portal com as credenciais definidas no build. Enquanto isso não acontece, a página mostra o motivo exato: API fora do ar, credenciais ausentes ou credenciais inválidas.
+1. O site abre e verifica a API (`/api/status`). O login no portal acontece depois que um arquivo é carregado, com as credenciais do prestador daquele lote, definidas no build. Enquanto isso não acontece, a página mostra o motivo exato: API fora do ar, credenciais ausentes ou credenciais inválidas.
 2. Você arrasta um arquivo `.xml` de lote TISS para a área de upload. O app calcula o hash MD5 e extrai os metadados do lote.
 3. A validação local roda as regras por guia.
 4. As guias com dados bem formados são consultadas no portal, em lote: elegibilidade pela carteira e status da autorização pela senha.
@@ -80,7 +80,7 @@ Depois da validação local, cada guia com dados válidos é consultada. Carteir
 - **Elegibilidade (carteira)**: devolve SIM ou NÃO. NÃO vira "Beneficiário não elegível"; quando o portal não renderiza o resultado, "Carteira não encontrada no portal".
 - **Autorização (senha)**: devolve a descrição do status da solicitação. Descrição com "autorizado" é sucesso; sem status, "Senha não encontrada no portal"; nos demais casos a descrição do portal é exibida.
 
-As consultas vão todas para `/api/consultas` em uma única chamada HTTP. O backend distribui o trabalho em até 10 sessões do portal (carteiras em série por sessão, senhas com até 3 simultâneas por sessão), preserva a ordem do lote e recupera falhas: sessão rejeitada (401/403) renova o login, falha transitória repete após pausa curta. O app guarda um fallback para chamadas individuais, usado apenas se o backend for um deploy antigo sem `/api/consultas`.
+As consultas vão todas para `/api/consultas` em uma única chamada HTTP. O backend distribui o trabalho em até 10 sessões do portal (carteiras em série por sessão, senhas com até 3 simultâneas por sessão), preserva a ordem do lote e recupera falhas: sessão rejeitada (401/403) renova o login, falha transitória repete após pausa curta. Não há rota individual de elegibilidade ou autorização: ambas viajam só pelo lote.
 
 ## Como rodar localmente
 
@@ -115,6 +115,14 @@ Definidas em tempo de build com `--dart-define`. Não há mais um prestador "pad
 | `PORTAL_CODE_CEMED` / `PORTAL_USER_CEMED` / `PORTAL_SENHA_CEMED` | Credenciais do prestador CNPJ/codigoPrestadorNaOperadora `27372066000673` (ver `RegraCredenciaisPortal`) |
 | `PORTAL_CODE_HSR` / `PORTAL_USER_HSR` / `PORTAL_SENHA_HSR` | Credenciais do prestador CNPJ/codigoPrestadorNaOperadora `27372066000169` |
 
+> **Dívida de segurança conhecida:** essas três variáveis de cada prestador são
+> credenciais reais embutidas no bundle web, porque `AppConfig` ainda as lê via
+> `String.fromEnvironment` e o frontend as envia no corpo de `POST /api/login`.
+> O destino é resolver `code`/`user`/`senha` só no servidor, a partir de
+> secrets, e fazer o app enviar apenas o identificador do prestador. Enquanto isso
+> não acontecer, tratar o bundle como público: nunca reutilizar essas credenciais
+> fora deste deploy e usar usuário de prestador com privilégios mínimos.
+
 ## Deploy
 
 ### Backend (Render)
@@ -126,6 +134,8 @@ Para criar: no dashboard do Render, New +, Blueprint, e selecione o repositório
 ### Frontend (Cloudflare Pages)
 
 ```bash
+# ATENÇÃO: hoje as credenciais do prestador viajam por --dart-define e ficam no
+# bundle web. Ver a advertência em "Variáveis de build do frontend".
 flutter build web --release \
   --dart-define=API_URL=https://validador-api.onrender.com \
   --dart-define=PORTAL_CODE_CEMED=... --dart-define=PORTAL_USER_CEMED=... --dart-define=PORTAL_SENHA_CEMED=... \
@@ -134,13 +144,15 @@ flutter build web --release \
 npx wrangler pages deploy build/web --project-name validador-tiss
 ```
 
+Não commitar credenciais reais, não colocá-las em YAML versionado e não publicá-las
+em logs. A configuração do backend (`render.yaml`) também não deve carregar
+segredos: use as variáveis de ambiente/secrets do serviço.
+
 ## Endpoints da API
 
 | Método | Rota | Corpo / Query | Descrição |
 |---|---|---|---|
-| POST | `/api/login` | `{code, user, senha}` | Autentica no portal e devolve `{token}` |
-| POST | `/api/beneficiario` | `{token, carteira}` | Elegibilidade de uma carteira |
-| GET | `/api/autorizacao` | `?token=&senha=` | Status da autorização pela senha |
+| POST | `/api/login` | `{code, user, senha}` | Autentica no portal e devolve `{token, autenticada: true}` |
 | POST | `/api/consultas` | `{token, consultas: [{tipo, chave}]}` | Consultas em lote, resultados na ordem da requisição |
 | GET | `/api/status` | nenhum | Health check, sessões ativas e alcance do portal |
 
@@ -163,7 +175,7 @@ dart analyze        # dentro de backend/
 - Os logs registram método, rota e status, nunca corpo nem credenciais.
 - O backend usa `Random.secure()`, valida formatos de carteira e senha no servidor e mascara chaves em logs (ex.: `5820...10`).
 
-Uma observação honesta: as credenciais do portal vão embutidas no bundle do front (são `--dart-define`). Quem baixar o site consegue lê-las. Isso é um risco assumido; em produção, vale restrigir `CORS_ORIGIN` e limitar a rede de acesso à API, além de usar um usuário de prestador com privilégios mínimos.
+Uma observação honesta: hoje as credenciais do portal ainda são embutidas no bundle do front (são `--dart-define`, lidas por `AppConfig` e enviadas no corpo de `/api/login`). Quem baixar o site consegue lê-las. Isso é uma dívida conhecida, não um desenho final: o destino é resolver as credenciais só no backend, via secrets. Enquanto durar, vale restringir `CORS_ORIGIN` e limitar a rede de acesso à API, além de usar um usuário de prestador com privilégios mínimos.
 
 ## Limitações conhecidas
 
