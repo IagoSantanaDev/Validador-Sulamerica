@@ -1,8 +1,93 @@
 import 'dart:convert';
+import 'dart:io';
 
+import 'package:logger/logger.dart';
 import 'package:shelf/shelf.dart';
 import 'package:test/test.dart';
+import 'package:validador_backend/modules/sulamerica/data/sessao_portal.dart';
 import 'package:validador_backend/validador_api.dart';
+
+/// Saida de log descartada: os testes nao devem poluir o console.
+class _LogMudo implements LogOutput {
+  const _LogMudo();
+
+  @override
+  void output(OutputEvent event) {}
+
+  @override
+  Future<void> destroy() async {}
+
+  @override
+  Future<void> init() async {}
+}
+
+/// `SessaoPortal` sem rede: `login` devolve um resultado controlado e guarda
+/// as credenciais recebidas para permitir assercao sobre a resolucao feita
+/// pelo servidor.
+class _SessaoPortalFake extends SessaoPortal {
+  _SessaoPortalFake(this.resultado)
+      : super(logger: Logger(output: const _LogMudo()));
+
+  final ResultadoLogin resultado;
+  final List<({String code, String user, String senha})> credenciaisRecebidas =
+      <({String code, String user, String senha})>[];
+
+  @override
+  Future<ResultadoLogin> login({
+    required String code,
+    required String user,
+    required String senha,
+  }) async {
+    credenciaisRecebidas.add((code: code, user: user, senha: senha));
+    return resultado;
+  }
+}
+
+/// Falso `HttpConnectionInfo` para exercitar o rate limit por IP real.
+class _ConexaoFake implements HttpConnectionInfo {
+  _ConexaoFake(this.remoteAddress);
+
+  @override
+  final InternetAddress remoteAddress;
+
+  @override
+  int get localPort => 8080;
+
+  @override
+  int get remotePort => 51234;
+}
+
+Request _requestLogin(
+  Object corpo, {
+  HttpConnectionInfo? conexao,
+  Map<String, String>? headers,
+}) {
+  return Request(
+    'POST',
+    Uri.parse('http://localhost/api/login'),
+    body: corpo is String ? corpo : jsonEncode(corpo),
+    headers: headers,
+    context: conexao == null
+        ? const <String, Object>{}
+        : <String, Object>{'shelf.io.connection_info': conexao},
+  );
+}
+
+Request _requestConsultas(
+  Object corpo, {
+  HttpConnectionInfo? conexao,
+  Map<String, String>? headers,
+}) {
+  return Request(
+    'POST',
+    Uri.parse('http://localhost/api/consultas'),
+    body: corpo is String ? corpo : jsonEncode(corpo),
+    headers: headers,
+    context: conexao == null
+        ? const <String, Object>{}
+        : <String, Object>{'shelf.io.connection_info': conexao},
+  );
+}
 
 void main() {
   group('ValidadorApi - login', () {
@@ -189,6 +274,50 @@ void main() {
       expect(response.statusCode, 400);
     });
 
+    test('valida payload antes do token: payload invalido + token valido '
+        'devolve 400', () async {
+      // Ordem importa: com token legitimo e payload invalido, o erro
+      // precisa ser de validacao (400), e nao de sessao (401).
+      final sessao = _SessaoPortalFake(const ResultadoLogin.autenticado());
+      final api = ValidadorApi(
+        ambiente: const {
+          'PORTAL_PRESTADOR_ID_TESTE_CODE': '000000000000',
+          'PORTAL_PRESTADOR_ID_TESTE_USER': 'usuario-teste',
+          'PORTAL_PRESTADOR_ID_TESTE_SENHA': 'senha-teste',
+        },
+        fabricaSessao: (_) => sessao,
+      );
+      final login = await api.handler(
+        _requestLogin(const {'identificadorPrestador': 'teste'}),
+      );
+      expect(login.statusCode, 200);
+      final loginCorpo = jsonDecode(await login.readAsString()) as Map;
+      final token = loginCorpo['token'] as String;
+      final response = await api.handler(
+        _requestConsultas({'token': token, 'consultas': 'nao-e-lista'}),
+      );
+      expect(response.statusCode, 400);
+      final corpo = jsonDecode(await response.readAsString()) as Map;
+      expect(corpo['mensagem'], 'Campo consultas e obrigatorio.');
+    });
+
+    test('valida payload antes do token: payload valido + token invalido '
+        'devolve 401', () async {
+      final sessao = _SessaoPortalFake(const ResultadoLogin.autenticado());
+      final api = ValidadorApi(fabricaSessao: (_) => sessao);
+      final response = await api.handler(
+        _requestConsultas({
+          'token': 'token-que-nao-existe',
+          'consultas': [
+            {'tipo': 'elegibilidade', 'chave': '12345678901234567890'},
+          ],
+        }),
+      );
+      expect(response.statusCode, 401);
+      final corpo = jsonDecode(await response.readAsString()) as Map;
+      expect(corpo['mensagem'], 'Token de sessao invalido ou ausente.');
+    });
+
     test('rejeita lote acima de 300 itens com 413', () async {
       final consultas = List.generate(
         301,
@@ -203,14 +332,33 @@ void main() {
       expect(response.statusCode, 413);
     });
 
-    test('rejeita corpo acima de 1 MB com 413', () {
+    test('rejeita corpo acima de 1 MB com 413', () async {
+      // O limite precisa ser provado no handler: um corpo grande mas
+      // sintaticamente invalido ("xxx...") so pode responder 413 se a
+      // checagem de tamanho existir; sem o limite cairia em 400.
       final corpoGrande = 'x' * ((1 << 20) + 1);
-      final request = Request(
-        'POST',
-        Uri.parse('http://localhost/api/consultas'),
-        body: corpoGrande,
-      );
-      expect(request.contentLength, greaterThan(1 << 20));
+      final request = _requestConsultas(corpoGrande);
+      final response = await api.handler(request);
+      expect(response.statusCode, 413);
+      final corpo = jsonDecode(await response.readAsString()) as Map;
+      expect(corpo['mensagem'], contains('1 MB'));
+    });
+
+    test('aceita corpo dentro do limite e segue para a validacao normal',
+        () async {
+      // Corpo com o mesmo tamanho-limite, porem JSON valido: nao pode ser
+      // barrado por tamanho, e sim reprovado pela regra de negocio
+      // (identificador desconhecido => 401).
+      final enchimento = 'x' * ((1 << 20) - 128);
+      final corpo =
+          jsonEncode({'identificadorPrestador': 'inexistente', 'lixo': enchimento});
+      expect(corpo.length, lessThanOrEqualTo(1 << 20));
+
+      final api = ValidadorApi();
+      final response = await api.handler(_requestLogin(corpo));
+      expect(response.statusCode, 401);
+      final mapa = jsonDecode(await response.readAsString()) as Map;
+      expect(mapa['mensagem'], isNot(contains('1 MB')));
     });
   });
 
@@ -269,6 +417,43 @@ void main() {
       expect(response.statusCode, 429);
     });
 
+    test('separa buckets de rate limit por IP de conexao real', () async {
+      // Prova que o rate limit usa o IP real: um cliente exhausting o proprio
+      // limite nao pode bloquear outro IP. Passaria com uma chave constante.
+      final api = ValidadorApi();
+      const int limite = 40;
+      final conexaoA = _ConexaoFake(InternetAddress('203.0.113.10'));
+      final conexaoB = _ConexaoFake(InternetAddress('203.0.113.11'));
+
+      for (int i = 0; i < limite; i++) {
+        final response = await api.handler(
+          _requestLogin(
+            const {'identificadorPrestador': 'inexistente'},
+            conexao: conexaoA,
+          ),
+        );
+        expect(response.statusCode, 401, reason: 'Falha na req $i do IP A');
+      }
+
+      // IP A esgotou: precisa estar bloqueado.
+      final bloqueadoA = await api.handler(
+        _requestLogin(
+          const {'identificadorPrestador': 'inexistente'},
+          conexao: conexaoA,
+        ),
+      );
+      expect(bloqueadoA.statusCode, 429);
+
+      // IP B tem o proprio bucket e nao pode ser afetado pelo IP A.
+      final respostaB = await api.handler(
+        _requestLogin(
+          const {'identificadorPrestador': 'inexistente'},
+          conexao: conexaoB,
+        ),
+      );
+      expect(respostaB.statusCode, 401);
+    });
+
     test('nao aplica rate limit em rotas fora do portal', () async {
       final api = ValidadorApi();
       for (int i = 0; i < 45; i++) {
@@ -298,31 +483,79 @@ void main() {
       expect(corpo['mensagem'], contains('nao autorizado'));
     });
 
-    test(
-      'identificador conhecido sai da etapa de autorizacao',
-      () async {
-        // Com ambiente injetado, o identificador e resolvido no servidor e a
-        // tentativa de login no portal acontece. Nao depende de rede: sem
-        // credenciais validas o portal recusa, mas a mensagem nao pode ser a
-        // de "identificador nao autorizado".
-        final api = ValidadorApi(
-          ambiente: const {
-            'PORTAL_PRESTADOR_ID_TESTE_CODE': '000000000000',
-            'PORTAL_PRESTADOR_ID_TESTE_USER': 'usuario-teste',
-            'PORTAL_PRESTADOR_ID_TESTE_SENHA': 'senha-teste',
-          },
-        );
-        final request = Request(
-          'POST',
-          Uri.parse('http://localhost/api/login'),
-          body: jsonEncode({'identificadorPrestador': 'teste'}),
-        );
-        final response = await api.handler(request);
-        final corpo = jsonDecode(await response.readAsString()) as Map;
-        expect(corpo['mensagem'], isNot(contains('nao autorizado')));
-      },
-      timeout: const Timeout(Duration(minutes: 2)),
-    );
+    const Map<String, String> ambienteTeste = {
+      'PORTAL_PRESTADOR_ID_TESTE_CODE': '000000000000',
+      'PORTAL_PRESTADOR_ID_TESTE_USER': 'usuario-teste',
+      'PORTAL_PRESTADOR_ID_TESTE_SENHA': 'senha-teste',
+    };
+
+    test('identificador conhecido avanca para autenticacao no portal',
+        () async {
+      // O `SessaoPortal` e falso: nenhum acesso a rede. O que se prova e que
+      // o identificador foi resolvido no servidor (as credenciais injetadas no
+      // ambiente chegam intactas a sessao) e que a requisicao NAO foi recusada
+      // na etapa de autorizacao.
+      final sessao = _SessaoPortalFake(const ResultadoLogin.autenticado());
+      final api = ValidadorApi(
+        ambiente: ambienteTeste,
+        fabricaSessao: (_) => sessao,
+      );
+
+      final response = await api.handler(
+        _requestLogin(const {'identificadorPrestador': 'teste'}),
+      );
+      final corpo = jsonDecode(await response.readAsString()) as Map;
+
+      expect(corpo['status'], isNull);
+      expect(corpo['autenticada'], isTrue);
+      expect(corpo['token'], isA<String>());
+      expect(corpo['mensagem'], isNull);
+
+      // Prova de que a resolucao veio do ambiente, e nao do corpo.
+      expect(sessao.credenciaisRecebidas, hasLength(1));
+      expect(sessao.credenciaisRecebidas.single.code, '000000000000');
+      expect(sessao.credenciaisRecebidas.single.user, 'usuario-teste');
+      expect(sessao.credenciaisRecebidas.single.senha, 'senha-teste');
+    });
+
+    test('identificador conhecido com credencial recusada pelo portal '
+        'retorna 401 do portal, nao de autorizacao', () async {
+      final sessao = _SessaoPortalFake(
+        const ResultadoLogin.falha(MotivoFalhaLogin.credenciaisInvalidas),
+      );
+      final api = ValidadorApi(
+        ambiente: ambienteTeste,
+        fabricaSessao: (_) => sessao,
+      );
+
+      final response = await api.handler(
+        _requestLogin(const {'identificadorPrestador': 'teste'}),
+      );
+      final corpo = jsonDecode(await response.readAsString()) as Map;
+      expect(response.statusCode, 401);
+      expect(corpo['mensagem'], 'Credenciais invalidas para o portal SulAmerica.');
+      expect(corpo['mensagem'], isNot(contains('nao autorizado')));
+      expect(sessao.credenciaisRecebidas, hasLength(1));
+    });
+
+    test('identificador desconhecido nao chega a instanciar sessao do portal',
+        () async {
+      // Par do teste acima: sem configuracao no ambiente, a recusa acontece
+      // antes de qualquer tentativa de portal.
+      final sessao = _SessaoPortalFake(const ResultadoLogin.autenticado());
+      final api = ValidadorApi(
+        ambiente: ambienteTeste,
+        fabricaSessao: (_) => sessao,
+      );
+
+      final response = await api.handler(
+        _requestLogin(const {'identificadorPrestador': 'nao-configurado'}),
+      );
+      final corpo = jsonDecode(await response.readAsString()) as Map;
+      expect(response.statusCode, 401);
+      expect(corpo['mensagem'], contains('nao autorizado'));
+      expect(sessao.credenciaisRecebidas, isEmpty);
+    });
 
     test('credenciais do cliente no corpo sao ignoradas', () async {
       // Mesmo com ambiente injetado para 'teste', o body traz outros
