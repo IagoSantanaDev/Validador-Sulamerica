@@ -8,13 +8,11 @@ class SulAmericaBackendService {
   final DioClient _dio;
 
   Future<Result<String>> login({
-    required String code,
-    required String user,
-    required String senha,
+    required String identificadorPrestador,
   }) {
     return _dio.post<String>(
       '/api/login',
-      corpo: {'code': code, 'user': user, 'senha': senha},
+      corpo: {'identificadorPrestador': identificadorPrestador},
       parser: (dados) => (dados as Map)['token'] as String,
     );
   }
