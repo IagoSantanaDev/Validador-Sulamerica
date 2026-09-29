@@ -26,7 +26,12 @@ class _LogMudo implements LogOutput {
 /// pelo servidor.
 class _SessaoPortalFake extends SessaoPortal {
   _SessaoPortalFake(this.resultado)
-      : super(logger: Logger(output: const _LogMudo()));
+      : super(
+          logger: Logger(output: const _LogMudo()),
+          // Deterministico: sem pinning, independente de
+          // PORTAL_CERT_FINGERPRINT_SHA256 no ambiente de quem roda.
+          fingerprintEsperado: '',
+        );
 
   final ResultadoLogin resultado;
   final List<({String code, String user, String senha})> credenciaisRecebidas =
@@ -274,7 +279,8 @@ void main() {
       expect(response.statusCode, 400);
     });
 
-    test('valida payload antes do token: payload invalido + token valido '
+    test(
+        'valida payload antes do token: payload invalido + token valido '
         'devolve 400', () async {
       // Ordem importa: com token legitimo e payload invalido, o erro
       // precisa ser de validacao (400), e nao de sessao (401).
@@ -301,7 +307,8 @@ void main() {
       expect(corpo['mensagem'], 'Campo consultas e obrigatorio.');
     });
 
-    test('valida payload antes do token: payload valido + token invalido '
+    test(
+        'valida payload antes do token: payload valido + token invalido '
         'devolve 401', () async {
       final sessao = _SessaoPortalFake(const ResultadoLogin.autenticado());
       final api = ValidadorApi(fabricaSessao: (_) => sessao);
@@ -350,8 +357,9 @@ void main() {
       // barrado por tamanho, e sim reprovado pela regra de negocio
       // (identificador desconhecido => 401).
       final enchimento = 'x' * ((1 << 20) - 128);
-      final corpo =
-          jsonEncode({'identificadorPrestador': 'inexistente', 'lixo': enchimento});
+      final corpo = jsonEncode(
+        {'identificadorPrestador': 'inexistente', 'lixo': enchimento},
+      );
       expect(corpo.length, lessThanOrEqualTo(1 << 20));
 
       final api = ValidadorApi();
@@ -518,7 +526,8 @@ void main() {
       expect(sessao.credenciaisRecebidas.single.senha, 'senha-teste');
     });
 
-    test('identificador conhecido com credencial recusada pelo portal '
+    test(
+        'identificador conhecido com credencial recusada pelo portal '
         'retorna 401 do portal, nao de autorizacao', () async {
       final sessao = _SessaoPortalFake(
         const ResultadoLogin.falha(MotivoFalhaLogin.credenciaisInvalidas),
@@ -533,7 +542,10 @@ void main() {
       );
       final corpo = jsonDecode(await response.readAsString()) as Map;
       expect(response.statusCode, 401);
-      expect(corpo['mensagem'], 'Credenciais invalidas para o portal SulAmerica.');
+      expect(
+        corpo['mensagem'],
+        'Credenciais invalidas para o portal SulAmerica.',
+      );
       expect(corpo['mensagem'], isNot(contains('nao autorizado')));
       expect(sessao.credenciaisRecebidas, hasLength(1));
     });
