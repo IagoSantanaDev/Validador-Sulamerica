@@ -125,7 +125,7 @@ void main() {
         erros: [
           ErroValidacao(
             campo: 'crm',
-            mensagem: 'CRM deve ter no máximo 5 dígitos (014481)',
+            mensagem: 'CRM deve ter no máximo 5 dígitos (123456)',
           ),
         ],
       );
@@ -237,7 +237,7 @@ void main() {
       erros: [
         ErroValidacao(
           campo: 'crm',
-          mensagem: 'CRM deve ter no máximo 5 dígitos (014481)',
+          mensagem: 'CRM deve ter no máximo 5 dígitos (123456)',
         ),
       ],
     );
@@ -249,7 +249,7 @@ void main() {
             linhas: [
               LinhaGradeGuia(
                 guia: guiaCrm,
-                detalhe: 'CRM deve ter no máximo 5 dígitos (014481)',
+                detalhe: 'CRM deve ter no máximo 5 dígitos (123456)',
               ),
             ],
           ),

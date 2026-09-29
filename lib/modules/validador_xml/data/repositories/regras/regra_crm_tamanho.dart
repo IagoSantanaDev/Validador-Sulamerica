@@ -11,9 +11,9 @@ class RegraCrmTamanho extends RegraValidacao {
     if (numeroConselho == null || numeroConselho.isEmpty) return null;
     if (numeroConselho.length <= 5) return null;
 
-    return const ErroValidacao(
+    return ErroValidacao(
       campo: 'crm',
-      mensagem: 'CRM deve ter no máximo 5 dígitos (${numeroConselho})',
+      mensagem: 'CRM deve ter no máximo 5 dígitos ($numeroConselho)',
     );
   }
 }

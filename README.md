@@ -63,7 +63,7 @@ Metadados exibidos no resultado: nome e tamanho do arquivo, versão do padrão T
 
 | Regra | Critério | Falha exibida |
 |---|---|---|
-| CRM do solicitante | conta literalmente os caracteres de `dadosSolicitante/profissionalSolicitante/numeroConselhoProfissional`; mais de 5 falha. Valor ausente ou vazio é ignorado; não há `trim` nem remoção de zeros. | "CRM deve ter no máximo 5 dígitos (014481)" |
+| CRM do solicitante | conta literalmente os caracteres de `dadosSolicitante/profissionalSolicitante/numeroConselhoProfissional`; mais de 5 falha. Valor ausente ou vazio é ignorado; não há `trim` nem remoção de zeros. | "CRM deve ter no máximo 5 dígitos (<número extraído>)" |
 | Senha obrigatória | guia sem `<senha>` falha; quando há procedimento VPP, aplica-se a regra específica abaixo em vez desta mensagem genérica. | "Senha não informada" |
 | Senha para procedimento VPP | um ou mais códigos com `VPP = Sim` exigem senha; é gerado um erro local único com todos os códigos aplicáveis. | "Senha obrigatória para procedimentos VPP: ..." |
 | Prefixo da senha | a senha começa com 5 | "senha deve começar com 5" |

@@ -42,7 +42,7 @@ void main() {
       final erro = regra.validar(guiaComCrm(crm));
 
       expect(erro?.campo, 'crm');
-      expect(erro?.mensagem, 'CRM deve ter no máximo 5 dígitos (014481)');
+      expect(erro?.mensagem, 'CRM deve ter no máximo 5 dígitos ($crm)');
     }
   });
 
