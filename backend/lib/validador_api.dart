@@ -18,13 +18,24 @@ class ValidadorApi {
   /// [fabricaSessao] permite injetar um `SessaoPortal` falso em testes,
   /// evitando qualquer acesso ao portal real. Em producao usa a construcao
   /// padrao com o logger da instancia.
+  /// [sondaPortal] executa a sondagem de rede do teste de alcance. Em teste
+  /// permite contar as sondagens sem tocar a rede; em producao usa o
+  /// `HttpClient` comum.
+  /// [janelaCacheAlcance] define por quanto tempo o resultado da sondagem vale
+  /// para chamadas seguidas, evitando handshakes TLS repetidos.
   ValidadorApi({
     Logger? logger,
     Map<String, String>? ambiente,
     SessaoPortal Function(Logger logger)? fabricaSessao,
+    Future<int> Function()? sondaPortal,
+    Duration janelaCacheAlcance = const Duration(seconds: 10),
+    int limiteSessoes = _limiteSessoesPadrao,
   })  : _logger = logger ?? Logger(),
         _ambiente = ambiente,
-        _fabricaSessao = fabricaSessao ?? _criarSessaoPortal;
+        _fabricaSessao = fabricaSessao ?? _criarSessaoPortal,
+        _janelaCacheAlcance = janelaCacheAlcance,
+        _limiteSessoes = limiteSessoes,
+        _sondaPortal = sondaPortal ?? _sondarPortalPadrao;
 
   static SessaoPortal _criarSessaoPortal(Logger logger) =>
       SessaoPortal(logger: logger);
@@ -35,9 +46,20 @@ class ValidadorApi {
   final Map<String, SessaoPortal> _sessoes = {};
   final Map<String, _CredenciaisPortal> _credenciaisPorToken = {};
   final Random _aleatorio = Random.secure();
-  static const int _limiteSessoes = 10;
+  final Duration _janelaCacheAlcance;
+  final int _limiteSessoes;
+  final Future<int> Function() _sondaPortal;
+
+  static const int _limiteSessoesPadrao = 10;
+
+  Map<String, dynamic>? _alcanceCacheado;
+  DateTime? _alcanceColetadoEm;
 
   bool _loteEmAndamento = false;
+
+  /// Token cuja sessao esta ocupada por um lote em andamento. A eviccao de
+  /// sessao antiga nunca pode fechar o `Dio` de um lote em voo.
+  String? _tokenEmUso;
 
   static const int _maxItensPorLote = 300;
   static const int _maxBytesCorpo = 1 << 20;
@@ -97,18 +119,30 @@ class ValidadorApi {
         MotivoFalhaLogin.credenciaisInvalidas =>
           'Credenciais invalidas para o portal SulAmerica.',
         MotivoFalhaLogin.falhaRede =>
-          'Falha de rede ao acessar o portal SulAmerica. '
-              'Detalhe: ${resultado.detalhe ?? 'sem detalhe'}.',
+          'Falha de rede ao acessar o portal SulAmerica.',
         MotivoFalhaLogin.respostaInesperada ||
         null =>
           'O portal SulAmerica respondeu de forma inesperada '
               '(possivel bloqueio do F5 ASM).',
       };
-      _logger.w('Login recusado: $mensagem');
+      // O detalhe crus (URL, fragmento de requisicao) nao pode sair para um
+      // cliente ainda nao autenticado: fica apenas no log do servidor.
+      _logger.w(
+        'Login recusado: $mensagem'
+        '${resultado.detalhe == null ? '' : ' (log) ${resultado.detalhe}'}',
+      );
       return _erro(mensagem, 401);
     }
 
-    final String token = _novoToken(sessao);
+    final String? token = await _novoToken(sessao);
+    if (token == null) {
+      await sessao.encerrar();
+      _logger.w('Login recusado: limite de sessoes todas em uso.');
+      return _erro(
+        'Limite de sessoes ativas em uso. Tente novamente em instantes.',
+        503,
+      );
+    }
 
     _credenciaisPorToken[token] = _CredenciaisPortal(
       code: credenciais.code,
@@ -169,7 +203,10 @@ class ValidadorApi {
       return _erro('Ja existe um lote em andamento. Aguarde.', 429);
     }
 
+    // Sem `await` entre a checagem e as duas marcacoes: o event loop do Dart
+    // garante que ninguem intercala aqui.
     _loteEmAndamento = true;
+    _tokenEmUso = token;
     List<Map<String, dynamic>> resultados;
     try {
       resultados = await _executarConsultas(
@@ -179,6 +216,7 @@ class ValidadorApi {
       );
     } finally {
       _loteEmAndamento = false;
+      _tokenEmUso = null;
     }
 
     final Map<String, Map<String, dynamic>> porChave = {
@@ -471,7 +509,7 @@ class ValidadorApi {
   }
 
   Future<Response> _status(Request request) async {
-    final Map<String, dynamic> alcancePortal = await _testarAlcancePortal();
+    final Map<String, dynamic> alcancePortal = await _alcancePortal();
     return _json({
       'status': 'ok',
       'sessoesAtivas': _sessoes.length,
@@ -480,7 +518,43 @@ class ValidadorApi {
     });
   }
 
+  /// Sonda o portal no maximo uma vez por [_janelaCacheAlcance].
+  ///
+  /// O cache e a protecao principal: sem ele, cada `GET /api/status` de um
+  /// cliente anonimo-forjador abriria um handshake TLS de saida. Nao ha rate
+  /// limit nesta rota de proposito (ver README): 429 conta como falha para o
+  /// health check do Render, que descarta trafego apos 15 s de falhas
+  /// consecutivas e reinicia a instancia apos 60 s.
+  Future<Map<String, dynamic>> _alcancePortal() async {
+    final DateTime agora = DateTime.now();
+    final Map<String, dynamic>? cache = _alcanceCacheado;
+    final DateTime? coletadoEm = _alcanceColetadoEm;
+    if (cache != null &&
+        coletadoEm != null &&
+        agora.difference(coletadoEm) < _janelaCacheAlcance) {
+      return cache;
+    }
+    final Map<String, dynamic> resultado = await _testarAlcancePortal();
+    _alcanceCacheado = resultado;
+    _alcanceColetadoEm = agora;
+    return resultado;
+  }
+
   Future<Map<String, dynamic>> _testarAlcancePortal() async {
+    try {
+      return {
+        'alcançavel': true,
+        'status': await _sondaPortal(),
+      };
+    } catch (erro) {
+      // `erro.toString()` carrega subject/issuer do certificado e detalhes de
+      // rede interna: fica no log, nunca no corpo de uma rota anonima.
+      _logger.w('Teste de alcance do portal falhou: $erro');
+      return {'alcançavel': false};
+    }
+  }
+
+  static Future<int> _sondarPortalPadrao() async {
     final HttpClient http = HttpClient()
       ..connectionTimeout = const Duration(seconds: 10);
     try {
@@ -489,15 +563,7 @@ class ValidadorApi {
           .timeout(const Duration(seconds: 10));
       final HttpClientResponse resposta =
           await requisicao.close().timeout(const Duration(seconds: 10));
-      return {
-        'alcançavel': true,
-        'status': resposta.statusCode,
-      };
-    } catch (erro) {
-      return {
-        'alcançavel': false,
-        'detalhe': erro.toString(),
-      };
+      return resposta.statusCode;
     } finally {
       http.close(force: true);
     }
@@ -507,12 +573,20 @@ class ValidadorApi {
     return _erro('Rota nao encontrada.', 404);
   }
 
-  String _novoToken(SessaoPortal sessao) {
+  /// Retorna `null` quando todas as sessoes estao em uso.
+  ///
+  /// A eviccao nunca encerra a sessao de um lote em andamento: fechar o `Dio`
+  /// dela no meio de uma consulta quebraria o lote em voo. Como existe apenas
+  /// um lote simultaneo, basta proteger o token corrente.
+  Future<String?> _novoToken(SessaoPortal sessao) async {
     if (_sessoes.length >= _limiteSessoes) {
-      final String antiga = _sessoes.keys.first;
+      final Iterable<String> antigas =
+          _sessoes.keys.where((String token) => token != _tokenEmUso).toList();
+      if (antigas.isEmpty) return null;
+      final String antiga = antigas.first;
       final SessaoPortal? sessaoAntiga = _sessoes.remove(antiga);
       _credenciaisPorToken.remove(antiga);
-      sessaoAntiga?.encerrar();
+      await sessaoAntiga?.encerrar();
     }
     final String token = _gerarToken();
     _sessoes[token] = sessao;
