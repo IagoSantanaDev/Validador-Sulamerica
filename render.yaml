@@ -19,3 +19,20 @@ services:
       # ex.: https://validador-tiss.pages.dev
       - key: CORS_ORIGIN
         value: "*"
+      # Credenciais do portal, uma entrada por prestador aceito. `sync: false`
+      # impede o valor real de entrar no repositório: defina no painel do
+      # Render (Dashboard → Environment). Sem isso, o login responde 401
+      # para qualquer identificador.
+      #   PORTAL_PRESTADOR_ID_27372066000673_CODE
+      #   PORTAL_PRESTADOR_ID_27372066000673_USER
+      #   PORTAL_PRESTADOR_ID_27372066000673_SENHA
+      # O identificador vai em MAIÚSCULAS e é o CNPJ/codigoPrestadorNaOperadora.
+      #
+      # TLS do portal: por padrão vale a validação de CA. Se o certificado do
+      # portal não for issuado por uma CA pública, defina também o fingerprint
+      # SHA256 (hex, do DER) para ativar pinning. Valor vazio ou malformado
+      # NÃO substitui o pinning: vazio cai na validação de CA e malformado faz
+      # o backend recusar a inicialização. Rotação = trocar a variável, sem
+      # recompilar. Ver backend/README.md.
+      - key: PORTAL_CERT_FINGERPRINT_SHA256
+        sync: false

@@ -71,7 +71,7 @@ Metadados exibidos no resultado: nome e tamanho do arquivo, versão do padrão T
 | Carteira (antes da consulta) | 20 dígitos, segmentos 3-5-4-4-4 | "Número da carteira inválido" |
 | Senha (antes da consulta) | 10 dígitos começando com 5 | "Senha inválida" |
 
-O conjunto VPP em runtime é um snapshot de 2.792 códigos com `VPP = Sim`, gerado em `lib/modules/validador_xml/data/repositories/regras/codigos_vpp.dart`. A fonte de referência `debug/KAN-07/procedimentos_vpp_sim.json` identifica `LISTA DE SERVIÇOES QUE EXIGEM AUTORIZAÇÃO.pdf` e o critério `VPP = Sim`, mas não informa edição ou data de vigência. Ao atualizar a fonte, atualize o conjunto Dart junto; o teste `regra_senha_procedimento_test.dart` verifica contagem, unicidade e igualdade integral. O app não lê o JSON em runtime. Para executar esse teste quando a fonte não estiver no caminho padrão, defina `KAN_07_VPP_JSON` com o caminho do arquivo.
+O conjunto VPP em runtime é um snapshot de 2.792 códigos com `VPP = Sim`, gerado em `lib/modules/validador_xml/data/repositories/regras/codigos_vpp.dart`. A fonte de referência `debug/KAN-07/procedimentos_vpp_sim.json` identifica `LISTA DE SERVIÇOES QUE EXIGEM AUTORIZAÇÃO.pdf` e o critério `VPP = Sim`, mas não informa edição ou data de vigência. Ao atualizar a fonte, atualize o conjunto Dart junto; o teste `regra_senha_procedimento_test.dart` verifica contagem, unicidade e igualdade integral. O app não lê o JSON em runtime, e o teste também não: ele valida o conjunto gerado contra a contagem esperada em código.
 
 ### Consultas ao portal
 
@@ -147,6 +147,8 @@ O repo tem um blueprint (`render.yaml`) que cria o serviço `validador-api` a pa
 Para criar: no dashboard do Render, New +, Blueprint, e selecione o repositório. A URL fica em `https://validador-api.onrender.com` (ajuste o `CORS_ORIGIN` para o domínio do front em produção).
 
 ### Frontend (Cloudflare Pages)
+
+Rode o build imediatamente antes do deploy: `build/web/` é um diretório de saída local e pode conter uma build antiga, com o contrato de credenciais anterior.
 
 ```bash
 flutter build web --release \
