@@ -63,11 +63,15 @@ Metadados exibidos no resultado: nome e tamanho do arquivo, versão do padrão T
 
 | Regra | Critério | Falha exibida |
 |---|---|---|
-| Senha obrigatória | a guia precisa ter `<senha>` | "Senha não informada" |
+| CRM do solicitante | conta literalmente os caracteres de `dadosSolicitante/profissionalSolicitante/numeroConselhoProfissional`; mais de 5 falha. Valor ausente ou vazio é ignorado; não há `trim` nem remoção de zeros. | "CRM deve ter no máximo 5 dígitos (014481)" |
+| Senha obrigatória | guia sem `<senha>` falha; quando há procedimento VPP, aplica-se a regra específica abaixo em vez desta mensagem genérica. | "Senha não informada" |
+| Senha para procedimento VPP | um ou mais códigos com `VPP = Sim` exigem senha; é gerado um erro local único com todos os códigos aplicáveis. | "Senha obrigatória para procedimentos VPP: ..." |
 | Prefixo da senha | a senha começa com 5 | "senha deve começar com 5" |
 | Comprimento da senha | exatamente 10 caracteres | "senha deve ter exatamente 10 caracteres" |
 | Carteira (antes da consulta) | 20 dígitos, segmentos 3-5-4-4-4 | "Número da carteira inválido" |
 | Senha (antes da consulta) | 10 dígitos começando com 5 | "Senha inválida" |
+
+O conjunto VPP em runtime é um snapshot de 2.792 códigos com `VPP = Sim`, gerado em `lib/modules/validador_xml/data/repositories/regras/codigos_vpp.dart`. A fonte de referência `debug/KAN-07/procedimentos_vpp_sim.json` identifica `LISTA DE SERVIÇOES QUE EXIGEM AUTORIZAÇÃO.pdf` e o critério `VPP = Sim`, mas não informa edição ou data de vigência. Ao atualizar a fonte, atualize o conjunto Dart junto; o teste `regra_senha_procedimento_test.dart` verifica contagem, unicidade e igualdade integral. O app não lê o JSON em runtime. Para executar esse teste quando a fonte não estiver no caminho padrão, defina `KAN_07_VPP_JSON` com o caminho do arquivo.
 
 ### Consultas ao portal
 
