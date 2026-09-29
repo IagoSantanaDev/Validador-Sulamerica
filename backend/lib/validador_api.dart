@@ -6,15 +6,21 @@ import 'dart:typed_data';
 import 'package:logger/logger.dart';
 import 'package:shelf/shelf.dart';
 import 'package:shelf_router/shelf_router.dart';
+import 'package:validador_backend/modules/sulamerica/data/credenciais_portal.dart';
 import 'package:validador_backend/modules/sulamerica/data/sessao_portal.dart';
 
 import 'elegibilidade_parser.dart';
 import 'util_texto.dart';
 
 class ValidadorApi {
-  ValidadorApi({Logger? logger}) : _logger = logger ?? Logger();
+  /// [ambiente] permite injetar a configuração em testes; em producao usa
+  /// `Platform.environment`. Nao altera o contrato HTTP.
+  ValidadorApi({Logger? logger, Map<String, String>? ambiente})
+      : _logger = logger ?? Logger(),
+        _ambiente = ambiente;
 
   final Logger _logger;
+  final Map<String, String>? _ambiente;
   final Map<String, SessaoPortal> _sessoes = {};
   final Map<String, _CredenciaisPortal> _credenciaisPorToken = {};
   final Random _aleatorio = Random.secure();
@@ -38,10 +44,14 @@ class ValidadorApi {
     ..get('/api/status', _status)
     ..all('/<ignored|.*>', _naoEncontrado);
 
-  Handler get handler => const Pipeline()
+  // Precisa ser unico por instancia: o rate limit guarda estado na closure
+  // do middleware e se reconstruido a cada acesso perderia a contagem.
+  late final Handler _handler = const Pipeline()
       .addMiddleware(ValidadorApi._cors())
       .addMiddleware(ValidadorApi._rateLimitPortal())
       .addHandler(_rotas.call);
+
+  Handler get handler => _handler;
 
   Future<Response> _login(Request request) async {
     final _LeituraJson leitura = await _lerJson(request);
@@ -51,29 +61,30 @@ class ValidadorApi {
       return _erro('Corpo JSON invalido.', 400);
     }
 
-    final String? code = corpo['code'] as String?;
-    final String? user = corpo['user'] as String?;
-    final String? senha = corpo['senha'] as String?;
-    if (code == null ||
-        code.isEmpty ||
-        user == null ||
-        user.isEmpty ||
-        senha == null ||
-        senha.isEmpty) {
-      return _erro('Campos code, user e senha sao obrigatorios.', 400);
+    final String? identificador = corpo['identificadorPrestador'] as String?;
+    if (identificador == null || identificador.trim().isEmpty) {
+      return _erro('Campo identificadorPrestador e obrigatorio.', 400);
+    }
+
+    final CredenciaisPortal? credenciais = CredenciaisPortal.resolver(
+      identificador.trim(),
+      ambiente: _ambiente,
+    );
+    if (credenciais == null) {
+      _logger.w('Login recusado: identificador desconhecido.');
+      return _erro('Identificador de prestador nao autorizado.', 401);
     }
 
     final SessaoPortal sessao = SessaoPortal(logger: _logger);
     final ResultadoLogin resultado = await sessao.login(
-      code: code,
-      user: user,
-      senha: senha,
+      code: credenciais.code,
+      user: credenciais.user,
+      senha: credenciais.senha,
     );
     if (!resultado.autenticada) {
       final String mensagem = switch (resultado.motivo) {
         MotivoFalhaLogin.credenciaisInvalidas =>
-          'Credenciais invalidas para o portal SulAmerica. '
-              'Confira o code/user/senha enviados no corpo da requisicao.',
+          'Credenciais invalidas para o portal SulAmerica.',
         MotivoFalhaLogin.falhaRede =>
           'Falha de rede ao acessar o portal SulAmerica. '
               'Detalhe: ${resultado.detalhe ?? 'sem detalhe'}.',
@@ -89,11 +100,11 @@ class ValidadorApi {
     final String token = _novoToken(sessao);
 
     _credenciaisPorToken[token] = _CredenciaisPortal(
-      code: code,
-      user: user,
-      senha: senha,
+      code: credenciais.code,
+      user: credenciais.user,
+      senha: credenciais.senha,
     );
-    _logger.i('Sessao criada para o prestador code=$code (mascarado).');
+    _logger.i('Sessao criada para o prestador (identificador mascarado).');
     return _json({'token': token, 'autenticada': true});
   }
 
@@ -103,12 +114,7 @@ class ValidadorApi {
     final Map<String, dynamic>? corpo = leitura.valor;
     if (corpo == null) return _erro('Corpo JSON invalido.', 400);
 
-    final SessaoPortal? sessao = _sessaoPorCorpo(corpo);
-    if (sessao == null) {
-      return _erro('Token de sessao invalido ou ausente.', 401);
-    }
-    final String? token = corpo['token'] as String?;
-
+    // Valida payload antes de verificar token.
     final dynamic consultas = corpo['consultas'];
     if (consultas is! List || consultas.isEmpty) {
       return _erro('Campo consultas e obrigatorio.', 400);
@@ -119,6 +125,35 @@ class ValidadorApi {
         413,
       );
     }
+
+    // Valida estrutura de cada item antes de processar.
+    for (int i = 0; i < consultas.length; i++) {
+      final dynamic item = consultas[i];
+      if (item is! Map) {
+        return _erro(
+          'Item $i deve ser um objeto com campos tipo e chave.',
+          400,
+        );
+      }
+      final dynamic tipo = item['tipo'];
+      final dynamic chave = item['chave'];
+      if (tipo is! String || tipo.isEmpty) {
+        return _erro('Item $i: campo tipo deve ser uma string nao vazia.', 400);
+      }
+      if (chave is! String || chave.isEmpty) {
+        return _erro(
+          'Item $i: campo chave deve ser uma string nao vazia.',
+          400,
+        );
+      }
+    }
+
+    final SessaoPortal? sessao = _sessaoPorCorpo(corpo);
+    if (sessao == null) {
+      return _erro('Token de sessao invalido ou ausente.', 401);
+    }
+    final String? token = corpo['token'] as String?;
+
     if (_loteEmAndamento) {
       return _erro('Ja existe um lote em andamento. Aguarde.', 429);
     }
@@ -436,8 +471,7 @@ class ValidadorApi {
 
   Future<Map<String, dynamic>> _testarAlcancePortal() async {
     final HttpClient http = HttpClient()
-      ..connectionTimeout = const Duration(seconds: 10)
-      ..badCertificateCallback = SessaoPortal.aceitarCertificadoDoPortal;
+      ..connectionTimeout = const Duration(seconds: 10);
     try {
       final HttpClientRequest requisicao = await http
           .getUrl(Uri.parse('https://saude.sulamericaseguros.com.br/'))
@@ -465,8 +499,9 @@ class ValidadorApi {
   String _novoToken(SessaoPortal sessao) {
     if (_sessoes.length >= _limiteSessoes) {
       final String antiga = _sessoes.keys.first;
-      _sessoes.remove(antiga);
+      final SessaoPortal? sessaoAntiga = _sessoes.remove(antiga);
       _credenciaisPorToken.remove(antiga);
+      sessaoAntiga?.encerrar();
     }
     final String token = _gerarToken();
     _sessoes[token] = sessao;
@@ -523,6 +558,15 @@ class ValidadorApi {
           }
           final String ip = _ipDe(request);
           final DateTime agora = DateTime.now();
+
+          // Remove janelas expiradas para evitar crescimento ilimitado.
+          acessos.removeWhere((_, timestamps) {
+            timestamps.removeWhere(
+              (t) => agora.difference(t) >= _janelaRateLimit,
+            );
+            return timestamps.isEmpty;
+          });
+
           final List<DateTime> recentes = (acessos[ip] ?? const [])
               .where((t) => agora.difference(t) < _janelaRateLimit)
               .toList();
@@ -544,11 +588,12 @@ class ValidadorApi {
         };
   }
 
+  /// Obtém o IP de origem da conexão.
+  ///
+  /// NÃO confia em `X-Forwarded-For` arbitrário recebido do cliente,
+  /// pois pode ser falsificado para burlar o rate limit. Usa apenas o
+  /// endereço de conexão real (`shelf.io.connection_info`).
   static String _ipDe(Request request) {
-    final String? forward = request.headers['x-forwarded-for'];
-    if (forward != null && forward.isNotEmpty) {
-      return forward.split(',').first.trim();
-    }
     final dynamic info = request.context['shelf.io.connection_info'];
     if (info is HttpConnectionInfo) return info.remoteAddress.address;
     return 'desconhecido';
