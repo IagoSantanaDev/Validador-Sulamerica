@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:cookie_jar/cookie_jar.dart';
+import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
 import 'package:dio_cookie_manager/dio_cookie_manager.dart';
@@ -30,8 +31,11 @@ class SessaoPortal {
     Dio? dio,
     CookieJar? cookieJar,
     Logger? logger,
+    String? fingerprintEsperado,
   })  : _dio = dio ?? Dio(),
         _cookieJar = cookieJar ?? CookieJar(),
+        _fingerprint = fingerprintEsperado ??
+            Platform.environment['PORTAL_CERT_FINGERPRINT_SHA256'],
         _logger = logger ?? Logger() {
     _dio.options = _dio.options.copyWith(
       connectTimeout: const Duration(seconds: 15),
@@ -45,10 +49,10 @@ class SessaoPortal {
       _dio.httpClientAdapter = IOHttpClientAdapter(
         createHttpClient: () {
           final HttpClient cliente = HttpClient();
-          cliente.badCertificateCallback = aceitarCertificadoDoPortal;
+          cliente.badCertificateCallback = _badCertificateCallback;
           return cliente;
         },
-        validateCertificate: _validarCertificadoDoPortal,
+        validateCertificate: validarCertificado,
       );
     }
     _dio.interceptors.add(CookieManager(_cookieJar));
@@ -56,24 +60,64 @@ class SessaoPortal {
 
   static const String hostPortal = 'saude.sulamericaseguros.com.br';
 
-  static bool aceitarCertificadoDoPortal(
-    X509Certificate? certificate,
-    String host,
-    int port,
-  ) =>
-      host == hostPortal;
+  /// Fingerprint SHA256 (hex, minusculas) do certificado do portal,
+  /// configurado via `PORTAL_CERT_FINGERPRINT_SHA256`. Permite rotacionar
+  /// sem alterar codigo. Ausente => validacao de CA padrao.
+  final String? _fingerprint;
 
-  bool _validarCertificadoDoPortal(
+  /// Callback do HttpClient para aceitar certificados durante o handshake.
+  /// Nunca aceita apenas por hostname; delega para a validacao real.
+  bool _badCertificateCallback(
     X509Certificate? certificate,
     String host,
     int port,
   ) {
-    if (!aceitarCertificadoDoPortal(certificate, host, port)) return false;
-    _logger.w(
-      'TLS do portal nao verificado pela CA publica (cadeia com self-signed); '
-      'aceitando certificado apresentado por $host para a integracao.',
-    );
-    return true;
+    // Se ha fingerprint configurado, aceita aqui para que o handshake
+    // complete e o certificado seja validado no validateCertificate.
+    if (_fingerprint != null) return true;
+    // Sem pinning configurado, rejeita self-signed (nao aceita cegamente).
+    return false;
+  }
+
+  /// Valida o certificado apresentado pelo portal.
+  ///
+  /// Estrategia:
+  /// - Se `PORTAL_CERT_FINGERPRINT_SHA256` esta configurado: pinning SHA256.
+  /// - Caso contrario: validacao de CA padrao (rejeita self-signed).
+  bool validarCertificado(
+    X509Certificate? certificate,
+    String host,
+    int port,
+  ) {
+    if (host != hostPortal) {
+      _logger.e('TLS: host inesperado $host (esperado $hostPortal).');
+      return false;
+    }
+
+    final String? fingerprint = _fingerprint;
+    if (fingerprint == null) {
+      // Sem pinning: a validacao de CA padrao ja foi feita pelo HttpClient.
+      // Se chegou aqui sem erro, a cadeia e confiavel.
+      return true;
+    }
+
+    if (certificate == null) {
+      _logger.e('TLS: certificado nulo recebido do portal.');
+      return false;
+    }
+
+    final String fingerprintCalculado =
+        sha256.convert(certificate.der).toString();
+    final bool confere =
+        fingerprintCalculado.toLowerCase() == fingerprint.trim().toLowerCase();
+
+    if (!confere) {
+      _logger.e(
+        'TLS: fingerprint do certificado do portal nao confere. '
+        'Possivel MITM ou certificado rotacionado.',
+      );
+    }
+    return confere;
   }
 
   static const String _userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
