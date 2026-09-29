@@ -75,6 +75,21 @@ TipoErroGuia? tipoErroDeLinha(LinhaGradeGuia linha) {
   return null;
 }
 
+Set<TipoErroGuia> tiposErroDeLinha(LinhaGradeGuia linha) {
+  final TipoErroGuia? tipo = tipoErroDeLinha(linha);
+  if (tipo == null) return const {};
+
+  final bool senhaVpp = tipo == TipoErroGuia.senha &&
+      linha.guia.erros.any(
+        (erro) =>
+            erro.campo == 'senha' &&
+            erro.mensagem == linha.detalhe &&
+            erro.mensagem.startsWith('Senha obrigatória para procedimento(s):'),
+      );
+  if (senhaVpp) return {TipoErroGuia.senha, TipoErroGuia.procedimento};
+  return {tipo};
+}
+
 TipoErroGuia _tipoDeConsulta(ConsultaGuia consulta) {
   return consulta.tipo == TipoConsultaGuia.senha
       ? TipoErroGuia.senha

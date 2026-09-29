@@ -233,7 +233,7 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
         ? todasLinhas
         : [
             for (final LinhaGradeGuia l in todasLinhas)
-              if (tipoErroDeLinha(l) == _filtroErro) l,
+              if (tiposErroDeLinha(l).contains(_filtroErro)) l,
           ];
     final List<LinhaGradeGuia> linhas = agruparPorDetalhe(linhasFiltradas);
     return SingleChildScrollView(

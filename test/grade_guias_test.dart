@@ -135,19 +135,23 @@ void main() {
       expect(rotuloTipoErro(TipoErroGuia.crm), 'CRM');
     });
 
-    test('erro local VPP permanece filtrado como Senha', () {
+    test('erro local VPP aparece nos filtros Senha e Procedimento', () {
       const GuiaValidada guiaVpp = GuiaValidada(
         guia: guia,
         erros: [
           ErroValidacao(
             campo: 'senha',
-            mensagem: 'Senha obrigatória para procedimentos VPP: 12345678',
+            mensagem: 'Senha obrigatória para procedimento(s): 12345678',
           ),
         ],
       );
       final LinhaGradeGuia linha = linhasDeGuia(guiaVpp).single;
 
       expect(tipoErroDeLinha(linha), TipoErroGuia.senha);
+      expect(
+        tiposErroDeLinha(linha),
+        containsAll([TipoErroGuia.senha, TipoErroGuia.procedimento]),
+      );
     });
 
     test('linha da consulta de elegibilidade é filtrada pelo motivo', () {
