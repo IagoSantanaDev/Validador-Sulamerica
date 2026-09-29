@@ -9,11 +9,11 @@ class RegraCrmTamanho extends RegraValidacao {
   ErroValidacao? validar(GuiaTiss guia) {
     final String? numeroConselho = guia.solicitante?.numeroConselho;
     if (numeroConselho == null || numeroConselho.isEmpty) return null;
-    if (numeroConselho.length == 5) return null;
+    if (numeroConselho.length <= 5) return null;
 
     return ErroValidacao(
       campo: 'crm',
-      mensagem: 'CRM deve ter 5 dígitos ($numeroConselho)',
+      mensagem: 'CRM deve ter no máximo 5 dígitos ($numeroConselho)',
     );
   }
 }
