@@ -23,9 +23,7 @@ class LoggingInterceptor extends Interceptor {
       );
 
       if (!_urlDe(response.requestOptions).contains('/api/login') &&
-          !_urlDe(response.requestOptions).contains('/api/consultas') &&
-          !_urlDe(response.requestOptions).contains('/api/beneficiario') &&
-          !_urlDe(response.requestOptions).contains('/api/autorizacao')) {
+          !_urlDe(response.requestOptions).contains('/api/consultas')) {
         _logarCorpo('resposta', response.data);
       }
     }
@@ -48,10 +46,7 @@ class LoggingInterceptor extends Interceptor {
 
   void _logarCorpoSemPii(RequestOptions options, String rotulo, dynamic dados) {
     final String url = _urlDe(options);
-    if (url.contains('/api/login') ||
-        url.contains('/api/consultas') ||
-        url.contains('/api/beneficiario') ||
-        url.contains('/api/autorizacao')) {
+    if (url.contains('/api/login') || url.contains('/api/consultas')) {
       return;
     }
     _logarCorpo(rotulo, dados);
