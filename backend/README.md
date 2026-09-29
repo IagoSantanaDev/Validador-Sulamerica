@@ -32,8 +32,18 @@ Variáveis de ambiente opcionais:
 | `PORT` | `8080` | Porta HTTP |
 | `HOST` | `0.0.0.0` | Interface de escuta |
 | `CORS_ORIGIN` | `*` | Origem permitida (ex.: `https://validador-tiss.pages.dev`) |
+| `PORTAL_PRESTADOR_ID_<IDENTIFICADOR>_CODE` | — | `code` do prestador no portal |
+| `PORTAL_PRESTADOR_ID_<IDENTIFICADOR>_USER` | — | `user` do prestador no portal |
+| `PORTAL_PRESTADOR_ID_<IDENTIFICADOR>_SENHA` | — | `senha` do prestador no portal |
+| `PORTAL_CERT_FINGERPRINT_SHA256` | — | Fingerprint SHA256 (hex) do certificado do portal; sem ele vale a validação de CA padrão |
 
-`CORS_ORIGIN` é lida em runtime, então dá para ajustar sem recompilar.
+`CORS_ORIGIN` é lida em runtime, então dá para ajustar sem recompilar. As credenciais e o fingerprint do certificado também são lidos em runtime.
+
+### Credenciais do prestador
+
+O backend resolve `code`, `user` e `senha` no servidor, a partir de variáveis de ambiente. O app nunca os envia: `POST /api/login` recebe só `{identificadorPrestador}`, e o identificador em MAIÚSCULAS define o prefixo das variáveis (`PORTAL_PRESTADOR_ID_<IDENTIFICADOR>_CODE|_USER|_SENHA`, ver `lib/modules/sulamerica/data/credenciais_portal.dart`).
+
+Comportamento: `identificadorPrestador` ausente ou vazio → 400; identificador sem trio completo de variáveis não vazias → 401. Nenhum log imprime credenciais nem o identificador em claro.
 
 ## Como o backend fala com o portal
 
@@ -44,17 +54,20 @@ Os detalhes abaixo foram validados contra o portal em produção e precisam cont
 - A consulta de beneficiário também redireciona (302 para `elegibilidade-resultado.htm`); o backend segue o redirect e devolve o HTML final.
 - A consulta de autorização é um GET em `ajax-controller.jsp` com `metodo=autorizador-pesquisar-solicitacoes` e o campo `numero-vpp` (a senha de 10 dígitos do beneficiário). O portal devolve `text/plain` em ISO-8859-1; o backend tenta UTF-8 e cai para Latin-1. Esse endpoint exige sessão autenticada (401 sem login).
 - A carteirinha é enviada nos segmentos originais 3-5-4-4-4 (campos `codigo-beneficiario-1` a `codigo-beneficiario-5`), não dividida em partes iguais.
-- O certificado TLS do portal tem cadeia com self-signed que a CA pública dos containers rejeita. O backend aceita a cadeia sem validação de CA quando o host é exatamente `saude.sulamericaseguros.com.br`; qualquer outro host mantém a verificação padrão. Isso significa que a conexão com o portal **não** tem garantia de identidade do servidor: ela se apoia apenas no hostname. É uma exceção conhecida, não um desenho final.
+- O certificado TLS do portal tem cadeia com self-signed que a CA pública dos containers rejeita. O backend **nunca** aceita o certificado apenas porque o hostname bate: `SessaoPortal` sempre valida. A estratégia é: validação de CA padrão por padrão; se `PORTAL_CERT_FINGERPRINT_SHA256` estiver configurado, a conexão passa por pinning do fingerprint SHA256 do certificado (dependência `crypto`), e a comparação é feita sobre o DER apresentado.
+- Rotação do certificado: o pinning é atualizado trocando o valor de `PORTAL_CERT_FINGERPRINT_SHA256`, sem recompilar e sem deploy de código. Sem a variável configurada, um certificado self-signed faz a conexão com o portal falhar, e o login responde 401 por falha de rede.
 
 ## Endpoints
 
 | Método | Rota | Corpo / Query | Descrição |
 |---|---|---|---|
-| POST | `/api/login` | `{code, user, senha}` | Autentica no portal e devolve `{token, autenticada: true}` |
+| POST | `/api/login` | `{identificadorPrestador}` | Autentica no portal e devolve `{token, autenticada: true}` |
 | POST | `/api/consultas` | `{token, consultas: [{tipo, chave}]}` | Consultas em lote; devolve `{status, resultados}` na ordem da requisição |
 | GET | `/api/status` | nenhum | Health check: sessões ativas e teste de alcance do portal |
 
 Qualquer outra rota devolve 404.
+
+O teste de alcance de `/api/status` usa um `HttpClient` comum, sem o adapter de `SessaoPortal` e sem pinning. Ele responde pela rede, não pela sessão do portal: um certificado self-signed pode aparecer como `alcançavel: false`.
 
 Regras de negócio aplicadas no servidor, espelhando o app:
 
@@ -71,12 +84,21 @@ curl http://localhost:8080/api/status
 
 curl -X POST http://localhost:8080/api/login \
   -H 'Content-Type: application/json' \
-  -d '{"code":"123","user":"alguem","senha":"segredo"}'
+  -d '{"identificadorPrestador":"<identificador>"}'
 ```
 
 ## Consultas em lote
 
-`/api/consultas` recebe todas as solicitações de um arquivo em uma única chamada HTTP e devolve os resultados na ordem da requisição. Cada item é `{tipo: "elegibilidade"|"senha", chave: <carteira ou senha>}`.
+`/api/consultas` recebe as solicitações de um arquivo e devolve `{status: "ok", resultados: [...]}` com os resultados na ordem da requisição. Cada item é `{tipo: "elegibilidade"|"senha", chave: <carteira ou senha>}`.
+
+A ordem de validação é: primeiro o payload, depois o token.
+
+- `consultas` ausente, não é lista ou vazia → 400.
+- Mais de 300 itens → 413.
+- Item que não é objeto, ou com `tipo`/`chave` ausentes, não string ou vazios → 400, citando o índice do item. É uma resposta de validação, não um 500.
+- Token ausente ou inválido → 401.
+
+O frontend respeita esse teto: `validador_controller.dart` limita cada chamada a 300 itens (`_maxConsultasPorLote`) e particiona arquivos maiores, recompondo os resultados por `tipo|chave`.
 
 Execução contra o portal:
 
@@ -94,15 +116,18 @@ Execução contra o portal:
 | Tamanho do corpo | 1 MB | 413 |
 | Rate limit nas rotas do portal (`/api/login`, `/api/consultas`) | 40 por minuto | 429 |
 | Lotes simultâneos | 1 | 429 |
-| Sessões ativas | 10 (a mais antiga é descartada) | nova sessão substitui a antiga |
+| Sessões ativas | 10 (a mais antiga é encerrada) | nova sessão substitui a antiga |
+
+O estado das sessões é local ao processo: não há réplica nem estado compartilhado, o que é outra razão para o serviço rodar com instância única.
 
 Tokens de sessão são gerados com `Random.secure()`. Sem credenciais válidas, o backend nega o login com 401 e mensagem com o motivo (credencial, rede ou resposta inesperada do portal).
 
 ## Segurança
 
+- As credenciais do prestador nunca chegam pelo app: o `/api/login` recebe só o identificador e `CredenciaisPortal` resolve `code`/`user`/`senha` das variáveis de ambiente. Elas não estão no bundle do front nem em nenhum artefato de build.
 - A senha do prestador nunca é logada e não persiste; as credenciais ficam retidas em memória por token, apenas para abrir sessões extras, e saem junto com a sessão.
-- Logs registram método, rota e status, nunca corpo nem credenciais. Chaves (carteira/senha) aparecem mascaradas, ex.: `5820...10`.
-- O rate limit identifica o cliente pelo primeiro valor de `X-Forwarded-For` quando o header existe, caindo para o endereço de conexão (`shelf.io.connection_info`). Atrás de um proxy, `X-Forwarded-For` é controlado por quem o envia, então um cliente pode forjar o próprio identificador e escapar do limite. O destino é contar apenas pelo endereço de conexão real.
+- Logs registram método, rota e status, nunca corpo nem credenciais. Chaves (carteira/senha) aparecem mascaradas, ex.: `5820...10`. O identificador do prestador também não é logado em claro.
+- O rate limit identifica o cliente pelo endereço de conexão real (`shelf.io.connection_info`) e não considera header de proxy enviado pelo cliente, que poderia forjar o identificador e escapar do limite. A consequência é que, atrás de um proxy, todos os clientes compartilham o mesmo endereço e a contagem fica agregada por proxy.
 - Em produção: rodar atrás de TLS e restringir `CORS_ORIGIN` e a rede de acesso à API.
 
 ## Deploy (Render free tier)
