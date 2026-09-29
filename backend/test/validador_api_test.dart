@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -13,6 +14,23 @@ class _LogMudo implements LogOutput {
 
   @override
   void output(OutputEvent event) {}
+
+  @override
+  Future<void> destroy() async {}
+
+  @override
+  Future<void> init() async {}
+}
+
+/// `LogOutput` que guarda as mensagens para permitir assercao sobre o que foi
+/// registrado no servidor.
+class _LogCapturado implements LogOutput {
+  _LogCapturado([List<String>? destino]) : mensagens = destino ?? <String>[];
+
+  final List<String> mensagens;
+
+  @override
+  void output(OutputEvent event) => mensagens.addAll(event.lines);
 
   @override
   Future<void> destroy() async {}
@@ -37,6 +55,18 @@ class _SessaoPortalFake extends SessaoPortal {
   final List<({String code, String user, String senha})> credenciaisRecebidas =
       <({String code, String user, String senha})>[];
 
+  /// Quantas vezes `encerrar()` foi chamado: prova se a sessao foi descartada
+  /// pelo servidor.
+  int encerradas = 0;
+
+  /// Quando preenchido, `consultarBeneficiario` fica parado ate o
+  /// `Completer` completar, mantendo a sessao ocupada por um lote em voo.
+  Completer<void>? consultaEmAndamento;
+
+  /// Quantas vezes o lote chegou a usar esta sessao. E o sinal de que a
+  /// sessao esta realmente ocupada, sem depender de `delay`.
+  int consultasIniciadas = 0;
+
   @override
   Future<ResultadoLogin> login({
     required String code,
@@ -45,6 +75,20 @@ class _SessaoPortalFake extends SessaoPortal {
   }) async {
     credenciaisRecebidas.add((code: code, user: user, senha: senha));
     return resultado;
+  }
+
+  @override
+  Future<String?> consultarBeneficiario({
+    required String carteirinhaCompleta,
+  }) async {
+    consultasIniciadas++;
+    await consultaEmAndamento?.future;
+    return '<html>elegivel=true</html>';
+  }
+
+  @override
+  Future<void> encerrar() async {
+    encerradas++;
   }
 }
 
@@ -60,6 +104,66 @@ class _ConexaoFake implements HttpConnectionInfo {
 
   @override
   int get remotePort => 51234;
+}
+
+const Map<String, String> _ambienteTeste = {
+  'PORTAL_PRESTADOR_ID_TESTE_CODE': '000000000000',
+  'PORTAL_PRESTADOR_ID_TESTE_USER': 'usuario-teste',
+  'PORTAL_PRESTADOR_ID_TESTE_SENHA': 'senha-teste',
+};
+
+/// Monta uma API cujas sessoes do portal sao [_SessaoPortalFake] e cuja sonda
+/// de alcance e contada, sem tocar a rede.
+ValidadorApi _apiDeTeste({
+  required List<_SessaoPortalFake> sessoes,
+  required List<String> log,
+  Future<int> Function()? sonda,
+  Duration janelaCacheAlcance = const Duration(seconds: 10),
+  int limiteSessoes = 10,
+}) {
+  final List<_SessaoPortalFake> fila = List<_SessaoPortalFake>.of(sessoes);
+  return ValidadorApi(
+    logger: Logger(output: _LogCapturado(log)),
+    ambiente: _ambienteTeste,
+    fabricaSessao: (_) => fila.removeAt(0),
+    sondaPortal: sonda ?? () async => 200,
+    janelaCacheAlcance: janelaCacheAlcance,
+    limiteSessoes: limiteSessoes,
+  );
+}
+
+/// Aguarda o lote chegar de fato na consulta ao portal, sem depender de
+/// `delay` fixo (a leitura do corpo e um await, nao e sincrona).
+Future<void> _aguardaConsulta(_SessaoPortalFake sessao) async {
+  for (int i = 0; i < 100 && sessao.consultasIniciadas == 0; i++) {
+    await Future<void>.delayed(const Duration(milliseconds: 1));
+  }
+  expect(
+    sessao.consultasIniciadas,
+    greaterThan(0),
+    reason: 'o lote deveria ter alcancado o portal',
+  );
+}
+
+/// Dispara um lote de uma elegibilidade e devolve a resposta sem aguardar,
+/// para que o teste observe a sessao enquanto ela esta ocupada.
+Future<Response> _loteDe(String token, ValidadorApi api) {
+  final Request request = _requestConsultas({
+    'token': token,
+    'consultas': <dynamic>[
+      {'tipo': 'elegibilidade', 'chave': '12345678901234567890'},
+    ],
+  });
+  return Future<Response>.value(api.handler(request));
+}
+
+Future<String> _tokenDoLogin(ValidadorApi api) async {
+  final response = await api.handler(
+    _requestLogin(const {'identificadorPrestador': 'teste'}),
+  );
+  expect(response.statusCode, 200, reason: 'login deveria autenticar');
+  final corpo = jsonDecode(await response.readAsString()) as Map;
+  return corpo['token'] as String;
 }
 
 Request _requestLogin(
@@ -602,7 +706,12 @@ void main() {
 
   group('ValidadorApi - status', () {
     test('retorna 200 para /api/status', () async {
-      final api = ValidadorApi();
+      final api = _apiDeTeste(
+        sessoes: <_SessaoPortalFake>[
+          _SessaoPortalFake(const ResultadoLogin.autenticado()),
+        ],
+        log: <String>[],
+      );
       final request = Request(
         'GET',
         Uri.parse('http://localhost/api/status'),
@@ -611,4 +720,262 @@ void main() {
       expect(response.statusCode, 200);
     });
   });
+
+  group('ValidadorApi - cache do teste de alcance', () {
+    test('duas chamadas dentro da janela sondam o portal uma vez', () async {
+      // Sem cache, cada GET /api/status abriria um handshake TLS de saida.
+      // O contador da sonda e o termometro: precisa crescer uma unica vez.
+      int sondagens = 0;
+      final api = _apiDeTeste(
+        sessoes: <_SessaoPortalFake>[
+          _SessaoPortalFake(const ResultadoLogin.autenticado()),
+        ],
+        log: <String>[],
+        sonda: () async {
+          sondagens++;
+          return 200;
+        },
+      );
+
+      for (int i = 0; i < 5; i++) {
+        final response = await api.handler(
+          Request('GET', Uri.parse('http://localhost/api/status')),
+        );
+        expect(response.statusCode, 200, reason: 'Falha na req $i');
+      }
+      expect(sondagens, 1);
+    });
+
+    test('apos a janela expirar volta a sondar o portal', () async {
+      // Par do teste acima: o cache precisa expirar, senao o health check
+      // passaria a mentir sobre o estado do portal para sempre.
+      int sondagens = 0;
+      final api = _apiDeTeste(
+        sessoes: <_SessaoPortalFake>[
+          _SessaoPortalFake(const ResultadoLogin.autenticado()),
+        ],
+        log: <String>[],
+        janelaCacheAlcance: Duration.zero,
+        sonda: () async {
+          sondagens++;
+          return 200;
+        },
+      );
+
+      for (int i = 0; i < 3; i++) {
+        await api.handler(
+          Request('GET', Uri.parse('http://localhost/api/status')),
+        );
+      }
+      expect(sondagens, 3);
+    });
+
+    test('/api/status nao responde 429 sob flood (health check do Render)',
+        () async {
+      // 429 conta como falha de saude para o Render, que para de rotear
+      // trafego e reinicia a instancia. Entao /api/status fica de fora do
+      // rate limit: a protecao e o cache da sonda, nao o 429.
+      final api = _apiDeTeste(
+        sessoes: <_SessaoPortalFake>[
+          _SessaoPortalFake(const ResultadoLogin.autenticado()),
+        ],
+        log: <String>[],
+      );
+      for (int i = 0; i < 60; i++) {
+        final response = await api.handler(
+          Request('GET', Uri.parse('http://localhost/api/status')),
+        );
+        expect(response.statusCode, 200, reason: 'Falha na req $i');
+      }
+    });
+  });
+
+  group('ValidadorApi - detalhes internos nao vazam', () {
+    test('falha de rede no login nao expoe o detalhe na resposta', () async {
+      // O detalhe vem de `_detalheDioException` e carrega URL/fragmento de
+      // requisicao. A resposta e entregue antes de qualquer autenticacao.
+      final List<String> log = <String>[];
+      final api = _apiDeTeste(
+        sessoes: <_SessaoPortalFake>[
+          _SessaoPortalFake(
+            const ResultadoLogin.falha(
+              MotivoFalhaLogin.falhaRede,
+              detalhe: 'connectionError: https://saude.sulamericaseguros.com'
+                  '.br/prestador/?token=SEGREDO',
+            ),
+          ),
+        ],
+        log: log,
+      );
+
+      final response = await api.handler(
+        _requestLogin(const {'identificadorPrestador': 'teste'}),
+      );
+      final corpo = jsonDecode(await response.readAsString()) as Map;
+
+      expect(response.statusCode, 401);
+      expect(corpo['mensagem'], isNot(contains('SEGREDO')));
+      expect(corpo['mensagem'], isNot(contains('saude.sulamericaseguros')));
+      expect(corpo['mensagem'], isNot(contains('Detalhe')));
+      // O cliente ainda precisa saber que foi falha de rede.
+      expect(corpo['mensagem'], contains('Falha de rede'));
+
+      // O detalhe vai para o log do servidor.
+      expect(log.join('\n'), contains('SEGREDO'));
+    });
+
+    test('/api/status nao devolve detalhe bruto da falha de sonda', () async {
+      final List<String> log = <String>[];
+      final api = _apiDeTeste(
+        sessoes: <_SessaoPortalFake>[
+          _SessaoPortalFake(const ResultadoLogin.autenticado()),
+        ],
+        log: log,
+        sonda: () async {
+          throw const _ErroDeSondaSensivel();
+        },
+      );
+
+      final response = await api.handler(
+        Request('GET', Uri.parse('http://localhost/api/status')),
+      );
+      final String bruto = await response.readAsString();
+      final Map<String, dynamic> corpo =
+          jsonDecode(bruto) as Map<String, dynamic>;
+      final Map<String, dynamic> portal =
+          corpo['portalSulAmerica'] as Map<String, dynamic>;
+
+      // O sinal util continua: o cliente sabe que o portal esta fora.
+      expect(corpo['status'], 'ok');
+      expect(portal['alcançavel'], isFalse);
+
+      // O subject/issuer do certificado nao pode vazar para chamador anonimo.
+      expect(bruto, isNot(contains('subject=')));
+      expect(bruto, isNot(contains('issuer=')));
+      expect(portal.containsKey('detalhe'), isFalse);
+      expect(portal.containsKey('erro'), isFalse);
+
+      // E o operador ainda consegue diagnosticar pelo log.
+      expect(log.join('\n'), contains('subject=CN=interno.sulamerica'));
+    });
+  });
+
+  group('ValidadorApi - ciclo de vida da sessao', () {
+    test('nao encerra a sessao usada por um lote em andamento', () async {
+      // Cenario: login atinge o limite enquanto um lote consulta. A eviccao
+      // ingenua (`_sessoes.keys.first`) fecharia o Dio do lote em voo.
+      final _SessaoPortalFake emUso = _SessaoPortalFake(
+        const ResultadoLogin.autenticado(),
+      );
+      final _SessaoPortalFake antiga = _SessaoPortalFake(
+        const ResultadoLogin.autenticado(),
+      );
+      final _SessaoPortalFake nova = _SessaoPortalFake(
+        const ResultadoLogin.autenticado(),
+      );
+
+      final api = _apiDeTeste(
+        // A ordem importa: a sessao que entrara em uso precisa ser a mais
+        // antiga do mapa, senao a eviccao ingenua (`_sessoes.keys.first`)
+        // ja pegaria outra e o teste nao provaria nada.
+        sessoes: <_SessaoPortalFake>[emUso, antiga, nova],
+        log: <String>[],
+        limiteSessoes: 2,
+      );
+
+      final String tokenEmUso =
+          await _tokenDoLogin(api); // `emUso` (mais antiga)
+      await _tokenDoLogin(api); // `antiga` (segunda, ociosa)
+
+      final Completer<void> liberado = Completer<void>();
+      emUso.consultaEmAndamento = liberado;
+      final Future<Response> lote = _loteDe(tokenEmUso, api);
+      await _aguardaConsulta(emUso);
+
+      // Login com o limite atingido: precisa evictar alguem, mas nao a em uso.
+      final login = await api.handler(
+        _requestLogin(const {'identificadorPrestador': 'teste'}),
+      );
+      expect(login.statusCode, 200, reason: 'login deveria criar sessao nova');
+      expect(emUso.encerradas, 0, reason: 'em uso nao pode ser encerrada');
+      expect(antiga.encerradas, 1, reason: 'a ociosa deve ser encerrada');
+
+      liberado.complete();
+      final respostaLote = await lote;
+      expect(respostaLote.statusCode, 200);
+    });
+
+    test('recusa o login com 503 quando todas as sessoes estao em uso',
+        () async {
+      // Com uma unica sessao, ocupada por um lote, nao ha o que evictar. O
+      // login precisa falhar com erro claro, nunca matar a sessao ativa.
+      final _SessaoPortalFake emUso = _SessaoPortalFake(
+        const ResultadoLogin.autenticado(),
+      );
+      final _SessaoPortalFake nova = _SessaoPortalFake(
+        const ResultadoLogin.autenticado(),
+      );
+      final api = _apiDeTeste(
+        sessoes: <_SessaoPortalFake>[emUso, nova],
+        log: <String>[],
+        limiteSessoes: 1,
+      );
+
+      final String token = await _tokenDoLogin(api);
+      final Completer<void> liberado = Completer<void>();
+      emUso.consultaEmAndamento = liberado;
+      final Future<Response> lote = _loteDe(token, api);
+      await _aguardaConsulta(emUso);
+
+      final login = await api.handler(
+        _requestLogin(const {'identificadorPrestador': 'teste'}),
+      );
+      final corpo = jsonDecode(await login.readAsString()) as Map;
+      expect(login.statusCode, 503);
+      expect(corpo['mensagem'], contains('Limite de sessoes ativas'));
+      expect(emUso.encerradas, 0, reason: 'ativa nao pode ser encerrada');
+      // A sessao do login recusado nao pode ficar vazando.
+      expect(nova.encerradas, 1);
+
+      liberado.complete();
+      expect((await lote).statusCode, 200);
+    });
+
+    test('apos o lote terminar a sessao volta a ser elegivel para eviccao',
+        () async {
+      final _SessaoPortalFake emUso = _SessaoPortalFake(
+        const ResultadoLogin.autenticado(),
+      );
+      final _SessaoPortalFake nova = _SessaoPortalFake(
+        const ResultadoLogin.autenticado(),
+      );
+      final api = _apiDeTeste(
+        sessoes: <_SessaoPortalFake>[emUso, nova, nova],
+        log: <String>[],
+        limiteSessoes: 1,
+      );
+
+      final String token = await _tokenDoLogin(api);
+      final Future<Response> lote = _loteDe(token, api);
+      expect((await lote).statusCode, 200);
+
+      // Sem lote em voo, a protecao nao pode vazar para sempre: a sessao
+      // volta a ser candidata normal a eviccao.
+      final login = await api.handler(
+        _requestLogin(const {'identificadorPrestador': 'teste'}),
+      );
+      expect(login.statusCode, 200);
+      expect(emUso.encerradas, 1);
+    });
+  });
+}
+
+/// Erro de rede sintetico com conteudo sensivel, para provar que o detalhe
+/// nao sai do servidor.
+class _ErroDeSondaSensivel implements Exception {
+  const _ErroDeSondaSensivel();
+
+  @override
+  String toString() => 'HandshakeException: subject=CN=interno.sulamerica, '
+      'issuer=CN=CA Interna SA, address=10.4.2.9:443';
 }

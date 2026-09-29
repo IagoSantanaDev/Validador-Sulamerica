@@ -69,6 +69,12 @@ Qualquer outra rota devolve 404.
 
 O teste de alcance de `/api/status` usa um `HttpClient` comum, sem o adapter de `SessaoPortal` e sem pinning. Ele responde pela rede, não pela sessão do portal: um certificado self-signed pode aparecer como `alcançavel: false`.
 
+O resultado do teste de alcance é **cacheado por 10 segundos** e compartilhado por todas as requisições. Sem isso, cada `GET /api/status` de um cliente anônimo-forjador abriria um handshake TLS de saída, e o próprio health check do Render dispararia rede a cada sondagem. Uma janela de 10 s limita o serviço a no máximo 6 handshakes por minuto, independentemente da taxa de chamadas. Expirada a janela, a próxima chamada volta a testar o portal — o health check não fica mentirindo sobre o estado do portal.
+
+`/api/status` fica **fora** do rate limit de propósito. O Render considera a instância saudável apenas com 2xx/3xx: um 429 conta como falha de saúde, o Render para de rotear tráfego após 15 s de falhas consecutivas e reinicia a instância se a condição persistir por 60 s. Como `render.yaml` usa `healthCheckPath: /api/status`, incluir a rota no rate limit transformaria um pico de tráfego em indisponibilidade do serviço. A proteção contra abuso é o cache da sonda, que já limita as saídas de rede a 1 por janela; a resposta anônima e barata não precisa de 429.
+
+Quando a sonda falha, a resposta pública é apenas `{"alcançavel": false}` dentro de `portalSulAmerica`. O erro bruto (`subject`/`issuer` do certificado, endereço interno) fica **apenas no log do servidor**: a rota é anônima e não tem o que autenticar quem pergunta.
+
 Regras de negócio aplicadas no servidor, espelhando o app:
 
 - Carteira precisa ter exatamente 20 dígitos.
@@ -115,18 +121,29 @@ Execução contra o portal:
 | Itens por lote | 300 | 413 |
 | Tamanho do corpo | 1 MB | 413 |
 | Rate limit nas rotas do portal (`/api/login`, `/api/consultas`) | 40 por minuto | 429 |
+| Cache do teste de alcance de `/api/status` | 10 segundos | — (reaproveita a última sonda) |
 | Lotes simultâneos | 1 | 429 |
-| Sessões ativas | 10 (a mais antiga é encerrada) | nova sessão substitui a antiga |
+| Sessões ativas | 10 (a mais antiga ociosa é encerrada) | nova sessão substitui a antiga |
+| Sessões em uso por um lote | — | 503 no login, sem encerrar a sessão ativa |
 
 O estado das sessões é local ao processo: não há réplica nem estado compartilhado, o que é outra razão para o serviço rodar com instância única.
 
 Tokens de sessão são gerados com `Random.secure()`. Sem credenciais válidas, o backend nega o login com 401 e mensagem com o motivo (credencial, rede ou resposta inesperada do portal).
+
+### Ciclo de vida da sessão
+
+Uma sessão só é descartada por evicção (atingiu o teto de 10) ou quando a sessão do lote extra é criada para uma chamada. A sessão **nunca é encerrada no meio de uma consulta**: `_novoToken` ignora o token cujo lote está em andamento e escolhe a mais antiga entre as ociosas. Como só existe um lote simultâneo, basta proteger esse token.
+
+Se todas as 10 sessões estiverem em uso — o que, com um único lote por vez, é o caso degenerado em que o limite é 1 e a sessão está ocupada — o login responde **503** com a mensagem `Limite de sessoes ativas em uso. Tente novamente em instantes.` e encerra a sessão que ele mesmo acabou de criar, em vez de matar a sessão ativa. Fechar o `Dio` de um lote em voo quebraria as consultas restantes sem avisar o cliente.
+
+`encerrar()` é aguardado (`await`) na evicção e no descarte da sessão do login recusado, para que o socket do portal feche antes do handler responder.
 
 ## Segurança
 
 - As credenciais do prestador nunca chegam pelo app: o `/api/login` recebe só o identificador e `CredenciaisPortal` resolve `code`/`user`/`senha` das variáveis de ambiente. Elas não estão no bundle do front nem em nenhum artefato de build.
 - A senha do prestador nunca é logada e não persiste; as credenciais ficam retidas em memória por token, apenas para abrir sessões extras, e saem junto com a sessão.
 - Logs registram método, rota e status, nunca corpo nem credenciais. Chaves (carteira/senha) aparecem mascaradas, ex.: `5820...10`. O identificador do prestador também não é logado em claro.
+- Detalhes internos não saem em respostas não autenticadas. A falha de rede do `/api/login` responde só com `Falha de rede ao acessar o portal SulAmerica.`; o detalhe do `Dio` (URL, fragmento de requisição) vai para o log. O mesmo vale para `/api/status`, que devolve apenas `alcançavel: false` quando a sonda falha. Ambos os detalhes ficam disponíveis no log do servidor para diagnóstico.
 - O rate limit identifica o cliente pelo endereço de conexão real (`shelf.io.connection_info`) e não considera header de proxy enviado pelo cliente, que poderia forjar o identificador e escapar do limite. A consequência é que, atrás de um proxy, todos os clientes compartilham o mesmo endereço e a contagem fica agregada por proxy.
 - Em produção: rodar atrás de TLS e restringir `CORS_ORIGIN` e a rede de acesso à API.
 
