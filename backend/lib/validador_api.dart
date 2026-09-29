@@ -6,15 +6,21 @@ import 'dart:typed_data';
 import 'package:logger/logger.dart';
 import 'package:shelf/shelf.dart';
 import 'package:shelf_router/shelf_router.dart';
+import 'package:validador_backend/modules/sulamerica/data/credenciais_portal.dart';
 import 'package:validador_backend/modules/sulamerica/data/sessao_portal.dart';
 
 import 'elegibilidade_parser.dart';
 import 'util_texto.dart';
 
 class ValidadorApi {
-  ValidadorApi({Logger? logger}) : _logger = logger ?? Logger();
+  /// [ambiente] permite injetar a configuração em testes; em produção usa
+  /// `Platform.environment`. Não altera o contrato HTTP.
+  ValidadorApi({Logger? logger, Map<String, String>? ambiente})
+      : _logger = logger ?? Logger(),
+        _ambiente = ambiente;
 
   final Logger _logger;
+  final Map<String, String>? _ambiente;
   final Map<String, SessaoPortal> _sessoes = {};
   final Map<String, _CredenciaisPortal> _credenciaisPorToken = {};
   final Random _aleatorio = Random.secure();
@@ -51,29 +57,30 @@ class ValidadorApi {
       return _erro('Corpo JSON invalido.', 400);
     }
 
-    final String? code = corpo['code'] as String?;
-    final String? user = corpo['user'] as String?;
-    final String? senha = corpo['senha'] as String?;
-    if (code == null ||
-        code.isEmpty ||
-        user == null ||
-        user.isEmpty ||
-        senha == null ||
-        senha.isEmpty) {
-      return _erro('Campos code, user e senha sao obrigatorios.', 400);
+    final String? identificador = corpo['identificadorPrestador'] as String?;
+    if (identificador == null || identificador.trim().isEmpty) {
+      return _erro('Campo identificadorPrestador e obrigatorio.', 400);
+    }
+
+    final CredenciaisPortal? credenciais = CredenciaisPortal.resolver(
+      identificador.trim(),
+      ambiente: _ambiente,
+    );
+    if (credenciais == null) {
+      _logger.w('Login recusado: identificador desconhecido.');
+      return _erro('Identificador de prestador nao autorizado.', 401);
     }
 
     final SessaoPortal sessao = SessaoPortal(logger: _logger);
     final ResultadoLogin resultado = await sessao.login(
-      code: code,
-      user: user,
-      senha: senha,
+      code: credenciais.code,
+      user: credenciais.user,
+      senha: credenciais.senha,
     );
     if (!resultado.autenticada) {
       final String mensagem = switch (resultado.motivo) {
         MotivoFalhaLogin.credenciaisInvalidas =>
-          'Credenciais invalidas para o portal SulAmerica. '
-              'Confira o code/user/senha enviados no corpo da requisicao.',
+          'Credenciais invalidas para o portal SulAmerica.',
         MotivoFalhaLogin.falhaRede =>
           'Falha de rede ao acessar o portal SulAmerica. '
               'Detalhe: ${resultado.detalhe ?? 'sem detalhe'}.',
@@ -89,11 +96,11 @@ class ValidadorApi {
     final String token = _novoToken(sessao);
 
     _credenciaisPorToken[token] = _CredenciaisPortal(
-      code: code,
-      user: user,
-      senha: senha,
+      code: credenciais.code,
+      user: credenciais.user,
+      senha: credenciais.senha,
     );
-    _logger.i('Sessao criada para o prestador code=$code (mascarado).');
+    _logger.i('Sessao criada para o prestador (identificador mascarado).');
     return _json({'token': token, 'autenticada': true});
   }
 
