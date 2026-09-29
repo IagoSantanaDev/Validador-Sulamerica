@@ -20,7 +20,7 @@ class RegraSenhaProcedimento extends RegraValidacao {
     return ErroValidacao(
       campo: 'senha',
       mensagem:
-          'Senha obrigatória para procedimentos VPP: ${codigos.join(', ')}',
+          'Senha obrigatória para procedimento(s): ${codigos.join(', ')}',
     );
   }
 }
