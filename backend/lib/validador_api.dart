@@ -436,8 +436,7 @@ class ValidadorApi {
 
   Future<Map<String, dynamic>> _testarAlcancePortal() async {
     final HttpClient http = HttpClient()
-      ..connectionTimeout = const Duration(seconds: 10)
-      ..badCertificateCallback = SessaoPortal.aceitarCertificadoDoPortal;
+      ..connectionTimeout = const Duration(seconds: 10);
     try {
       final HttpClientRequest requisicao = await http
           .getUrl(Uri.parse('https://saude.sulamericaseguros.com.br/'))
