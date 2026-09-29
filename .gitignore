@@ -14,3 +14,9 @@ web/*.js.map
 debug/
 .artifacts/
 .agents/
+!.agents/
+.agents/*
+!.agents/skills/
+.agents/skills/*
+!.agents/skills/kan-07-implementation/
+!.agents/skills/kan-07-implementation/**

@@ -119,6 +119,41 @@ void main() {
       expect(tipoErroDeLinha(linha), TipoErroGuia.senha);
     });
 
+    test('erro local do CRM é filtrado como CRM', () {
+      const GuiaValidada guiaCrm = GuiaValidada(
+        guia: guia,
+        erros: [
+          ErroValidacao(
+            campo: 'crm',
+            mensagem: 'CRM deve ter no máximo 5 dígitos (123456)',
+          ),
+        ],
+      );
+      final LinhaGradeGuia linha = linhasDeGuia(guiaCrm).single;
+
+      expect(tipoErroDeLinha(linha), TipoErroGuia.crm);
+      expect(rotuloTipoErro(TipoErroGuia.crm), 'CRM');
+    });
+
+    test('erro local VPP aparece nos filtros Senha e Procedimento', () {
+      const GuiaValidada guiaVpp = GuiaValidada(
+        guia: guia,
+        erros: [
+          ErroValidacao(
+            campo: 'senha',
+            mensagem: 'Senha obrigatória para procedimento(s): 12345678',
+          ),
+        ],
+      );
+      final LinhaGradeGuia linha = linhasDeGuia(guiaVpp).single;
+
+      expect(tipoErroDeLinha(linha), TipoErroGuia.senha);
+      expect(
+        tiposErroDeLinha(linha),
+        containsAll([TipoErroGuia.senha, TipoErroGuia.procedimento]),
+      );
+    });
+
     test('linha da consulta de elegibilidade é filtrada pelo motivo', () {
       const GuiaValidada guiaConsulta = GuiaValidada(
         guia: guia,
@@ -198,5 +233,37 @@ void main() {
 
     expect(find.text(carteiraLiteral), findsOneWidget);
     expect(find.text(senhaLiteral), findsOneWidget);
+  });
+
+  testWidgets('exibe o rótulo CRM no detalhe do erro local', (tester) async {
+    const GuiaValidada guiaCrm = GuiaValidada(
+      guia: guia,
+      erros: [
+        ErroValidacao(
+          campo: 'crm',
+          mensagem: 'CRM deve ter no máximo 5 dígitos (123456)',
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: GradeGuias(
+            linhas: [
+              LinhaGradeGuia(
+                guia: guiaCrm,
+                detalhe: 'CRM deve ter no máximo 5 dígitos (123456)',
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.byIcon(Icons.cancel));
+    await tester.pumpAndSettle();
+
+    expect(find.text('CRM'), findsOneWidget);
   });
 }
