@@ -35,7 +35,7 @@ Variáveis de ambiente opcionais:
 | `PORTAL_PRESTADOR_ID_<IDENTIFICADOR>_CODE` | — | `code` do prestador no portal |
 | `PORTAL_PRESTADOR_ID_<IDENTIFICADOR>_USER` | — | `user` do prestador no portal |
 | `PORTAL_PRESTADOR_ID_<IDENTIFICADOR>_SENHA` | — | `senha` do prestador no portal |
-| `PORTAL_CERT_FINGERPRINT_SHA256` | — | Fingerprint SHA256 (hex) do certificado do portal; sem ele vale a validação de CA padrão |
+| `PORTAL_CERT_FINGERPRINT_SHA256` | — | Fingerprint SHA256 do certificado do portal, em hex de 64 caracteres, sem dois-pontos (aceita caixa alta). Ausente, vazio ou só espaços: vale a validação de CA padrão. Presente mas malformado: o backend recusa o valor e falha ao criar a sessão com `ArgumentError`, sem registrar o valor. Rotação: troque só o valor da variável, sem recompilar |
 
 `CORS_ORIGIN` é lida em runtime, então dá para ajustar sem recompilar. As credenciais e o fingerprint do certificado também são lidos em runtime.
 
