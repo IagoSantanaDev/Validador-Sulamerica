@@ -1,4 +1,5 @@
 import 'procedimento.dart';
+import 'profissional_solicitante.dart';
 
 class GuiaTiss {
   const GuiaTiss({
@@ -6,6 +7,7 @@ class GuiaTiss {
     required this.numeroCarteira,
     required this.senha,
     this.nomeBeneficiario,
+    this.solicitante,
     this.procedimentos = const [],
   });
 
@@ -13,5 +15,6 @@ class GuiaTiss {
   final String? numeroCarteira;
   final String? senha;
   final String? nomeBeneficiario;
+  final ProfissionalSolicitante? solicitante;
   final List<Procedimento> procedimentos;
 }

@@ -69,6 +69,7 @@ class AppStrings {
   static const String filtroSenha = 'Senha';
   static const String filtroCarteira = 'Carteira';
   static const String filtroProcedimento = 'Procedimento';
+  static const String filtroCrm = 'CRM';
   static const String filtroSemResultado =
       'Nenhuma guia encontrada com este filtro.';
 }
