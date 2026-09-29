@@ -13,8 +13,8 @@ import 'elegibilidade_parser.dart';
 import 'util_texto.dart';
 
 class ValidadorApi {
-  /// [ambiente] permite injetar a configuração em testes; em produção usa
-  /// `Platform.environment`. Não altera o contrato HTTP.
+  /// [ambiente] permite injetar a configuração em testes; em producao usa
+  /// `Platform.environment`. Nao altera o contrato HTTP.
   ValidadorApi({Logger? logger, Map<String, String>? ambiente})
       : _logger = logger ?? Logger(),
         _ambiente = ambiente;
@@ -44,10 +44,14 @@ class ValidadorApi {
     ..get('/api/status', _status)
     ..all('/<ignored|.*>', _naoEncontrado);
 
-  Handler get handler => const Pipeline()
+  // Precisa ser unico por instancia: o rate limit guarda estado na closure
+  // do middleware e se reconstruido a cada acesso perderia a contagem.
+  late final Handler _handler = const Pipeline()
       .addMiddleware(ValidadorApi._cors())
       .addMiddleware(ValidadorApi._rateLimitPortal())
       .addHandler(_rotas.call);
+
+  Handler get handler => _handler;
 
   Future<Response> _login(Request request) async {
     final _LeituraJson leitura = await _lerJson(request);
@@ -110,12 +114,7 @@ class ValidadorApi {
     final Map<String, dynamic>? corpo = leitura.valor;
     if (corpo == null) return _erro('Corpo JSON invalido.', 400);
 
-    final SessaoPortal? sessao = _sessaoPorCorpo(corpo);
-    if (sessao == null) {
-      return _erro('Token de sessao invalido ou ausente.', 401);
-    }
-    final String? token = corpo['token'] as String?;
-
+    // Valida payload antes de verificar token.
     final dynamic consultas = corpo['consultas'];
     if (consultas is! List || consultas.isEmpty) {
       return _erro('Campo consultas e obrigatorio.', 400);
@@ -126,6 +125,35 @@ class ValidadorApi {
         413,
       );
     }
+
+    // Valida estrutura de cada item antes de processar.
+    for (int i = 0; i < consultas.length; i++) {
+      final dynamic item = consultas[i];
+      if (item is! Map) {
+        return _erro(
+          'Item $i deve ser um objeto com campos tipo e chave.',
+          400,
+        );
+      }
+      final dynamic tipo = item['tipo'];
+      final dynamic chave = item['chave'];
+      if (tipo is! String || tipo.isEmpty) {
+        return _erro('Item $i: campo tipo deve ser uma string nao vazia.', 400);
+      }
+      if (chave is! String || chave.isEmpty) {
+        return _erro(
+          'Item $i: campo chave deve ser uma string nao vazia.',
+          400,
+        );
+      }
+    }
+
+    final SessaoPortal? sessao = _sessaoPorCorpo(corpo);
+    if (sessao == null) {
+      return _erro('Token de sessao invalido ou ausente.', 401);
+    }
+    final String? token = corpo['token'] as String?;
+
     if (_loteEmAndamento) {
       return _erro('Ja existe um lote em andamento. Aguarde.', 429);
     }
@@ -471,8 +499,9 @@ class ValidadorApi {
   String _novoToken(SessaoPortal sessao) {
     if (_sessoes.length >= _limiteSessoes) {
       final String antiga = _sessoes.keys.first;
-      _sessoes.remove(antiga);
+      final SessaoPortal? sessaoAntiga = _sessoes.remove(antiga);
       _credenciaisPorToken.remove(antiga);
+      sessaoAntiga?.encerrar();
     }
     final String token = _gerarToken();
     _sessoes[token] = sessao;
@@ -529,6 +558,15 @@ class ValidadorApi {
           }
           final String ip = _ipDe(request);
           final DateTime agora = DateTime.now();
+
+          // Remove janelas expiradas para evitar crescimento ilimitado.
+          acessos.removeWhere((_, timestamps) {
+            timestamps.removeWhere(
+              (t) => agora.difference(t) >= _janelaRateLimit,
+            );
+            return timestamps.isEmpty;
+          });
+
           final List<DateTime> recentes = (acessos[ip] ?? const [])
               .where((t) => agora.difference(t) < _janelaRateLimit)
               .toList();
@@ -550,11 +588,12 @@ class ValidadorApi {
         };
   }
 
+  /// Obtém o IP de origem da conexão.
+  ///
+  /// NÃO confia em `X-Forwarded-For` arbitrário recebido do cliente,
+  /// pois pode ser falsificado para burlar o rate limit. Usa apenas o
+  /// endereço de conexão real (`shelf.io.connection_info`).
   static String _ipDe(Request request) {
-    final String? forward = request.headers['x-forwarded-for'];
-    if (forward != null && forward.isNotEmpty) {
-      return forward.split(',').first.trim();
-    }
     final dynamic info = request.context['shelf.io.connection_info'];
     if (info is HttpConnectionInfo) return info.remoteAddress.address;
     return 'desconhecido';
