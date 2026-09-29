@@ -15,10 +15,21 @@ import 'util_texto.dart';
 class ValidadorApi {
   /// [ambiente] permite injetar a configuração em testes; em producao usa
   /// `Platform.environment`. Nao altera o contrato HTTP.
-  ValidadorApi({Logger? logger, Map<String, String>? ambiente})
-      : _logger = logger ?? Logger(),
-        _ambiente = ambiente;
+  /// [fabricaSessao] permite injetar um `SessaoPortal` falso em testes,
+  /// evitando qualquer acesso ao portal real. Em producao usa a construcao
+  /// padrao com o logger da instancia.
+  ValidadorApi({
+    Logger? logger,
+    Map<String, String>? ambiente,
+    SessaoPortal Function(Logger logger)? fabricaSessao,
+  })  : _logger = logger ?? Logger(),
+        _ambiente = ambiente,
+        _fabricaSessao = fabricaSessao ?? _criarSessaoPortal;
 
+  static SessaoPortal _criarSessaoPortal(Logger logger) =>
+      SessaoPortal(logger: logger);
+
+  final SessaoPortal Function(Logger logger) _fabricaSessao;
   final Logger _logger;
   final Map<String, String>? _ambiente;
   final Map<String, SessaoPortal> _sessoes = {};
@@ -75,7 +86,7 @@ class ValidadorApi {
       return _erro('Identificador de prestador nao autorizado.', 401);
     }
 
-    final SessaoPortal sessao = SessaoPortal(logger: _logger);
+    final SessaoPortal sessao = _fabricaSessao(_logger);
     final ResultadoLogin resultado = await sessao.login(
       code: credenciais.code,
       user: credenciais.user,
@@ -255,7 +266,7 @@ class ValidadorApi {
     _CredenciaisPortal credenciais,
     int indice,
   ) async {
-    final SessaoPortal nova = SessaoPortal(logger: _logger);
+    final SessaoPortal nova = _fabricaSessao(_logger);
     final ResultadoLogin login = await nova.login(
       code: credenciais.code,
       user: credenciais.user,
