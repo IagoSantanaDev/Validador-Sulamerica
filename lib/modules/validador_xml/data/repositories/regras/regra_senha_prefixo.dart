@@ -9,6 +9,13 @@ class RegraSenhaPrefixo extends RegraValidacao {
   static const String prefixoObrigatorio = '5';
   static const int tamanhoExato = 10;
 
+  static bool senhaValida(String senha) =>
+      senha.length == tamanhoExato &&
+      senha.startsWith(prefixoObrigatorio) &&
+      senha.codeUnits
+          .skip(1)
+          .every((unidade) => unidade >= 48 && unidade <= 57);
+
   @override
   ErroValidacao? validar(GuiaTiss guia) {
     final String? senha = guia.senha;
@@ -31,6 +38,12 @@ class RegraSenhaPrefixo extends RegraValidacao {
       return const ErroValidacao(
         campo: 'senha',
         mensagem: 'senha deve ter exatamente 10 caracteres',
+      );
+    }
+    if (!senhaValida(senha)) {
+      return const ErroValidacao(
+        campo: 'senha',
+        mensagem: 'senha deve conter apenas dígitos ASCII',
       );
     }
     return null;

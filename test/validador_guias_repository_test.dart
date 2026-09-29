@@ -117,6 +117,32 @@ void main() {
       expect(resultado.single.temErro, isFalse);
     });
 
+    test(
+        'rejeita letras, pontuação, espaços, dígitos Unicode e tamanho inválido',
+        () {
+      for (final String senha in [
+        '5ABCDEFGHI',
+        '5!23456789',
+        ' 500000000',
+        '5000000000 ',
+        '5\u06600000000',
+        '505643084',
+        '50564308431',
+      ]) {
+        final String xml = _xmlComSenhaValida.replaceFirst(
+          '5056430843',
+          senha,
+        );
+        final resultado = repository.validarLote(xml);
+
+        expect(
+          resultado.single.erros.any((erro) => erro.campo == 'senha'),
+          isTrue,
+          reason: 'A senha $senha deve ser rejeitada',
+        );
+      }
+    });
+
     test('preserva carteira e senha exatamente como aparecem no XML', () {
       const String carteiraLiteral = ' 557888884823194700 20 ';
       const String senhaLiteral = ' 5056430843 ';

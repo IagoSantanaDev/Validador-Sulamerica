@@ -14,12 +14,12 @@ import 'package:validador_xml_sulamerica/modules/validador_xml/data/services/sul
 import 'package:validador_xml_sulamerica/modules/validador_xml/presentation/controllers/validador_controller.dart';
 
 class _RegraCredenciaisFixa extends RegraCredenciaisPortal {
-  const _RegraCredenciaisFixa(this._credenciais);
+  const _RegraCredenciaisFixa(this._identificadorPrestador);
 
-  final CredenciaisPortal? _credenciais;
+  final String? _identificadorPrestador;
 
   @override
-  CredenciaisPortal? resolver(String? identificadorPrestador) => _credenciais;
+  String? resolver(String? identificadorPrestador) => _identificadorPrestador;
 }
 
 class _FakeBatchAdapter implements HttpClientAdapter {
@@ -27,13 +27,23 @@ class _FakeBatchAdapter implements HttpClientAdapter {
     this.statusAutorizacao = 'Autorizado',
     this.elegivel = true,
     this.loginOk = true,
+    this.rejeicoesBatch = 0,
+    this.resultadosParciais = false,
+    this.reverterResultados = false,
+    this.elegibilidadeAlternada = false,
   });
 
   final String? statusAutorizacao;
   final bool? elegivel;
   final bool loginOk;
+  int rejeicoesBatch;
+  final bool resultadosParciais;
+  final bool reverterResultados;
+  final bool elegibilidadeAlternada;
   final List<String> logChamadas = [];
   final List<dynamic> consultasRecebidas = [];
+  final List<int> tamanhosLotes = [];
+  final List<Object?> corposLogin = [];
 
   @override
   void close({bool force = false}) {}
@@ -47,6 +57,7 @@ class _FakeBatchAdapter implements HttpClientAdapter {
     logChamadas.add(options.path);
     switch (options.path) {
       case '/api/login':
+        corposLogin.add(options.data);
         return loginOk
             ? _resposta(200, {'token': 'tok123'})
             : _resposta(401, {'status': 'erro'});
@@ -56,26 +67,43 @@ class _FakeBatchAdapter implements HttpClientAdapter {
             ? jsonDecode(data) as Map<String, dynamic>
             : (data as Map).cast<String, dynamic>();
         final List<dynamic> consultas = corpo['consultas'] as List;
+        tamanhosLotes.add(consultas.length);
         consultasRecebidas.addAll(consultas);
+        if (rejeicoesBatch > 0) {
+          rejeicoesBatch--;
+          return _resposta(401, {'status': 'erro'});
+        }
         final List<Map<String, dynamic>> resultados = [
           for (final dynamic c in consultas)
-            if ((c as Map)['tipo'] == 'elegibilidade')
-              {
-                'chave': c['chave'],
-                'tipo': c['tipo'],
-                'sucesso': true,
-                'elegivel': elegivel,
-                'rotuloElegibilidade': elegivel == true ? 'SIM' : null,
-              }
-            else
-              {
-                'chave': c['chave'],
-                'tipo': c['tipo'],
-                'sucesso': true,
-                'statusSenha': statusAutorizacao,
-              },
+            if (!resultadosParciais ||
+                (c as Map)['chave'] != (consultas.last as Map)['chave'])
+              if ((c as Map)['tipo'] == 'elegibilidade')
+                {
+                  'chave': c['chave'],
+                  'tipo': c['tipo'],
+                  'sucesso': true,
+                  'elegivel': elegibilidadeAlternada
+                      ? (c['chave'] as String).endsWith('1')
+                      : elegivel,
+                  'rotuloElegibilidade': elegibilidadeAlternada
+                      ? ((c['chave'] as String).endsWith('1') ? 'SIM' : 'NAO')
+                      : elegivel == true
+                          ? 'SIM'
+                          : null,
+                }
+              else
+                {
+                  'chave': c['chave'],
+                  'tipo': c['tipo'],
+                  'sucesso': true,
+                  'statusSenha': statusAutorizacao,
+                },
         ];
-        return _resposta(200, {'status': 'ok', 'resultados': resultados});
+        return _resposta(200, {
+          'status': 'ok',
+          'resultados':
+              reverterResultados ? resultados.reversed.toList() : resultados,
+        });
       default:
         return _resposta(404, {'status': 'erro', 'mensagem': 'nao encontrado'});
     }
@@ -99,6 +127,9 @@ class _FakeValidadorGuiasRepository implements ValidadorGuiasRepository {
 
   @override
   List<GuiaValidada> validarLote(String conteudoXml) => retorno;
+
+  @override
+  List<GuiaValidada> validarGuias(List<GuiaTiss> guias) => retorno;
 }
 
 const GuiaTiss _guiaSemSenha = GuiaTiss(
@@ -122,29 +153,25 @@ const GuiaTiss _guiaSenhaInvalida = GuiaTiss(
 ValidadorController _controllerComGateway({
   required HttpClientAdapter adapter,
   required List<GuiaValidada> retornoValidacao,
-  String? code = 'prestador-code',
-  String? user = 'master',
-  String? senha = 'x',
+  String? identificadorPrestador = '27372066000673',
 }) {
   final Dio dio = Dio()..httpClientAdapter = adapter;
   final SulAmericaBackendService service = SulAmericaBackendService(
     DioClient(baseUrl: 'http://localhost:8080', dio: dio),
   );
-  final CredenciaisPortal? credenciais =
-      (code == null || user == null || senha == null)
-          ? null
-          : CredenciaisPortal(code: code, user: user, senha: senha);
   return ValidadorController(
     repository: _FakeValidadorGuiasRepository(retornoValidacao),
     service: service,
-    regraCredenciais: _RegraCredenciaisFixa(credenciais),
+    regraCredenciais: _RegraCredenciaisFixa(identificadorPrestador),
   );
 }
 
 Future<ValidadorController> _validar(ValidadorController controller) async {
   controller.definirArquivo(
     nomeArquivo: 'lote.xml',
-    bytes: Uint8List.fromList('<lote/>'.codeUnits),
+    bytes: Uint8List.fromList(
+      '<mensagemTISS><guiaSP-SADT/></mensagemTISS>'.codeUnits,
+    ),
   );
   await controller.validar();
   return controller;
@@ -177,6 +204,9 @@ void main() {
       expect(controller.status, StatusValidador.concluido);
 
       expect(adapter.logChamadas, ['/api/login', '/api/consultas']);
+      expect(adapter.corposLogin, [
+        {'identificadorPrestador': '27372066000673'},
+      ]);
       expect(adapter.consultasRecebidas, hasLength(3));
 
       expect(controller.guiasComErro.first.consultas, hasLength(1));
@@ -294,6 +324,37 @@ void main() {
       expect(descricoes, contains('Elegível: SIM'));
     });
 
+    test('senha com dígito Unicode é rejeitada antes de consultar a API',
+        () async {
+      const GuiaTiss guiaSenhaUnicode = GuiaTiss(
+        numeroGuiaPrestador: '334',
+        numeroCarteira: '55788888482319470020',
+        senha: '5\u06600000000',
+      );
+      final _FakeBatchAdapter adapter = _FakeBatchAdapter();
+
+      final ValidadorController controller = await _validar(
+        _controllerComGateway(
+          adapter: adapter,
+          retornoValidacao: const [
+            GuiaValidada(guia: guiaSenhaUnicode, erros: []),
+          ],
+        ),
+      );
+
+      expect(
+        controller.guias.single.consultas
+            .firstWhere((consulta) => consulta.tipo == TipoConsultaGuia.senha)
+            .sucesso,
+        isFalse,
+      );
+      expect(
+        adapter.consultasRecebidas
+            .where((consulta) => (consulta as Map)['tipo'] == 'senha'),
+        isEmpty,
+      );
+    });
+
     test('elegibilidade NÃO é um erro próprio no frontend', () async {
       final _FakeBatchAdapter adapter = _FakeBatchAdapter(elegivel: false);
 
@@ -394,15 +455,100 @@ void main() {
           retornoValidacao: const [
             GuiaValidada(guia: _guiaSemSenha, erros: []),
           ],
-          code: null,
-          user: null,
-          senha: null,
+          identificadorPrestador: null,
         ),
       );
 
       expect(controller.status, StatusValidador.concluido);
       expect(adapter.logChamadas, isEmpty);
       expect(controller.totalGuias, 1);
+    });
+
+    test('particiona 301 chaves e preserva correlação para todas as guias',
+        () async {
+      final List<GuiaValidada> guias = [
+        for (int indice = 0; indice < 301; indice++)
+          GuiaValidada(
+            guia: GuiaTiss(
+              numeroGuiaPrestador: indice.toString().padLeft(3, '0'),
+              numeroCarteira: indice.toString().padLeft(20, '0'),
+              senha: null,
+            ),
+            erros: const [],
+          ),
+      ];
+      final _FakeBatchAdapter adapter = _FakeBatchAdapter(
+        reverterResultados: true,
+        elegibilidadeAlternada: true,
+      );
+
+      final ValidadorController controller = await _validar(
+        _controllerComGateway(adapter: adapter, retornoValidacao: guias),
+      );
+
+      expect(adapter.tamanhosLotes, [300, 1]);
+      expect(adapter.consultasRecebidas, hasLength(301));
+      expect(controller.guias, hasLength(301));
+      expect(
+        controller.guias.map((guia) => guia.consulta?.sucesso),
+        [for (int indice = 0; indice < 301; indice++) indice % 10 == 1],
+      );
+      expect(
+        controller.guias.map((guia) => guia.numeroGuiaPrestador).toList(),
+        [
+          for (int indice = 0; indice < 301; indice++)
+            indice.toString().padLeft(3, '0'),
+        ],
+      );
+    });
+
+    test('resposta parcial marca resultados ausentes como falha por guia',
+        () async {
+      const GuiaTiss guiaAusente = GuiaTiss(
+        numeroGuiaPrestador: '115',
+        numeroCarteira: '42509512809910100032',
+        senha: null,
+      );
+      final _FakeBatchAdapter adapter =
+          _FakeBatchAdapter(resultadosParciais: true);
+
+      final ValidadorController controller = await _validar(
+        _controllerComGateway(
+          adapter: adapter,
+          retornoValidacao: const [
+            GuiaValidada(guia: _guiaSemSenha, erros: []),
+            GuiaValidada(guia: guiaAusente, erros: []),
+          ],
+        ),
+      );
+
+      expect(controller.guias.first.temFalhaConsulta, isFalse);
+      expect(controller.guias.last.temFalhaConsulta, isTrue);
+      expect(
+        controller.guias.last.consulta?.descricao,
+        contains('não retornou resultado'),
+      );
+    });
+
+    test('token rejeitado refaz login e repete o batch no máximo uma vez',
+        () async {
+      final _FakeBatchAdapter adapter = _FakeBatchAdapter(rejeicoesBatch: 3);
+
+      final ValidadorController controller = await _validar(
+        _controllerComGateway(
+          adapter: adapter,
+          retornoValidacao: const [
+            GuiaValidada(guia: _guiaSemSenha, erros: []),
+          ],
+        ),
+      );
+
+      expect(
+        adapter.logChamadas,
+        ['/api/login', '/api/consultas', '/api/login', '/api/consultas'],
+      );
+      expect(controller.guias.single.consulta?.sucesso, isFalse);
+      expect(controller.guias.single.consulta?.descricao, contains('401/403'));
     });
   });
 }
