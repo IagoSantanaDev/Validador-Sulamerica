@@ -9,7 +9,7 @@ import '../../../../globals/widgets/textos.dart';
 import '../../data/models/consulta_guia.dart';
 import '../../data/models/guia_validada.dart';
 
-enum TipoErroGuia { senha, carteira, procedimento }
+enum TipoErroGuia { senha, carteira, procedimento, crm }
 
 class LinhaGradeGuia {
   const LinhaGradeGuia({required this.guia, required this.detalhe});
@@ -70,6 +70,7 @@ TipoErroGuia? tipoErroDeLinha(LinhaGradeGuia linha) {
     if (erro.campo == 'senha') return TipoErroGuia.senha;
     if (erro.campo == 'numeroCarteira') return TipoErroGuia.carteira;
     if (erro.campo == 'procedimentos') return TipoErroGuia.procedimento;
+    if (erro.campo == 'crm') return TipoErroGuia.crm;
   }
   return null;
 }
@@ -84,6 +85,7 @@ String rotuloTipoErro(TipoErroGuia tipo) => switch (tipo) {
       TipoErroGuia.senha => AppStrings.filtroSenha,
       TipoErroGuia.carteira => AppStrings.filtroCarteira,
       TipoErroGuia.procedimento => AppStrings.filtroProcedimento,
+      TipoErroGuia.crm => AppStrings.filtroCrm,
     };
 
 class GradeGuias extends StatelessWidget {
@@ -206,7 +208,9 @@ class GradeGuias extends StatelessWidget {
                           ? AppStrings.filtroProcedimento
                           : erro.campo == 'senha'
                               ? AppStrings.rotuloSenha
-                              : AppStrings.rotuloCarteira,
+                              : erro.campo == 'crm'
+                                  ? AppStrings.filtroCrm
+                                  : AppStrings.rotuloCarteira,
                       valor: valor,
                     );
                   },
