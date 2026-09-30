@@ -15,8 +15,15 @@ services:
     envVars:
       - key: HOST
         value: "0.0.0.0"
-      # Restringir após definir o domínio do front:
-      # ex.: https://validador-tiss.pages.dev
+      # Lista de origens permitidas, separadas por VÍRGULA (a barra final é
+      # opcional e ignorada). Este valor fica em "*" por padrão; quem opera
+      # precisa trocar por uma lista explícita no painel do Render
+      # (Dashboard → Environment), porque o domínio do front é definido fora
+      # do repositório. Exemplo do cenário real deste projeto:
+      #   https://validador-sulamerica.pages.dev, http://localhost:3000
+      # Nunca use barra entre as origens nem espaço antes da vírgula como
+      # separador. A resposta ecoa só a origem que casar; o resto é bloqueado
+      # pelo navegador. Ver backend/README.md.
       - key: CORS_ORIGIN
         value: "*"
       # Credenciais do portal, uma entrada por prestador aceito. `sync: false`

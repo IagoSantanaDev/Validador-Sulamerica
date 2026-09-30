@@ -80,7 +80,7 @@ class ValidadorApi {
   // Precisa ser unico por instancia: o rate limit guarda estado na closure
   // do middleware e se reconstruido a cada acesso perderia a contagem.
   late final Handler _handler = const Pipeline()
-      .addMiddleware(ValidadorApi._cors())
+      .addMiddleware(_cors())
       .addMiddleware(ValidadorApi._rateLimitPortal())
       .addHandler(_rotas.call);
 
@@ -699,14 +699,29 @@ class ValidadorApi {
     );
   }
 
-  static Middleware _cors() {
-    const String origemPadrao = '*';
+  /// `CORS_ORIGIN` aceita uma ou mais origens separadas por virgula. A
+  /// resposta ecoa **apenas** a origem que casa com o `Origin` da requisicao,
+  /// porque `Access-Control-Allow-Origin` aceita um valor so: ecoar a lista
+  /// inteira produz um header invalido e o navegador bloqueia a chamada.
+  /// Ausente ou vazia, vale `*` (default de desenvolvimento). Com lista
+  /// explicita, origem de fora da lista nao recebe o header.
+  Middleware _cors() {
+    final String configurado =
+        (_ambiente ?? Platform.environment)['CORS_ORIGIN'] ?? '';
+    final List<String> origens = <String>[
+      for (final String item in configurado.split(','))
+        if (_origemNormalizada(item) != null) _origemNormalizada(item)!,
+    ];
     return (Handler inner) {
-      final String origemPermitida =
-          Platform.environment['CORS_ORIGIN'] ?? origemPadrao;
       return (Request request) async {
-        final Map<String, String> headers = {
-          'Access-Control-Allow-Origin': origemPermitida,
+        final String? permitida =
+            _origemPermitida(origens, request.headers['origin']);
+        final Map<String, String> headers = <String, String>{
+          if (permitida != null) 'Access-Control-Allow-Origin': permitida,
+          // A resposta passa a depender de `Origin`: sem `Vary`, um cache
+          // compartilhado (CDN/proxy) poderia servir a resposta de uma origem
+          // para outra.
+          if (permitida != null && permitida != '*') 'vary': 'origin',
           'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
           'Access-Control-Allow-Headers': 'Content-Type, Authorization',
           'Access-Control-Max-Age': '86400',
@@ -718,6 +733,27 @@ class ValidadorApi {
         return resposta.change(headers: headers);
       };
     };
+  }
+
+  /// Normaliza um item de `CORS_ORIGIN`: sem espacos nas pontas e sem barra
+  /// final, porque um origin da spec e esquema+host+porta, sem path. Itens
+  /// vazios (virgula dupla ou virgula no fim) viram `null` e sao ignorados.
+  static String? _origemNormalizada(String item) {
+    String origem = item.trim();
+    while (origem.endsWith('/')) {
+      origem = origem.substring(0, origem.length - 1);
+    }
+    return origem.isEmpty ? null : origem;
+  }
+
+  /// Valor de `Access-Control-Allow-Origin` para a requisicao, ou `null` para
+  /// nao enviar o header e deixar o navegador bloquear.
+  static String? _origemPermitida(List<String> origens, String? requisicao) {
+    if (origens.isEmpty || origens.contains('*')) return '*';
+    if (requisicao == null) return null;
+    final String? normalizada = _origemNormalizada(requisicao);
+    if (normalizada == null || !origens.contains(normalizada)) return null;
+    return normalizada;
   }
 }
 
