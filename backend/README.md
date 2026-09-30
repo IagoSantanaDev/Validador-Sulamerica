@@ -54,8 +54,9 @@ Os detalhes abaixo foram validados contra o portal em produção e precisam cont
 - A consulta de beneficiário também redireciona (302 para `elegibilidade-resultado.htm`); o backend segue o redirect e devolve o HTML final.
 - A consulta de autorização é um GET em `ajax-controller.jsp` com `metodo=autorizador-pesquisar-solicitacoes` e o campo `numero-vpp` (a senha de 10 dígitos do beneficiário). O portal devolve `text/plain` em ISO-8859-1; o backend tenta UTF-8 e cai para Latin-1. Esse endpoint exige sessão autenticada (401 sem login).
 - A carteirinha é enviada nos segmentos originais 3-5-4-4-4 (campos `codigo-beneficiario-1` a `codigo-beneficiario-5`), não dividida em partes iguais.
-- O certificado TLS do portal tem cadeia com self-signed que a CA pública dos containers rejeita. O backend **nunca** aceita o certificado apenas porque o hostname bate: `SessaoPortal` sempre valida. A estratégia é: validação de CA padrão por padrão; se `PORTAL_CERT_FINGERPRINT_SHA256` estiver configurado, a conexão passa por pinning do fingerprint SHA256 do certificado (dependência `crypto`), e a comparação é feita sobre o DER apresentado.
-- Rotação do certificado: o pinning é atualizado trocando o valor de `PORTAL_CERT_FINGERPRINT_SHA256`, sem recompilar e sem deploy de código. Sem a variável configurada, um certificado self-signed faz a conexão com o portal falhar, e o login responde 401 por falha de rede.
+- O backend **nunca** aceita o certificado apenas porque o hostname bate: `SessaoPortal` sempre valida. A estratégia é validação de CA padrão; se `PORTAL_CERT_FINGERPRINT_SHA256` estiver configurado, a conexão passa por pinning do fingerprint SHA256 do certificado (dependência `crypto`), comparado sobre o DER apresentado.
+- Verificado em 2026-09-29: o portal (`saude.sulamericaseguros.com.br`) **emite certificado de CA pública**, emitido por `GeoTrust TLS RSA CA G1` (DigiCert), válido até 2026-10-25, com SAN `*.sulamericaseguros.com.br`. O handshake com a validação de CA padrão do Dart **passa**. Portanto `PORTAL_CERT_FINGERPRINT_SHA256` deve ficar **vazia**; o pinning é defesa em profundidade para o caso de o portal migrar para certificado fora de CA pública.
+- Rotação do certificado: se o pinning estiver ativo, atualize o valor de `PORTAL_CERT_FINGERPRINT_SHA256` sem recompilar e sem deploy de código. Com valor vazio, a renovação normal do certificado do portal é transparente. Com valor malformado o backend recusa a inicialização, de propósito — degradar em silêncio tiraria a proteção sem nenhum sinal.
 
 ## Endpoints
 
@@ -67,7 +68,7 @@ Os detalhes abaixo foram validados contra o portal em produção e precisam cont
 
 Qualquer outra rota devolve 404.
 
-O teste de alcance de `/api/status` usa um `HttpClient` comum, sem o adapter de `SessaoPortal` e sem pinning. Ele responde pela rede, não pela sessão do portal: um certificado self-signed pode aparecer como `alcançavel: false`.
+O teste de alcance de `/api/status` usa um `HttpClient` comum, sem o adapter de `SessaoPortal` e sem pinning. Ele responde pela rede, não pela sessão do portal: se o certificado deixar de ser válido por CA pública, aparece como `alcançavel: false`. O resultado é cacheado por alguns segundos para não gerar um handshake por requisição.
 
 O resultado do teste de alcance é **cacheado por 10 segundos** e compartilhado por todas as requisições. Sem isso, cada `GET /api/status` de um cliente anônimo-forjador abriria um handshake TLS de saída, e o próprio health check do Render dispararia rede a cada sondagem. Uma janela de 10 s limita o serviço a no máximo 6 handshakes por minuto, independentemente da taxa de chamadas. Expirada a janela, a próxima chamada volta a testar o portal — o health check não fica mentirindo sobre o estado do portal.
 
