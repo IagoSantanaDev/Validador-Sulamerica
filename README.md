@@ -148,16 +148,35 @@ Para criar: no dashboard do Render, New +, Blueprint, e selecione o repositório
 
 ### Frontend (Cloudflare Pages)
 
-Rode o build imediatamente antes do deploy: `build/web/` é um diretório de saída local e pode conter uma build antiga, com o contrato de credenciais anterior.
+O deploy é feito pelo Cloudflare Pages a partir do Git, não por `wrangler` local.
+Configure em **Pages → seu projeto → Settings → Builds & deployments**:
+
+| Campo | Valor |
+|---|---|
+| Build command | `flutter build web --release` |
+| Build output directory | `build/web` |
+| Root directory | `/` (a raiz do repositório) |
+
+E em **Settings → Environment variables**, em **Production**:
+
+| Nome | Valor |
+|---|---|
+| `API_URL` | `https://validador-api.onrender.com` |
+
+`API_URL` é a única variável de que o bundle precisa — nenhuma credencial. O
+Cloudflare injeta a variável no build, então o `index.html` servido já aponta
+para a API de produção sem `--dart-define` manual.
+
+Para validar localmente antes de commitar, o mesmo build roda na sua máquina:
 
 ```bash
-flutter build web --release \
-  --dart-define=API_URL=https://validador-api.onrender.com
-
-npx wrangler pages deploy build/web --project-name validador-tiss
+flutter build web --release --dart-define=API_URL=https://validador-api.onrender.com
+flutter run -d chrome
 ```
 
-O bundle web não recebe nenhuma credencial: o build só precisa de `API_URL`. As credenciais do prestador são configuradas como secrets no serviço do backend, nunca no build do front.
+Isso é opcional e serve só para conferir. Não é o caminho de deploy. Um
+diretório `build/web/` local pode ficar desatualizado e não deve ser publicado
+manualmente: o Pages sempre constrói a partir do commit atual.
 
 Não commitar credenciais reais, não colocá-las em YAML versionado e não publicá-las
 em logs. A configuração do backend (`render.yaml`) também não deve carregar
