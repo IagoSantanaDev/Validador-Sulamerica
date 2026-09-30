@@ -96,6 +96,16 @@ dart run bin/server.dart
 
 O servidor escuta em `0.0.0.0:8080`. Variáveis de ambiente opcionais: `PORT` (padrão 8080), `HOST` (padrão 0.0.0.0) e `CORS_ORIGIN` (padrão `*`).
 
+`CORS_ORIGIN` aceita **uma ou mais** origens separadas por vírgula. A resposta
+devolve `Access-Control-Allow-Origin` com apenas a origem que casa com a
+requisição; uma origem fora da lista não recebe o header. A barra final é
+ignorada, mas o correto é omitir — um *origin* é esquema, host e porta, sem
+caminho:
+
+```
+CORS_ORIGIN=https://validador-sulamerica.pages.dev, http://localhost:3000
+```
+
 ### Frontend
 
 ```bash
@@ -144,7 +154,7 @@ Os identificadores que o app envia são informação pública; as credenciais n�
 
 O repo tem um blueprint (`render.yaml`) que cria o serviço `validador-api` a partir do `backend/Dockerfile`, no free tier. O serviço precisa rodar com instância única: a sessão do portal vive em memória, então réplicas quebrariam a autenticação. No free tier o Render dorme após cerca de 15 minutos ocioso e a sessão se perde; o front re-autentica na próxima visita.
 
-Para criar: no dashboard do Render, New +, Blueprint, e selecione o repositório. A URL fica em `https://validador-api.onrender.com` (ajuste o `CORS_ORIGIN` para o domínio do front em produção).
+Para criar: no dashboard do Render, New +, Blueprint, e selecione o repositório. A URL fica em `https://validador-api.onrender.com`. No painel do serviço, em **Environment**, defina `CORS_ORIGIN` com o domínio do front em produção (e o `http://localhost:PORT` durante o desenvolvimento), no formato de lista descrito acima. Também defina as credenciais do portal (`PORTAL_PRESTADOR_ID_<ID>_CODE|_USER|_SENHA`): sem elas o login responde 401 para qualquer identificador. `PORTAL_CERT_FINGERPRINT_SHA256` deve ficar **vazia** — o portal emite certificado de CA pública, então a validação padrão já é a correta.
 
 ### Frontend (Cloudflare Pages)
 
@@ -212,7 +222,7 @@ dart analyze        # dentro de backend/
 
 Como o bundle web não carrega segredo, o que ainda precisa de disciplina no servidor:
 
-- restringir `CORS_ORIGIN` ao domínio do front em produção, em vez de `*`;
+- restringir `CORS_ORIGIN` ao domínio do front em produção, em vez de `*` (aceita lista separada por vírgula);
 - limitar a rede de acesso à API;
 - usar, no portal, um usuário de prestador com privilégios mínimos;
 - manter as credenciais só em secrets do serviço, fora de YAML versionado e de logs.
