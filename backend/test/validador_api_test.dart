@@ -132,6 +132,37 @@ ValidadorApi _apiDeTeste({
   );
 }
 
+/// Monta uma API só para exercitar o CORS, com a sonda de alcance contada
+/// (nenhum teste toca a rede). [corsOrigin] ausente = `CORS_ORIGIN` não
+/// definida, que precisa continuar valendo `*`.
+ValidadorApi _apiDeCors(String? corsOrigin) {
+  return ValidadorApi(
+    logger: Logger(output: _LogCapturado(<String>[])),
+    ambiente: <String, String>{
+      ..._ambienteTeste,
+      if (corsOrigin != null) 'CORS_ORIGIN': corsOrigin,
+    },
+    fabricaSessao: (_) => _SessaoPortalFake(const ResultadoLogin.autenticado()),
+    sondaPortal: () async => 200,
+  );
+}
+
+/// Dispara a rota que só exercita o middleware de CORS: 404 sem tocar o
+/// portal e sem rede.
+Future<Response> _requisicaoDeCors(
+  ValidadorApi api,
+  String metodo,
+  String? origin,
+) async {
+  return api.handler(
+    Request(
+      metodo,
+      Uri.parse('http://localhost/api/login'),
+      headers: origin == null ? null : <String, String>{'origin': origin},
+    ),
+  );
+}
+
 /// Aguarda o lote chegar de fato na consulta ao portal, sem depender de
 /// `delay` fixo (a leitura do corpo e um await, nao e sincrona).
 Future<void> _aguardaConsulta(_SessaoPortalFake sessao) async {
@@ -718,6 +749,151 @@ void main() {
       );
       final response = await api.handler(request);
       expect(response.statusCode, 200);
+    });
+  });
+
+  group('ValidadorApi - CORS', () {
+    // Cenario do bug: CORS_ORIGIN com lista separada por virgula. Ecoar a
+    // string inteira produz `Access-Control-Allow-Origin` com varias origens,
+    // o que a spec rejeita e o navegador reporta como "contains multiple
+    // values". O header precisa valer exatamente a origem que casou.
+    const String producao = 'https://validador-sulamerica.pages.dev';
+    const String local = 'http://localhost:3000';
+
+    test('devolve so a origem que casa quando CORS_ORIGIN tem varias',
+        () async {
+      final api = _apiDeCors('$producao, $local');
+      final response = await _requisicaoDeCors(api, 'GET', producao);
+      expect(response.headers['access-control-allow-origin'], producao);
+      expect(response.headers['access-control-allow-origin'], isNot(contains(',')));
+    });
+
+    test('a segunda origem da lista tambem casa', () async {
+      final api = _apiDeCors('$producao, $local');
+      final response = await _requisicaoDeCors(api, 'GET', local);
+      expect(response.headers['access-control-allow-origin'], local);
+    });
+
+    test('nao devolve Access-Control-Allow-Origin para origem fora da lista',
+        () async {
+      final api = _apiDeCors('$producao, $local');
+      final response =
+          await _requisicaoDeCors(api, 'GET', 'https://ataque.example');
+      // Sem o header o navegador bloqueia: e o comportamento seguro.
+      expect(response.headers.containsKey('access-control-allow-origin'), isFalse);
+    });
+
+    test('aceita origem configurada com barra final', () async {
+      // O header Origin do navegador nunca tem barra final; a configuracao
+      // ingênua do operador tem. Os dois precisam casar.
+      final api = _apiDeCors('$producao/, $local/');
+      expect(
+        (await _requisicaoDeCors(api, 'GET', producao))
+            .headers['access-control-allow-origin'],
+        producao,
+      );
+      expect(
+        (await _requisicaoDeCors(api, 'GET', local))
+            .headers['access-control-allow-origin'],
+        local,
+      );
+    });
+
+    test('ignora espacos em volta dos itens da lista', () async {
+      final api = _apiDeCors('  $producao ,   $local  ');
+      expect(
+        (await _requisicaoDeCors(api, 'GET', producao))
+            .headers['access-control-allow-origin'],
+        producao,
+      );
+    });
+
+    test('ignora item vazio de virgula dupla ou virgula no fim', () async {
+      final api = _apiDeCors('$producao,, $local,');
+      expect(
+        (await _requisicaoDeCors(api, 'GET', local))
+            .headers['access-control-allow-origin'],
+        local,
+      );
+      // O item vazio nao pode virar uma origem extra aceita.
+      expect(
+        (await _requisicaoDeCors(api, 'GET', ''))
+            .headers
+            .containsKey('access-control-allow-origin'),
+        isFalse,
+      );
+    });
+
+    test('CORS_ORIGIN ausente mantem o wildcard', () async {
+      final api = _apiDeCors(null);
+      final response = await _requisicaoDeCors(api, 'GET', producao);
+      expect(response.headers['access-control-allow-origin'], '*');
+    });
+
+    test('asterisco na lista devolve wildcard', () async {
+      final api = _apiDeCors('$producao, *');
+      expect(
+        (await _requisicaoDeCors(api, 'GET', 'https://qualquer.example'))
+            .headers['access-control-allow-origin'],
+        '*',
+      );
+    });
+
+    test('preflight OPTIONS segue a mesma logica de lista', () async {
+      final api = _apiDeCors('$producao, $local');
+      final permitido =
+          await _requisicaoDeCors(api, 'OPTIONS', producao);
+      expect(permitido.statusCode, 200);
+      expect(
+        permitido.headers['access-control-allow-origin'],
+        producao,
+      );
+      expect(
+        permitido.headers['access-control-allow-methods'],
+        contains('POST'),
+      );
+
+      final bloqueado = await _requisicaoDeCors(
+        api,
+        'OPTIONS',
+        'https://ataque.example',
+      );
+      expect(
+        bloqueado.headers.containsKey('access-control-allow-origin'),
+        isFalse,
+        reason: 'preflight de origem nao permitida tambem nao pode echoar',
+      );
+    });
+
+    test('a resposta real carrega o header, nao so o preflight', () async {
+      // A resposta de login (nao preflight) tambem precisa do header, senao o
+      // navegador bloqueia a leitura do corpo.
+      final api = _apiDeCors('$producao, $local');
+      final response = await api.handler(
+        _requestLogin(
+          const {'identificadorPrestador': 'desconhecido'},
+          headers: <String, String>{'origin': producao},
+        ),
+      );
+      expect(response.statusCode, 401);
+      expect(response.headers['access-control-allow-origin'], producao);
+    });
+
+    test('marca Vary: Origin quando a resposta depende da origem', () async {
+      // Sem Vary, um cache compartilhado (CDN/proxy do Render) pode servir a
+      // resposta montada para uma origem para outra.
+      final api = _apiDeCors('$producao, $local');
+      expect(
+        (await _requisicaoDeCors(api, 'GET', producao)).headers['vary'],
+        'origin',
+      );
+      // Com wildcard a resposta nao varia por origem: nada a diferenciar.
+      expect(
+        (await _requisicaoDeCors(_apiDeCors(null), 'GET', producao))
+            .headers
+            .containsKey('vary'),
+        isFalse,
+      );
     });
   });
 
