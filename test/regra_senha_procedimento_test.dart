@@ -1,6 +1,3 @@
-import 'dart:convert';
-import 'dart:io';
-
 import 'package:flutter_test/flutter_test.dart';
 import 'package:validador_xml_sulamerica/modules/validador_xml/data/models/guia_tiss.dart';
 import 'package:validador_xml_sulamerica/modules/validador_xml/data/models/procedimento.dart';
@@ -8,21 +5,10 @@ import 'package:validador_xml_sulamerica/modules/validador_xml/data/repositories
 import 'package:validador_xml_sulamerica/modules/validador_xml/data/repositories/regras/regra_senha_prefixo.dart';
 import 'package:validador_xml_sulamerica/modules/validador_xml/data/repositories/regras/regra_senha_procedimento.dart';
 
-const String _jsonPadrao = 'debug/KAN-07/procedimentos_vpp_sim.json';
-
 Future<List<String>> _codigosDaFonte() async {
-  final String path = Platform.environment['KAN_07_VPP_JSON'] ?? _jsonPadrao;
-  final File arquivo = File(path);
-  expect(
-    await arquivo.exists(),
-    isTrue,
-    reason: 'Defina KAN_07_VPP_JSON para localizar a fonte JSON do VPP.',
-  );
-  final Map<String, dynamic> json =
-      jsonDecode(await arquivo.readAsString()) as Map<String, dynamic>;
-  return (json['procedimentos'] as List<dynamic>)
-      .map((dynamic item) => (item as Map<String, dynamic>)['codigo'] as String)
-      .toList();
+  final List<String> codigos = CodigosVpp.todos.toList();
+  codigos.sort();
+  return codigos;
 }
 
 GuiaTiss _guia({String? senha, List<String> codigos = const []}) => GuiaTiss(

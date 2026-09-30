@@ -7,9 +7,17 @@ import 'package:dio/io.dart';
 import 'package:dio_cookie_manager/dio_cookie_manager.dart';
 import 'package:logger/logger.dart';
 
-import 'util_texto.dart';
+import 'package:validador_backend/util_texto.dart';
 
-enum MotivoFalhaLogin { credenciaisInvalidas, respostaInesperada, falhaRede }
+/// `falhaRede` cobre apenas `DioException`. Erro de codigo, header inesperado
+/// ou estado invalido cai em `falhaInterna`: juntar os dois sob o mesmo rotulo
+/// escondia a causa real atras de "falha de rede".
+enum MotivoFalhaLogin {
+  credenciaisInvalidas,
+  respostaInesperada,
+  falhaRede,
+  falhaInterna,
+}
 
 class ResultadoLogin {
   const ResultadoLogin.autenticado()
@@ -41,14 +49,12 @@ class SessaoPortal {
       followRedirects: false,
     );
 
+    // Sem `createHttpClient`: o `HttpClient` padrao valida a cadeia do
+    // certificado e o hostname. `validateCertificate` so roda depois disso
+    // (ver doc do dio), servindo so como registro do host esperado.
     if (dio == null) {
       _dio.httpClientAdapter = IOHttpClientAdapter(
-        createHttpClient: () {
-          final HttpClient cliente = HttpClient();
-          cliente.badCertificateCallback = aceitarCertificadoDoPortal;
-          return cliente;
-        },
-        validateCertificate: _validarCertificadoDoPortal,
+        validateCertificate: validarCertificado,
       );
     }
     _dio.interceptors.add(CookieManager(_cookieJar));
@@ -56,23 +62,21 @@ class SessaoPortal {
 
   static const String hostPortal = 'saude.sulamericaseguros.com.br';
 
-  static bool aceitarCertificadoDoPortal(
-    X509Certificate? certificate,
-    String host,
-    int port,
-  ) =>
-      host == hostPortal;
-
-  bool _validarCertificadoDoPortal(
+  /// Confirma que o certificado apresentado foi emitido para o host do portal.
+  ///
+  /// A validacao de CA e de hostname ja foi feita pelo `HttpClient` antes deste
+  /// callback (ver doc do dio: ele so e invocado apos a cadeia ser aceita).
+  /// Este metodo nao repete essa checagem; ele registra no log um certificado
+  /// de outro host, que indicaria redirecionamento ou interceptacao.
+  bool validarCertificado(
     X509Certificate? certificate,
     String host,
     int port,
   ) {
-    if (!aceitarCertificadoDoPortal(certificate, host, port)) return false;
-    _logger.w(
-      'TLS do portal nao verificado pela CA publica (cadeia com self-signed); '
-      'aceitando certificado apresentado por $host para a integracao.',
-    );
+    if (host != hostPortal) {
+      _logger.e('TLS: host inesperado $host (esperado $hostPortal).');
+      return false;
+    }
     return true;
   }
 
@@ -189,17 +193,13 @@ class SessaoPortal {
       );
 
       if (resposta.statusCode == 302) {
-        final String? destino = resposta.headers.value('location');
-        if (destino == null) {
+        final String? urlFinal = _urlDeRedirect(resposta);
+        if (urlFinal == null) {
           _logger.e('Login Lumis: 302 sem Location.');
           return const ResultadoLogin.falha(
             MotivoFalhaLogin.respostaInesperada,
           );
         }
-        final Uri uri = Uri.parse(destino);
-        final String urlFinal = uri.hasScheme
-            ? destino
-            : 'https://saude.sulamericaseguros.com.br$destino';
         final Response<String> pos = await _dio.get<String>(
           urlFinal,
           options: Options(
@@ -259,7 +259,7 @@ class SessaoPortal {
       }
       return const ResultadoLogin.autenticado();
     } on DioException catch (erro) {
-      _logger.e('Falha de rede no login: ${erro.message}');
+      _logger.e('Falha de rede no login: ${erro.type.name} - ${erro.message}');
       return ResultadoLogin.falha(
         MotivoFalhaLogin.falhaRede,
         detalhe: _detalheDioException(erro),
@@ -267,7 +267,7 @@ class SessaoPortal {
     } catch (erro) {
       _logger.e('Falha inesperada no login: $erro');
       return ResultadoLogin.falha(
-        MotivoFalhaLogin.falhaRede,
+        MotivoFalhaLogin.falhaInterna,
         detalhe: erro.toString(),
       );
     }
@@ -277,6 +277,21 @@ class SessaoPortal {
     final int? status = erro.response?.statusCode;
     final String tipo = erro.type.name;
     return status != null ? '$tipo (HTTP $status): ${erro.message}' : tipo;
+  }
+
+  /// URL absoluta do redirect, ou `null` se a resposta nao tiver `Location`.
+  ///
+  /// Usa `headers['location']` e nao `headers.value('location')`: o segundo
+  /// lanca `Exception` quando o header chega repetido, e essa excecao subia
+  /// para o `catch` do login, virando "falha de rede" na resposta ao cliente.
+  /// Um `Location` repetido e lido como o primeiro valor.
+  String? _urlDeRedirect(Response<String> resposta) {
+    final List<String>? valores = resposta.headers['location'];
+    if (valores == null || valores.isEmpty) return null;
+    final String destino = valores.first;
+    return Uri.parse(destino).hasScheme
+        ? destino
+        : 'https://$hostPortal$destino';
   }
 
   Future<String?> consultarBeneficiario({
@@ -305,16 +320,12 @@ class SessaoPortal {
       );
 
       if (resposta.statusCode == 302) {
-        final String? destino = resposta.headers.value('location');
-        if (destino == null) {
+        final String? urlFinal = _urlDeRedirect(resposta);
+        if (urlFinal == null) {
           _logger.e('Consulta: 302 sem Location.');
           _ultimoStatusFalha = resposta.statusCode;
           return null;
         }
-        final Uri uri = Uri.parse(destino);
-        final String urlFinal = uri.hasScheme
-            ? destino
-            : 'https://saude.sulamericaseguros.com.br$destino';
         final Response<String> pos = await _dio.get<String>(
           urlFinal,
           options: Options(

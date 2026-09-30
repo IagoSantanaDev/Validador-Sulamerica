@@ -1,0 +1,12 @@
+# O package do backend nao depende de Flutter: ele usa `lints`, nao
+# `flutter_lints`. Sem este arquivo, o analisador subia ate o
+# analysis_options.yaml da raiz Flutter e nao resolvia o include, o que gerava
+# o warning "Failed to resolve package URI package:flutter_lints/flutter.yaml"
+# no `dart format` e no `dart analyze`.
+include: package:lints/recommended.yaml
+
+linter:
+  rules:
+    prefer_final_locals: true
+    avoid_print: true
+    require_trailing_commas: true

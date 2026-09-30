@@ -20,3 +20,5 @@ debug/
 .agents/skills/*
 !.agents/skills/kan-07-implementation/
 !.agents/skills/kan-07-implementation/**
+!.agents/workflows/
+!.agents/workflows/**

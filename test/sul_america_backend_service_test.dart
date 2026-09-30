@@ -14,6 +14,7 @@ class _FakeHttpClientAdapter implements HttpClientAdapter {
 
   final int statusCode;
   final Map<String, dynamic> corpo;
+  final List<Object?> corposEnviados = [];
 
   @override
   void close({bool force = false}) {}
@@ -24,6 +25,7 @@ class _FakeHttpClientAdapter implements HttpClientAdapter {
     Stream<Uint8List>? requestStream,
     Future<void>? cancelFuture,
   ) async {
+    corposEnviados.add(options.data);
     return ResponseBody.fromBytes(
       utf8.encode(jsonEncode(corpo)),
       statusCode,
@@ -37,10 +39,11 @@ class _FakeHttpClientAdapter implements HttpClientAdapter {
 SulAmericaBackendService _servico({
   required int statusCode,
   required Map<String, dynamic> corpo,
+  _FakeHttpClientAdapter? adapter,
 }) {
   final Dio dio = Dio()
     ..httpClientAdapter =
-        _FakeHttpClientAdapter(statusCode: statusCode, corpo: corpo);
+        adapter ?? _FakeHttpClientAdapter(statusCode: statusCode, corpo: corpo);
   return SulAmericaBackendService(
     DioClient(baseUrl: 'http://localhost:8080', dio: dio),
   );
@@ -49,21 +52,27 @@ SulAmericaBackendService _servico({
 void main() {
   group('SulAmericaBackendService', () {
     test('login devolve o token do backend em Success', () async {
-      final servico = _servico(
+      final _FakeHttpClientAdapter adapter = _FakeHttpClientAdapter(
         statusCode: 200,
         corpo: {'token': 'a1b2c3d4', 'autenticada': true},
       );
+      final servico = _servico(
+        statusCode: 200,
+        corpo: {'token': 'a1b2c3d4', 'autenticada': true},
+        adapter: adapter,
+      );
 
       final resultado = await servico.login(
-        code: '100000015513',
-        user: 'master',
-        senha: 'x',
+        identificadorPrestador: '27372066000673',
       );
 
       resultado.fold(
         onSuccess: (token) => expect(token, 'a1b2c3d4'),
         onFailure: (erro) => fail('Esperava sucesso, veio: $erro'),
       );
+      expect(adapter.corposEnviados, [
+        {'identificadorPrestador': '27372066000673'},
+      ]);
     });
 
     test('consultarLote parseia resultados de elegibilidade e senha', () async {
@@ -123,9 +132,7 @@ void main() {
       );
 
       final resultado = await servico.login(
-        code: '100000015513',
-        user: 'master',
-        senha: 'errada',
+        identificadorPrestador: '27372066000673',
       );
 
       resultado.fold(
