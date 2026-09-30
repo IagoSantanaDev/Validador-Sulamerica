@@ -765,7 +765,10 @@ void main() {
       final api = _apiDeCors('$producao, $local');
       final response = await _requisicaoDeCors(api, 'GET', producao);
       expect(response.headers['access-control-allow-origin'], producao);
-      expect(response.headers['access-control-allow-origin'], isNot(contains(',')));
+      expect(
+        response.headers['access-control-allow-origin'],
+        isNot(contains(',')),
+      );
     });
 
     test('a segunda origem da lista tambem casa', () async {
@@ -780,7 +783,10 @@ void main() {
       final response =
           await _requisicaoDeCors(api, 'GET', 'https://ataque.example');
       // Sem o header o navegador bloqueia: e o comportamento seguro.
-      expect(response.headers.containsKey('access-control-allow-origin'), isFalse);
+      expect(
+        response.headers.containsKey('access-control-allow-origin'),
+        isFalse,
+      );
     });
 
     test('aceita origem configurada com barra final', () async {
@@ -841,8 +847,7 @@ void main() {
 
     test('preflight OPTIONS segue a mesma logica de lista', () async {
       final api = _apiDeCors('$producao, $local');
-      final permitido =
-          await _requisicaoDeCors(api, 'OPTIONS', producao);
+      final permitido = await _requisicaoDeCors(api, 'OPTIONS', producao);
       expect(permitido.statusCode, 200);
       expect(
         permitido.headers['access-control-allow-origin'],
