@@ -31,13 +31,32 @@ Variáveis de ambiente opcionais:
 |---|---|---|
 | `PORT` | `8080` | Porta HTTP |
 | `HOST` | `0.0.0.0` | Interface de escuta |
-| `CORS_ORIGIN` | `*` | Origem permitida (ex.: `https://validador-tiss.pages.dev`) |
+| `CORS_ORIGIN` | `*` | Origem(ens) permitida(s), separadas por vírgula (ex.: `https://validador-sulamerica.pages.dev, http://localhost:3000`) |
 | `PORTAL_PRESTADOR_ID_<IDENTIFICADOR>_CODE` | — | `code` do prestador no portal |
 | `PORTAL_PRESTADOR_ID_<IDENTIFICADOR>_USER` | — | `user` do prestador no portal |
 | `PORTAL_PRESTADOR_ID_<IDENTIFICADOR>_SENHA` | — | `senha` do prestador no portal |
 | `PORTAL_CERT_FINGERPRINT_SHA256` | — | Fingerprint SHA256 do certificado do portal, em hex de 64 caracteres, sem dois-pontos (aceita caixa alta). Ausente, vazio ou só espaços: vale a validação de CA padrão. Presente mas malformado: o backend recusa o valor e falha ao criar a sessão com `ArgumentError`, sem registrar o valor. Rotação: troque só o valor da variável, sem recompilar |
 
 `CORS_ORIGIN` é lida em runtime, então dá para ajustar sem recompilar. As credenciais e o fingerprint do certificado também são lidos em runtime.
+
+### Formato do CORS_ORIGIN
+
+`CORS_ORIGIN` aceita **uma ou mais** origens, separadas por vírgula:
+
+```
+CORS_ORIGIN=https://validador-sulamerica.pages.dev, http://localhost:3000
+```
+
+Regras:
+
+- Espaços em volta de cada item são ignorados, e itens vazios (vírgula dupla ou vírgula no fim) são descartados.
+- A barra final é **opcional**: um *origin* da spec é esquema + host + porta, sem path e sem barra. Tanto `https://x.pages.dev` quanto `https://x.pages.dev/` casam com o header `Origin` que o navegador envia.
+- A resposta ecoa em `Access-Control-Allow-Origin` **exatamente uma** origem: a que casa com o `Origin` da requisição. Esse header não aceita lista; ecoar as duas faz o navegador recusar a chamada com `The 'Access-Control-Allow-Origin' header contains multiple values`.
+- Origem fora da lista **não** recebe o header, e o navegador bloqueia. Não há fallback para `*` quando há lista explícita.
+- `CORS_ORIGIN` ausente (ou vazia) vale `*`, o default de desenvolvimento. `*` dentro da lista também significa "qualquer origem".
+- Quando a resposta depende da origem, o backend envia `Vary: Origin`, para que um cache compartilhado (CDN/proxy) não sirva a resposta montada para uma origem a outra. Com `*` não há `Vary`, porque a resposta é a mesma para qualquer origem.
+
+O mesmo vale para o preflight `OPTIONS`: ele segue a mesma comparação e devolve só a origem que casou.
 
 ### Credenciais do prestador
 
@@ -156,7 +175,7 @@ Pontos que precisam continuar como estão:
 
 - Instância única. A sessão do portal vive em memória; réplicas quebrariam a autenticação.
 - No free tier o Render dorme após cerca de 15 minutos ocioso. O cold start leva alguns segundos e a sessão do portal se perde; o front re-autentica na próxima consulta.
-- `CORS_ORIGIN` precisa apontar para o domínio do front em produção.
+- `CORS_ORIGIN` precisa apontar para o domínio do front em produção. Com mais de um ambiente (produção + localhost), use a lista separada por vírgula; veja "Formato do CORS_ORIGIN".
 - Push no git dispara redeploy automático.
 
 Para o front, o build aponta para a URL do serviço:
