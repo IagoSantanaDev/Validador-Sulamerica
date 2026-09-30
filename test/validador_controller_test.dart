@@ -11,9 +11,16 @@ class _FakeValidadorGuiasRepository implements ValidadorGuiasRepository {
   _FakeValidadorGuiasRepository(this.retorno);
 
   final List<GuiaValidada> retorno;
+  List<GuiaTiss>? guiasValidadas;
 
   @override
   List<GuiaValidada> validarLote(String conteudoXml) => retorno;
+
+  @override
+  List<GuiaValidada> validarGuias(List<GuiaTiss> guias) {
+    guiasValidadas = guias;
+    return retorno;
+  }
 }
 
 void main() {
@@ -45,13 +52,52 @@ void main() {
         ValidadorController(repository: _FakeValidadorGuiasRepository(retorno));
     controller.definirArquivo(
       nomeArquivo: 'lote.xml',
-      bytes: Uint8List.fromList('<lote/>'.codeUnits),
+      bytes: Uint8List.fromList(
+        '<mensagemTISS><guiaSP-SADT/></mensagemTISS>'.codeUnits,
+      ),
     );
     await controller.validar();
     return controller;
   }
 
   group('ValidadorController - exibição de erros', () {
+    test('preserva metadados do XML extraído com as guias', () async {
+      final _FakeValidadorGuiasRepository repository =
+          _FakeValidadorGuiasRepository(const [
+        GuiaValidada(guia: guiaValida, erros: []),
+      ]);
+      final ValidadorController controller =
+          ValidadorController(repository: repository);
+      const String xml = '''
+<mensagemTISS>
+  <cabecalho>
+    <identificacaoTransacao><tipoTransacao>ENVIO_LOTE</tipoTransacao></identificacaoTransacao>
+    <Padrao>4.01.00</Padrao>
+    <origem><CNPJ>27372066000673</CNPJ></origem>
+    <destino><registroANS>999999</registroANS></destino>
+  </cabecalho>
+  <loteGuias>
+    <numeroLote>LOTE-9</numeroLote>
+    <valorTotalGeral>10.00</valorTotalGeral>
+    <guiaSP-SADT><cabecalhoGuia><numeroGuiaPrestador>222</numeroGuiaPrestador></cabecalhoGuia></guiaSP-SADT>
+  </loteGuias>
+</mensagemTISS>
+''';
+      controller.definirArquivo(
+        nomeArquivo: 'metadados.xml',
+        bytes: Uint8List.fromList(xml.codeUnits),
+      );
+
+      await controller.validar();
+
+      expect(controller.informacoes.versao, '4.01.00');
+      expect(controller.informacoes.tipoTransacao, 'ENVIO_LOTE');
+      expect(controller.informacoes.prestadorCnpjCpf, '27372066000673');
+      expect(controller.informacoes.operadoraRegistroANS, '999999');
+      expect(controller.informacoes.numeroLote, 'LOTE-9');
+      expect(repository.guiasValidadas, hasLength(1));
+    });
+
     test('expõe apenas as guias com erro, apesar do lote completo', () async {
       final ValidadorController controller =
           await validarLote(loteComErroEValida());

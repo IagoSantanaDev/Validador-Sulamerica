@@ -1,6 +1,7 @@
 import 'package:xml/xml.dart';
 
 import '../models/guia_tiss.dart';
+import '../models/lote_guias_extraido.dart';
 import '../models/procedimento.dart';
 import '../models/profissional_solicitante.dart';
 import '../models/informacoes_lote.dart';
@@ -10,64 +11,73 @@ class XmlLoteGuiasDatasource {
   const XmlLoteGuiasDatasource();
 
   List<GuiaTiss> extrairGuias(String conteudoXml) {
+    return extrairLote(conteudoXml).guias;
+  }
+
+  LoteGuiasExtraido extrairLote(String conteudoXml) {
     final XmlDocument documento = _parsear(conteudoXml);
-    final List<XmlElement> elementosGuia =
-        documento.findAllElements('guiaSP-SADT', namespace: '*').toList();
+    final List<XmlElement> elementosGuia = _elementosGuia(documento);
 
     if (elementosGuia.isEmpty) {
       throw const NenhumaGuiaEncontradaException(
         'Nenhuma guia guiaSP-SADT foi encontrada no lote.',
       );
     }
-    return elementosGuia.map(_converterParaGuiaTiss).toList();
+    return LoteGuiasExtraido(
+      informacoes: _extrairInformacoes(documento, elementosGuia),
+      guias: elementosGuia.map(_converterParaGuiaTiss).toList(),
+    );
   }
 
   InformacoesLote extrairInformacoesDoLote(String conteudoXml) {
-    try {
-      final XmlDocument documento = _parsear(conteudoXml);
-      final List<XmlElement> guias =
-          documento.findAllElements('guiaSP-SADT', namespace: '*').toList();
+    final XmlDocument documento = _parsear(conteudoXml);
+    return _extrairInformacoes(documento, _elementosGuia(documento));
+  }
 
-      return InformacoesLote(
-        versao: _textoPrimeiro(documento, const ['Padrao']) ??
-            _textoPrimeiro(documento, const ['versaoPadrao']),
-        tipoTransacao: _textoPrimeiro(
-          documento,
-          const ['identificacaoTransacao', 'tipoTransacao'],
-        ),
-        prestadorCnpjCpf: _textoPrimeiro(
-              documento,
-              const ['identificacaoPrestador', 'CNPJ'],
-            ) ??
-            _textoPrimeiro(
-              documento,
-              const ['identificacaoPrestador', 'CPF'],
-            ) ??
-            _textoPrimeiro(
-              documento,
-              const ['identificacaoPrestador', 'codigoPrestadorNaOperadora'],
-            ) ??
-            _textoPrimeiro(documento, const ['origem', 'CNPJ']) ??
-            _textoPrimeiro(documento, const ['origem', 'CPF']) ??
-            _textoPrimeiro(
-              documento,
-              const ['origem', 'codigoPrestadorNaOperadora'],
-            ),
-        operadoraRegistroANS:
-            _textoPrimeiro(documento, const ['destino', 'registroANS']),
-        numeroLote: _textoPrimeiro(documento, const ['numeroLote']),
-        qtdGuias: guias.isEmpty ? null : guias.length,
-        valorTotalInformado: _somarValorTotalGeral(documento) ??
-            (guias.isEmpty
-                ? null
-                : _textoDoFilhoAninhado(
-                    guias.first,
-                    const ['valorTotalGuia'],
-                  )),
-      );
-    } catch (_) {
-      return InformacoesLote.vazio;
-    }
+  List<XmlElement> _elementosGuia(XmlDocument documento) =>
+      documento.findAllElements('guiaSP-SADT', namespace: '*').toList();
+
+  InformacoesLote _extrairInformacoes(
+    XmlDocument documento,
+    List<XmlElement> guias,
+  ) {
+    return InformacoesLote(
+      versao: _textoPrimeiro(documento, const ['Padrao']) ??
+          _textoPrimeiro(documento, const ['versaoPadrao']),
+      tipoTransacao: _textoPrimeiro(
+        documento,
+        const ['identificacaoTransacao', 'tipoTransacao'],
+      ),
+      prestadorCnpjCpf: _textoPrimeiro(
+            documento,
+            const ['identificacaoPrestador', 'CNPJ'],
+          ) ??
+          _textoPrimeiro(
+            documento,
+            const ['identificacaoPrestador', 'CPF'],
+          ) ??
+          _textoPrimeiro(
+            documento,
+            const ['identificacaoPrestador', 'codigoPrestadorNaOperadora'],
+          ) ??
+          _textoPrimeiro(documento, const ['origem', 'CNPJ']) ??
+          _textoPrimeiro(documento, const ['origem', 'CPF']) ??
+          _textoPrimeiro(
+            documento,
+            const ['origem', 'codigoPrestadorNaOperadora'],
+          ),
+      operadoraRegistroANS:
+          _textoPrimeiro(documento, const ['destino', 'registroANS']),
+      numeroLote: _textoPrimeiro(documento, const ['numeroLote']),
+      qtdGuias: guias.isEmpty ? null : guias.length,
+      valorTotalInformado: _somarValorTotalGeral(documento) ??
+          (guias.isEmpty
+              ? null
+              : _textoDoFilhoAninhado(
+                  guias.first,
+                  const ['valorTotalGuia'],
+                )),
+    );
   }
 
   String? _somarValorTotalGeral(XmlDocument documento) {

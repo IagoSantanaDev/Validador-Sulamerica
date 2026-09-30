@@ -5,15 +5,17 @@ import 'package:flutter/foundation.dart';
 import 'package:get_it/get_it.dart';
 
 import '../../../../globals/constants/app_strings.dart';
+import '../../../../globals/network/app_exception.dart';
 import '../../../../globals/network/result.dart';
 import '../../data/datasources/xml_lote_guias_datasource.dart';
 import '../../data/datasources/xml_lote_guias_exceptions.dart';
 import '../../data/models/consulta_guia.dart';
-import '../../data/repositories/regras/regra_credenciais_portal.dart';
-import '../../data/repositories/regras/regra_senha_prefixo.dart';
 import '../../data/models/consulta_lote.dart';
 import '../../data/models/guia_validada.dart';
 import '../../data/models/informacoes_lote.dart';
+import '../../data/models/lote_guias_extraido.dart';
+import '../../data/repositories/regras/regra_credenciais_portal.dart';
+import '../../data/repositories/regras/regra_senha_prefixo.dart';
 import '../../data/repositories/validador_guias_repository.dart';
 import '../../data/repositories/validador_guias_repository_impl.dart';
 import '../../data/services/sul_america_backend_service.dart';
@@ -23,6 +25,8 @@ enum StatusValidador { semArquivo, arquivoPronto, validando, concluido, erro }
 enum EstadoConexao { verificando, apiIndisponivel, pronto }
 
 class ValidadorController extends ChangeNotifier {
+  static const int _maxConsultasPorLote = 300;
+
   ValidadorController({
     ValidadorGuiasRepository? repository,
     SulAmericaBackendService? service,
@@ -38,7 +42,7 @@ class ValidadorController extends ChangeNotifier {
 
   String? _tokenSessao;
 
-  String? _codePrestadorDoToken;
+  String? _identificadorPrestadorDoToken;
 
   EstadoConexao _estadoConexao = EstadoConexao.verificando;
 
@@ -120,14 +124,14 @@ class ValidadorController extends ChangeNotifier {
     final Stopwatch cronometro = Stopwatch()..start();
     try {
       final String conteudoXml = _decodificarXml(bytes);
-      final InformacoesLote informacoes =
-          _datasource.extrairInformacoesDoLote(conteudoXml);
+      final LoteGuiasExtraido lote = _datasource.extrairLote(conteudoXml);
+      final InformacoesLote informacoes = lote.informacoes;
       final List<GuiaValidada> resultadoBruto =
-          await Future(() => _repository.validarLote(conteudoXml));
-      final CredenciaisPortal? credenciais =
+          await Future(() => _repository.validarGuias(lote.guias));
+      final String? identificadorPrestador =
           _regraCredenciais.resolver(informacoes.prestadorCnpjCpf);
       final List<GuiaValidada> comConsultas =
-          await _consultarGuias(resultadoBruto, credenciais);
+          await _consultarGuias(resultadoBruto, identificadorPrestador);
 
       _resultado = _ordenarPorNumeroGuia(comConsultas);
       _informacoes = informacoes;
@@ -165,7 +169,7 @@ class ValidadorController extends ChangeNotifier {
 
   Future<List<GuiaValidada>> _consultarGuias(
     List<GuiaValidada> guias,
-    CredenciaisPortal? credenciais,
+    String? identificadorPrestador,
   ) async {
     final SulAmericaBackendService? service = _service;
     if (service == null || guias.isEmpty) return guias;
@@ -220,7 +224,7 @@ class ValidadorController extends ChangeNotifier {
     if (itens.isEmpty) return base;
 
     final (String? token, String? motivoErro) =
-        await _obterTokenSessao(service, credenciais);
+        await _obterTokenSessao(service, identificadorPrestador);
     if (token == null) {
       final ConsultaGuia erro = ConsultaGuia(
         sucesso: false,
@@ -231,45 +235,127 @@ class ValidadorController extends ChangeNotifier {
       ];
     }
 
-    final Result<List<ResultadoConsultaLote>> resultado =
-        await service.consultarLote(token: token, consultas: itens);
+    final Map<String, ConsultaGuia> porChave = {};
+    String? erroParada;
+    bool repetiuAposLogin = false;
+    String tokenAtual = token;
 
-    return resultado.fold<List<GuiaValidada>>(
-      onSuccess: (resultados) {
-        final Map<String, ConsultaGuia> porChave = {
-          for (final ResultadoConsultaLote r in resultados)
-            '${r.tipo.name}|${r.chave}': _consultaDesdeBatch(r),
-        };
-        final List<GuiaValidada> acumulado = List.of(base);
-        for (int indice = 0; indice < base.length; indice++) {
-          for (final ConsultaLoteItem item in _itensDeConsulta(base[indice])) {
-            final ConsultaGuia? consulta =
-                porChave['${item.tipo.name}|${item.chave}'];
-            if (consulta == null) continue;
-            acumulado[indice] = _anexarConsulta(acumulado[indice], consulta);
-          }
+    for (int inicio = 0;
+        inicio < itens.length;
+        inicio += _maxConsultasPorLote) {
+      final int limite = inicio + _maxConsultasPorLote;
+      final int fim = limite < itens.length ? limite : itens.length;
+      final List<ConsultaLoteItem> lote = itens.sublist(inicio, fim);
+      if (erroParada != null) {
+        _registrarFalhaDoLote(lote, erroParada, porChave);
+        continue;
+      }
+
+      Result<List<ResultadoConsultaLote>> resultado =
+          await service.consultarLote(token: tokenAtual, consultas: lote);
+      AppException? erroResultado = resultado.fold<AppException?>(
+        onSuccess: (_) => null,
+        onFailure: (erro) => erro,
+      );
+
+      if (erroResultado is NaoAutorizadoException && !repetiuAposLogin) {
+        repetiuAposLogin = true;
+        _tokenSessao = null;
+        _identificadorPrestadorDoToken = null;
+        final (String? novoToken, String? erroLogin) =
+            await _obterTokenSessao(service, identificadorPrestador);
+        if (novoToken == null) {
+          erroParada = erroLogin ?? AppStrings.erroLoginFalhou;
+          _registrarFalhaDoLote(lote, erroParada, porChave);
+          continue;
         }
-        return acumulado;
-      },
-      onFailure: (erro) {
-        final ConsultaGuia erroConsulta = ConsultaGuia(
-          sucesso: false,
-          descricao: 'Consulta em lote falhou: $erro',
+        tokenAtual = novoToken;
+        resultado = await service.consultarLote(
+          token: tokenAtual,
+          consultas: lote,
         );
-        return [
-          for (final GuiaValidada guia in base)
-            _anexarConsulta(guia, erroConsulta),
-        ];
-      },
-    );
+        erroResultado = resultado.fold<AppException?>(
+          onSuccess: (_) => null,
+          onFailure: (erro) => erro,
+        );
+      }
+
+      if (erroResultado != null) {
+        final String mensagem = 'Consulta em lote falhou: $erroResultado';
+        _registrarFalhaDoLote(lote, mensagem, porChave);
+        if (erroResultado is NaoAutorizadoException) {
+          _tokenSessao = null;
+          _identificadorPrestadorDoToken = null;
+          erroParada = mensagem;
+        }
+        continue;
+      }
+
+      final Set<String> chavesDoLote = {
+        for (final ConsultaLoteItem item in lote)
+          '${item.tipo.name}|${item.chave}',
+      };
+      final List<ResultadoConsultaLote> resultados =
+          resultado.fold<List<ResultadoConsultaLote>>(
+        onSuccess: (itensResultado) => itensResultado,
+        onFailure: (_) => const [],
+      );
+      for (final ResultadoConsultaLote item in resultados) {
+        final String chave = '${item.tipo.name}|${item.chave}';
+        if (chavesDoLote.contains(chave)) {
+          porChave[chave] = _consultaDesdeBatch(item);
+        }
+      }
+      for (final ConsultaLoteItem item in lote) {
+        final String chave = '${item.tipo.name}|${item.chave}';
+        porChave.putIfAbsent(
+          chave,
+          () => ConsultaGuia(
+            tipo: item.tipo,
+            sucesso: false,
+            descricao:
+                'A API não retornou resultado para ${item.tipo.name} (${item.chave}).',
+          ),
+        );
+      }
+    }
+
+    final List<GuiaValidada> acumulado = List.of(base);
+    for (int indice = 0; indice < base.length; indice++) {
+      for (final ConsultaLoteItem item in _itensDeConsulta(base[indice])) {
+        final String chave = '${item.tipo.name}|${item.chave}';
+        final ConsultaGuia consulta = porChave[chave] ??
+            ConsultaGuia(
+              tipo: item.tipo,
+              sucesso: false,
+              descricao:
+                  'A API não retornou resultado para ${item.tipo.name} (${item.chave}).',
+            );
+        acumulado[indice] = _anexarConsulta(acumulado[indice], consulta);
+      }
+    }
+    return acumulado;
+  }
+
+  void _registrarFalhaDoLote(
+    List<ConsultaLoteItem> itens,
+    String mensagem,
+    Map<String, ConsultaGuia> porChave,
+  ) {
+    for (final ConsultaLoteItem item in itens) {
+      porChave['${item.tipo.name}|${item.chave}'] = ConsultaGuia(
+        tipo: item.tipo,
+        sucesso: false,
+        descricao: mensagem,
+      );
+    }
   }
 
   static bool _carteiraValida(String carteira) =>
       carteira.length == 20 && RegExp(r'^\d+$').hasMatch(carteira);
 
   static bool _senhaValida(String senha) =>
-      senha.length == RegraSenhaPrefixo.tamanhoExato &&
-      senha.startsWith(RegraSenhaPrefixo.prefixoObrigatorio);
+      RegraSenhaPrefixo.senhaValida(senha);
 
   List<ConsultaLoteItem> _itensDeConsulta(GuiaValidada guia) {
     final List<ConsultaLoteItem> itens = [];
@@ -363,26 +449,25 @@ class ValidadorController extends ChangeNotifier {
 
   Future<(String?, String?)> _obterTokenSessao(
     SulAmericaBackendService service,
-    CredenciaisPortal? credenciais,
+    String? identificadorPrestador,
   ) async {
-    if (credenciais == null || !credenciais.completas) {
+    if (identificadorPrestador == null) {
       return (null, AppStrings.erroCredenciaisAusentes);
     }
 
     final String? tokenAtual = _tokenSessao;
-    if (tokenAtual != null && _codePrestadorDoToken == credenciais.code) {
+    if (tokenAtual != null &&
+        _identificadorPrestadorDoToken == identificadorPrestador) {
       return (tokenAtual, null);
     }
 
     final Result<String> resultado = await service.login(
-      code: credenciais.code,
-      user: credenciais.user,
-      senha: credenciais.senha,
+      identificadorPrestador: identificadorPrestador,
     );
     return resultado.fold<(String?, String?)>(
       onSuccess: (token) {
         _tokenSessao = token;
-        _codePrestadorDoToken = credenciais.code;
+        _identificadorPrestadorDoToken = identificadorPrestador;
         return (token, null);
       },
       onFailure: (_) => (null, AppStrings.erroLoginFalhou),

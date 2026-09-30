@@ -6,21 +6,60 @@ import 'dart:typed_data';
 import 'package:logger/logger.dart';
 import 'package:shelf/shelf.dart';
 import 'package:shelf_router/shelf_router.dart';
+import 'package:validador_backend/modules/sulamerica/data/credenciais_portal.dart';
+import 'package:validador_backend/modules/sulamerica/data/sessao_portal.dart';
 
 import 'elegibilidade_parser.dart';
-import 'sessao_portal.dart';
 import 'util_texto.dart';
 
 class ValidadorApi {
-  ValidadorApi({Logger? logger}) : _logger = logger ?? Logger();
+  /// [ambiente] permite injetar a configuração em testes; em producao usa
+  /// `Platform.environment`. Nao altera o contrato HTTP.
+  /// [fabricaSessao] permite injetar um `SessaoPortal` falso em testes,
+  /// evitando qualquer acesso ao portal real. Em producao usa a construcao
+  /// padrao com o logger da instancia.
+  /// [sondaPortal] executa a sondagem de rede do teste de alcance. Em teste
+  /// permite contar as sondagens sem tocar a rede; em producao usa o
+  /// `HttpClient` comum.
+  /// [janelaCacheAlcance] define por quanto tempo o resultado da sondagem vale
+  /// para chamadas seguidas, evitando handshakes TLS repetidos.
+  ValidadorApi({
+    Logger? logger,
+    Map<String, String>? ambiente,
+    SessaoPortal Function(Logger logger)? fabricaSessao,
+    Future<int> Function()? sondaPortal,
+    Duration janelaCacheAlcance = const Duration(seconds: 10),
+    int limiteSessoes = _limiteSessoesPadrao,
+  })  : _logger = logger ?? Logger(),
+        _ambiente = ambiente,
+        _fabricaSessao = fabricaSessao ?? _criarSessaoPortal,
+        _janelaCacheAlcance = janelaCacheAlcance,
+        _limiteSessoes = limiteSessoes,
+        _sondaPortal = sondaPortal ?? _sondarPortalPadrao;
 
+  static SessaoPortal _criarSessaoPortal(Logger logger) =>
+      SessaoPortal(logger: logger);
+
+  final SessaoPortal Function(Logger logger) _fabricaSessao;
   final Logger _logger;
+  final Map<String, String>? _ambiente;
   final Map<String, SessaoPortal> _sessoes = {};
   final Map<String, _CredenciaisPortal> _credenciaisPorToken = {};
   final Random _aleatorio = Random.secure();
-  static const int _limiteSessoes = 10;
+  final Duration _janelaCacheAlcance;
+  final int _limiteSessoes;
+  final Future<int> Function() _sondaPortal;
+
+  static const int _limiteSessoesPadrao = 10;
+
+  Map<String, dynamic>? _alcanceCacheado;
+  DateTime? _alcanceColetadoEm;
 
   bool _loteEmAndamento = false;
+
+  /// Token cuja sessao esta ocupada por um lote em andamento. A eviccao de
+  /// sessao antiga nunca pode fechar o `Dio` de um lote em voo.
+  String? _tokenEmUso;
 
   static const int _maxItensPorLote = 300;
   static const int _maxBytesCorpo = 1 << 20;
@@ -38,10 +77,14 @@ class ValidadorApi {
     ..get('/api/status', _status)
     ..all('/<ignored|.*>', _naoEncontrado);
 
-  Handler get handler => const Pipeline()
-      .addMiddleware(ValidadorApi._cors())
+  // Precisa ser unico por instancia: o rate limit guarda estado na closure
+  // do middleware e se reconstruido a cada acesso perderia a contagem.
+  late final Handler _handler = const Pipeline()
+      .addMiddleware(_cors())
       .addMiddleware(ValidadorApi._rateLimitPortal())
       .addHandler(_rotas.call);
+
+  Handler get handler => _handler;
 
   Future<Response> _login(Request request) async {
     final _LeituraJson leitura = await _lerJson(request);
@@ -51,49 +94,64 @@ class ValidadorApi {
       return _erro('Corpo JSON invalido.', 400);
     }
 
-    final String? code = corpo['code'] as String?;
-    final String? user = corpo['user'] as String?;
-    final String? senha = corpo['senha'] as String?;
-    if (code == null ||
-        code.isEmpty ||
-        user == null ||
-        user.isEmpty ||
-        senha == null ||
-        senha.isEmpty) {
-      return _erro('Campos code, user e senha sao obrigatorios.', 400);
+    final String? identificador = corpo['identificadorPrestador'] as String?;
+    if (identificador == null || identificador.trim().isEmpty) {
+      return _erro('Campo identificadorPrestador e obrigatorio.', 400);
     }
 
-    final SessaoPortal sessao = SessaoPortal(logger: _logger);
+    final CredenciaisPortal? credenciais = CredenciaisPortal.resolver(
+      identificador.trim(),
+      ambiente: _ambiente,
+    );
+    if (credenciais == null) {
+      _logger.w('Login recusado: identificador desconhecido.');
+      return _erro('Identificador de prestador nao autorizado.', 401);
+    }
+
+    final SessaoPortal sessao = _fabricaSessao(_logger);
     final ResultadoLogin resultado = await sessao.login(
-      code: code,
-      user: user,
-      senha: senha,
+      code: credenciais.code,
+      user: credenciais.user,
+      senha: credenciais.senha,
     );
     if (!resultado.autenticada) {
       final String mensagem = switch (resultado.motivo) {
         MotivoFalhaLogin.credenciaisInvalidas =>
-          'Credenciais invalidas para o portal SulAmerica. '
-              'Confira o code/user/senha enviados no corpo da requisicao.',
+          'Credenciais invalidas para o portal SulAmerica.',
         MotivoFalhaLogin.falhaRede =>
-          'Falha de rede ao acessar o portal SulAmerica. '
-              'Detalhe: ${resultado.detalhe ?? 'sem detalhe'}.',
+          'Falha de rede ao acessar o portal SulAmerica.',
+        MotivoFalhaLogin.falhaInterna =>
+          'Falha interna ao processar a resposta do portal SulAmerica.',
         MotivoFalhaLogin.respostaInesperada ||
         null =>
           'O portal SulAmerica respondeu de forma inesperada '
               '(possivel bloqueio do F5 ASM).',
       };
-      _logger.w('Login recusado: $mensagem');
+      // O detalhe crus (URL, fragmento de requisicao) nao pode sair para um
+      // cliente ainda nao autenticado: fica apenas no log do servidor.
+      _logger.w(
+        'Login recusado: $mensagem'
+        '${resultado.detalhe == null ? '' : ' (log) ${resultado.detalhe}'}',
+      );
       return _erro(mensagem, 401);
     }
 
-    final String token = _novoToken(sessao);
+    final String? token = await _novoToken(sessao);
+    if (token == null) {
+      await sessao.encerrar();
+      _logger.w('Login recusado: limite de sessoes todas em uso.');
+      return _erro(
+        'Limite de sessoes ativas em uso. Tente novamente em instantes.',
+        503,
+      );
+    }
 
     _credenciaisPorToken[token] = _CredenciaisPortal(
-      code: code,
-      user: user,
-      senha: senha,
+      code: credenciais.code,
+      user: credenciais.user,
+      senha: credenciais.senha,
     );
-    _logger.i('Sessao criada para o prestador code=$code (mascarado).');
+    _logger.i('Sessao criada para o prestador (identificador mascarado).');
     return _json({'token': token, 'autenticada': true});
   }
 
@@ -103,12 +161,7 @@ class ValidadorApi {
     final Map<String, dynamic>? corpo = leitura.valor;
     if (corpo == null) return _erro('Corpo JSON invalido.', 400);
 
-    final SessaoPortal? sessao = _sessaoPorCorpo(corpo);
-    if (sessao == null) {
-      return _erro('Token de sessao invalido ou ausente.', 401);
-    }
-    final String? token = corpo['token'] as String?;
-
+    // Valida payload antes de verificar token.
     final dynamic consultas = corpo['consultas'];
     if (consultas is! List || consultas.isEmpty) {
       return _erro('Campo consultas e obrigatorio.', 400);
@@ -119,11 +172,43 @@ class ValidadorApi {
         413,
       );
     }
+
+    // Valida estrutura de cada item antes de processar.
+    for (int i = 0; i < consultas.length; i++) {
+      final dynamic item = consultas[i];
+      if (item is! Map) {
+        return _erro(
+          'Item $i deve ser um objeto com campos tipo e chave.',
+          400,
+        );
+      }
+      final dynamic tipo = item['tipo'];
+      final dynamic chave = item['chave'];
+      if (tipo is! String || tipo.isEmpty) {
+        return _erro('Item $i: campo tipo deve ser uma string nao vazia.', 400);
+      }
+      if (chave is! String || chave.isEmpty) {
+        return _erro(
+          'Item $i: campo chave deve ser uma string nao vazia.',
+          400,
+        );
+      }
+    }
+
+    final SessaoPortal? sessao = _sessaoPorCorpo(corpo);
+    if (sessao == null) {
+      return _erro('Token de sessao invalido ou ausente.', 401);
+    }
+    final String? token = corpo['token'] as String?;
+
     if (_loteEmAndamento) {
       return _erro('Ja existe um lote em andamento. Aguarde.', 429);
     }
 
+    // Sem `await` entre a checagem e as duas marcacoes: o event loop do Dart
+    // garante que ninguem intercala aqui.
     _loteEmAndamento = true;
+    _tokenEmUso = token;
     List<Map<String, dynamic>> resultados;
     try {
       resultados = await _executarConsultas(
@@ -133,6 +218,7 @@ class ValidadorApi {
       );
     } finally {
       _loteEmAndamento = false;
+      _tokenEmUso = null;
     }
 
     final Map<String, Map<String, dynamic>> porChave = {
@@ -220,7 +306,7 @@ class ValidadorApi {
     _CredenciaisPortal credenciais,
     int indice,
   ) async {
-    final SessaoPortal nova = SessaoPortal(logger: _logger);
+    final SessaoPortal nova = _fabricaSessao(_logger);
     final ResultadoLogin login = await nova.login(
       code: credenciais.code,
       user: credenciais.user,
@@ -425,7 +511,7 @@ class ValidadorApi {
   }
 
   Future<Response> _status(Request request) async {
-    final Map<String, dynamic> alcancePortal = await _testarAlcancePortal();
+    final Map<String, dynamic> alcancePortal = await _alcancePortal();
     return _json({
       'status': 'ok',
       'sessoesAtivas': _sessoes.length,
@@ -434,25 +520,52 @@ class ValidadorApi {
     });
   }
 
+  /// Sonda o portal no maximo uma vez por [_janelaCacheAlcance].
+  ///
+  /// O cache e a protecao principal: sem ele, cada `GET /api/status` de um
+  /// cliente anonimo-forjador abriria um handshake TLS de saida. Nao ha rate
+  /// limit nesta rota de proposito (ver README): 429 conta como falha para o
+  /// health check do Render, que descarta trafego apos 15 s de falhas
+  /// consecutivas e reinicia a instancia apos 60 s.
+  Future<Map<String, dynamic>> _alcancePortal() async {
+    final DateTime agora = DateTime.now();
+    final Map<String, dynamic>? cache = _alcanceCacheado;
+    final DateTime? coletadoEm = _alcanceColetadoEm;
+    if (cache != null &&
+        coletadoEm != null &&
+        agora.difference(coletadoEm) < _janelaCacheAlcance) {
+      return cache;
+    }
+    final Map<String, dynamic> resultado = await _testarAlcancePortal();
+    _alcanceCacheado = resultado;
+    _alcanceColetadoEm = agora;
+    return resultado;
+  }
+
   Future<Map<String, dynamic>> _testarAlcancePortal() async {
+    try {
+      return {
+        'alcançavel': true,
+        'status': await _sondaPortal(),
+      };
+    } catch (erro) {
+      // `erro.toString()` carrega subject/issuer do certificado e detalhes de
+      // rede interna: fica no log, nunca no corpo de uma rota anonima.
+      _logger.w('Teste de alcance do portal falhou: $erro');
+      return {'alcançavel': false};
+    }
+  }
+
+  static Future<int> _sondarPortalPadrao() async {
     final HttpClient http = HttpClient()
-      ..connectionTimeout = const Duration(seconds: 10)
-      ..badCertificateCallback = SessaoPortal.aceitarCertificadoDoPortal;
+      ..connectionTimeout = const Duration(seconds: 10);
     try {
       final HttpClientRequest requisicao = await http
           .getUrl(Uri.parse('https://saude.sulamericaseguros.com.br/'))
           .timeout(const Duration(seconds: 10));
       final HttpClientResponse resposta =
           await requisicao.close().timeout(const Duration(seconds: 10));
-      return {
-        'alcançavel': true,
-        'status': resposta.statusCode,
-      };
-    } catch (erro) {
-      return {
-        'alcançavel': false,
-        'detalhe': erro.toString(),
-      };
+      return resposta.statusCode;
     } finally {
       http.close(force: true);
     }
@@ -462,11 +575,20 @@ class ValidadorApi {
     return _erro('Rota nao encontrada.', 404);
   }
 
-  String _novoToken(SessaoPortal sessao) {
+  /// Retorna `null` quando todas as sessoes estao em uso.
+  ///
+  /// A eviccao nunca encerra a sessao de um lote em andamento: fechar o `Dio`
+  /// dela no meio de uma consulta quebraria o lote em voo. Como existe apenas
+  /// um lote simultaneo, basta proteger o token corrente.
+  Future<String?> _novoToken(SessaoPortal sessao) async {
     if (_sessoes.length >= _limiteSessoes) {
-      final String antiga = _sessoes.keys.first;
-      _sessoes.remove(antiga);
+      final Iterable<String> antigas =
+          _sessoes.keys.where((String token) => token != _tokenEmUso).toList();
+      if (antigas.isEmpty) return null;
+      final String antiga = antigas.first;
+      final SessaoPortal? sessaoAntiga = _sessoes.remove(antiga);
       _credenciaisPorToken.remove(antiga);
+      await sessaoAntiga?.encerrar();
     }
     final String token = _gerarToken();
     _sessoes[token] = sessao;
@@ -523,6 +645,15 @@ class ValidadorApi {
           }
           final String ip = _ipDe(request);
           final DateTime agora = DateTime.now();
+
+          // Remove janelas expiradas para evitar crescimento ilimitado.
+          acessos.removeWhere((_, timestamps) {
+            timestamps.removeWhere(
+              (t) => agora.difference(t) >= _janelaRateLimit,
+            );
+            return timestamps.isEmpty;
+          });
+
           final List<DateTime> recentes = (acessos[ip] ?? const [])
               .where((t) => agora.difference(t) < _janelaRateLimit)
               .toList();
@@ -544,11 +675,12 @@ class ValidadorApi {
         };
   }
 
+  /// Obtém o IP de origem da conexão.
+  ///
+  /// NÃO confia em `X-Forwarded-For` arbitrário recebido do cliente,
+  /// pois pode ser falsificado para burlar o rate limit. Usa apenas o
+  /// endereço de conexão real (`shelf.io.connection_info`).
   static String _ipDe(Request request) {
-    final String? forward = request.headers['x-forwarded-for'];
-    if (forward != null && forward.isNotEmpty) {
-      return forward.split(',').first.trim();
-    }
     final dynamic info = request.context['shelf.io.connection_info'];
     if (info is HttpConnectionInfo) return info.remoteAddress.address;
     return 'desconhecido';
@@ -569,14 +701,29 @@ class ValidadorApi {
     );
   }
 
-  static Middleware _cors() {
-    const String origemPadrao = '*';
+  /// `CORS_ORIGIN` aceita uma ou mais origens separadas por virgula. A
+  /// resposta ecoa **apenas** a origem que casa com o `Origin` da requisicao,
+  /// porque `Access-Control-Allow-Origin` aceita um valor so: ecoar a lista
+  /// inteira produz um header invalido e o navegador bloqueia a chamada.
+  /// Ausente ou vazia, vale `*` (default de desenvolvimento). Com lista
+  /// explicita, origem de fora da lista nao recebe o header.
+  Middleware _cors() {
+    final String configurado =
+        (_ambiente ?? Platform.environment)['CORS_ORIGIN'] ?? '';
+    final List<String> origens = <String>[
+      for (final String item in configurado.split(','))
+        if (_origemNormalizada(item) != null) _origemNormalizada(item)!,
+    ];
     return (Handler inner) {
-      final String origemPermitida =
-          Platform.environment['CORS_ORIGIN'] ?? origemPadrao;
       return (Request request) async {
-        final Map<String, String> headers = {
-          'Access-Control-Allow-Origin': origemPermitida,
+        final String? permitida =
+            _origemPermitida(origens, request.headers['origin']);
+        final Map<String, String> headers = <String, String>{
+          if (permitida != null) 'Access-Control-Allow-Origin': permitida,
+          // A resposta passa a depender de `Origin`: sem `Vary`, um cache
+          // compartilhado (CDN/proxy) poderia servir a resposta de uma origem
+          // para outra.
+          if (permitida != null && permitida != '*') 'vary': 'origin',
           'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
           'Access-Control-Allow-Headers': 'Content-Type, Authorization',
           'Access-Control-Max-Age': '86400',
@@ -588,6 +735,27 @@ class ValidadorApi {
         return resposta.change(headers: headers);
       };
     };
+  }
+
+  /// Normaliza um item de `CORS_ORIGIN`: sem espacos nas pontas e sem barra
+  /// final, porque um origin da spec e esquema+host+porta, sem path. Itens
+  /// vazios (virgula dupla ou virgula no fim) viram `null` e sao ignorados.
+  static String? _origemNormalizada(String item) {
+    String origem = item.trim();
+    while (origem.endsWith('/')) {
+      origem = origem.substring(0, origem.length - 1);
+    }
+    return origem.isEmpty ? null : origem;
+  }
+
+  /// Valor de `Access-Control-Allow-Origin` para a requisicao, ou `null` para
+  /// nao enviar o header e deixar o navegador bloquear.
+  static String? _origemPermitida(List<String> origens, String? requisicao) {
+    if (origens.isEmpty || origens.contains('*')) return '*';
+    if (requisicao == null) return null;
+    final String? normalizada = _origemNormalizada(requisicao);
+    if (normalizada == null || !origens.contains(normalizada)) return null;
+    return normalizada;
   }
 }
 
