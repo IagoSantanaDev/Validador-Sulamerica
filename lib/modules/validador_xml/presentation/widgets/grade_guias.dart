@@ -37,20 +37,6 @@ List<LinhaGradeGuia> agruparPorDetalhe(List<LinhaGradeGuia> linhas) {
   return [for (final List<LinhaGradeGuia> lista in grupos.values) ...lista];
 }
 
-List<LinhaGradeGuia> filtrarPorTermo(
-  List<LinhaGradeGuia> linhas,
-  String termo,
-) {
-  final String alvo = termo.trim().toLowerCase();
-  if (alvo.isEmpty) return linhas;
-  return [
-    for (final LinhaGradeGuia linha in linhas)
-      if (linha.guia.numeroGuiaPrestador.toLowerCase().contains(alvo) ||
-          linha.detalhe.toLowerCase().contains(alvo))
-        linha,
-  ];
-}
-
 TipoErroGuia? tipoErroDeLinha(LinhaGradeGuia linha) {
   final String detalhe = linha.detalhe;
   for (final ConsultaGuia consulta in linha.guia.consultas) {
@@ -155,7 +141,6 @@ class GradeGuias extends StatelessWidget {
           child: TextoApp.corpo(
             guia.numeroGuiaPrestador,
             peso: FontWeight.w700,
-            selecionavel: false,
           ),
         ),
         _Celula(
@@ -163,7 +148,6 @@ class GradeGuias extends StatelessWidget {
           tap: () => _mostrarInformacoes(context, guia),
           child: TextoApp.corpo(
             linha.detalhe,
-            selecionavel: false,
           ),
         ),
       ],
@@ -269,7 +253,6 @@ class _Celula extends StatelessWidget {
           texto!,
           peso: cabecalho ? FontWeight.w700 : FontWeight.w400,
           cor: cabecalho ? AppColors.textMuted : null,
-          selecionavel: false,
         );
 
     if (tap == null || hover == null) {

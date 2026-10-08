@@ -248,56 +248,59 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
               horizontal: AppDimens.spaceLg,
               vertical: AppDimens.spaceXxl,
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                CabecalhoResultado(
-                  identificador: _identificador ?? AppStrings.valorIndisponivel,
-                ),
-                const SizedBox(height: AppDimens.spaceLg),
-                CardSurface(
-                  child: TabelaMetadados(
-                    nomeArquivo: c.nomeArquivo,
-                    tamanhoArquivoBytes: c.tamanhoArquivoBytes,
-                    informacoes: c.informacoes,
-                    hashMd5: c.hashMd5,
+            child: SelectionArea(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  CabecalhoResultado(
+                    identificador:
+                        _identificador ?? AppStrings.valorIndisponivel,
                   ),
-                ),
-                const SizedBox(height: AppDimens.spaceLg),
-                if (comProblema.isEmpty)
-                  const PainelStatus(
-                    icone: Icons.check_circle_outline,
-                    cor: AppColors.success,
-                    titulo: AppStrings.semErrosTitulo,
-                    mensagem: AppStrings.semErrosDetalhe,
-                  )
-                else ...[
-                  const _TituloLista(),
-                  const SizedBox(height: AppDimens.spaceSm),
-                  _filtroErros(),
-                  const SizedBox(height: AppDimens.spaceSm),
-                  if (linhas.isEmpty)
+                  const SizedBox(height: AppDimens.spaceLg),
+                  CardSurface(
+                    child: TabelaMetadados(
+                      nomeArquivo: c.nomeArquivo,
+                      tamanhoArquivoBytes: c.tamanhoArquivoBytes,
+                      informacoes: c.informacoes,
+                      hashMd5: c.hashMd5,
+                    ),
+                  ),
+                  const SizedBox(height: AppDimens.spaceLg),
+                  if (comProblema.isEmpty)
                     const PainelStatus(
-                      icone: Icons.filter_alt_off,
-                      cor: AppColors.textMuted,
-                      titulo: '',
-                      mensagem: AppStrings.filtroSemResultado,
+                      icone: Icons.check_circle_outline,
+                      cor: AppColors.success,
+                      titulo: AppStrings.semErrosTitulo,
+                      mensagem: AppStrings.semErrosDetalhe,
                     )
-                  else
-                    GradeGuias(linhas: linhas),
+                  else ...[
+                    const _TituloLista(),
+                    const SizedBox(height: AppDimens.spaceSm),
+                    _filtroErros(),
+                    const SizedBox(height: AppDimens.spaceSm),
+                    if (linhas.isEmpty)
+                      const PainelStatus(
+                        icone: Icons.filter_alt_off,
+                        cor: AppColors.textMuted,
+                        titulo: '',
+                        mensagem: AppStrings.filtroSemResultado,
+                      )
+                    else
+                      GradeGuias(linhas: linhas),
+                  ],
+                  const SizedBox(height: AppDimens.spaceLg),
+                  RodapeResultado(
+                    tempoProcessamento: c.tempoProcessamento,
+                    onValidarOutro: () {
+                      setState(() {
+                        _ultimoValidadoNome = null;
+                        _identificador = null;
+                      });
+                      context.read<ValidadorController>().novoArquivo();
+                    },
+                  ),
                 ],
-                const SizedBox(height: AppDimens.spaceLg),
-                RodapeResultado(
-                  tempoProcessamento: c.tempoProcessamento,
-                  onValidarOutro: () {
-                    setState(() {
-                      _ultimoValidadoNome = null;
-                      _identificador = null;
-                    });
-                    context.read<ValidadorController>().novoArquivo();
-                  },
-                ),
-              ],
+              ),
             ),
           ),
         ),
