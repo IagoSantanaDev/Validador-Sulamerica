@@ -189,9 +189,7 @@ void main() {
           retornoValidacao: const [
             GuiaValidada(
               guia: _guiaSemSenha,
-              erros: [
-                ErroValidacao(campo: 'senha', mensagem: 'senha não informada'),
-              ],
+              erros: [ErroValidacao(campo: 'senha', mensagem: 'sem senha')],
             ),
             GuiaValidada(
               guia: _guiaSenhaValida,
