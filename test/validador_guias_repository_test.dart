@@ -82,15 +82,10 @@ void main() {
       expect(resultado.single.temErro, isFalse);
     });
 
-    test('marca erro quando senha não está presente', () {
+    test('não marca erro quando senha não está presente', () {
       final resultado = repository.validarLote(_xmlSemSenha);
 
-      expect(resultado.single.temErro, isTrue);
-      expect(resultado.single.erros.single.campo, 'senha');
-      expect(
-        resultado.single.erros.single.mensagem,
-        contains('não informada'),
-      );
+      expect(resultado.single.temErro, isFalse);
     });
 
     test('marca erro quando senha não tem exatamente dez caracteres', () {

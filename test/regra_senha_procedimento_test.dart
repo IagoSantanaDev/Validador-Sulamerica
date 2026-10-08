@@ -76,10 +76,14 @@ void main() {
       const RegraSenhaPrefixo prefixo = RegraSenhaPrefixo();
 
       expect(prefixo.validar(_guia(codigos: [fonte.first])), isNull);
-      expect(
-        prefixo.validar(_guia()),
-        isNotNull,
-      );
+    });
+
+    test('RegraSenhaPrefixo não exige senha quando ela não é informada',
+        () async {
+      const RegraSenhaPrefixo prefixo = RegraSenhaPrefixo();
+
+      expect(prefixo.validar(_guia()), isNull);
+      expect(prefixo.validar(_guia(senha: '')), isNull);
     });
   });
 }

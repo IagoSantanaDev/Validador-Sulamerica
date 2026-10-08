@@ -18,9 +18,6 @@ class LinhaGradeGuia {
   final String detalhe;
 }
 
-bool _ehSenhaNaoInformada(String detalhe) =>
-    detalhe.toLowerCase().contains('senha não informada');
-
 List<LinhaGradeGuia> linhasDeGuia(GuiaValidada guia) {
   final List<LinhaGradeGuia> linhas = [
     for (final erro in guia.erros)
@@ -29,14 +26,6 @@ List<LinhaGradeGuia> linhasDeGuia(GuiaValidada guia) {
       if (!consulta.sucesso)
         LinhaGradeGuia(guia: guia, detalhe: consulta.descricao),
   ];
-
-  final int indiceSenha = linhas.indexWhere(
-    (l) => _ehSenhaNaoInformada(l.detalhe),
-  );
-  if (indiceSenha > -1 && indiceSenha != linhas.length - 1) {
-    final LinhaGradeGuia linhaSenha = linhas.removeAt(indiceSenha);
-    linhas.add(linhaSenha);
-  }
   return linhas;
 }
 
@@ -45,17 +34,21 @@ List<LinhaGradeGuia> agruparPorDetalhe(List<LinhaGradeGuia> linhas) {
   for (final LinhaGradeGuia linha in linhas) {
     grupos.putIfAbsent(linha.detalhe, () => []).add(linha);
   }
-  final List<LinhaGradeGuia> ordenado = [];
-  for (final MapEntry<String, List<LinhaGradeGuia>> entrada in grupos.entries) {
-    if (_ehSenhaNaoInformada(entrada.key)) continue;
-    ordenado.addAll(entrada.value);
-  }
-  for (final List<LinhaGradeGuia> lista in grupos.values) {
-    if (lista.isNotEmpty && _ehSenhaNaoInformada(lista.first.detalhe)) {
-      ordenado.addAll(lista);
-    }
-  }
-  return ordenado;
+  return [for (final List<LinhaGradeGuia> lista in grupos.values) ...lista];
+}
+
+List<LinhaGradeGuia> filtrarPorTermo(
+  List<LinhaGradeGuia> linhas,
+  String termo,
+) {
+  final String alvo = termo.trim().toLowerCase();
+  if (alvo.isEmpty) return linhas;
+  return [
+    for (final LinhaGradeGuia linha in linhas)
+      if (linha.guia.numeroGuiaPrestador.toLowerCase().contains(alvo) ||
+          linha.detalhe.toLowerCase().contains(alvo))
+        linha,
+  ];
 }
 
 TipoErroGuia? tipoErroDeLinha(LinhaGradeGuia linha) {

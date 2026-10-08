@@ -1,6 +1,5 @@
 import '../../models/erro_validacao.dart';
 import '../../models/guia_tiss.dart';
-import 'regra_senha_procedimento.dart';
 import 'regra_validacao.dart';
 
 class RegraSenhaPrefixo extends RegraValidacao {
@@ -20,13 +19,7 @@ class RegraSenhaPrefixo extends RegraValidacao {
   ErroValidacao? validar(GuiaTiss guia) {
     final String? senha = guia.senha;
     if (senha == null || senha.isEmpty) {
-      if (RegraSenhaProcedimento.codigosAplicaveis(guia).isNotEmpty) {
-        return null;
-      }
-      return const ErroValidacao(
-        campo: 'senha',
-        mensagem: 'Senha não informada',
-      );
+      return null;
     }
     if (!senha.startsWith(prefixoObrigatorio)) {
       return const ErroValidacao(

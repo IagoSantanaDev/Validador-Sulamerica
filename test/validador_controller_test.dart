@@ -39,7 +39,10 @@ void main() {
         GuiaValidada(
           guia: guiaComErro,
           erros: [
-            ErroValidacao(campo: 'senha', mensagem: 'senha não informada'),
+            ErroValidacao(
+              campo: 'senha',
+              mensagem: 'senha deve começar com 5',
+            ),
           ],
         ),
         GuiaValidada(guia: guiaValida, erros: []),
