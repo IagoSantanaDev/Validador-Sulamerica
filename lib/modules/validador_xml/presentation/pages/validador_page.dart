@@ -248,8 +248,7 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
               horizontal: AppDimens.spaceLg,
               vertical: AppDimens.spaceXxl,
             ),
-            child: SelectionArea(
-              child: Column(
+            child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   CabecalhoResultado(
@@ -304,8 +303,7 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
             ),
           ),
         ),
-      ),
-    );
+      );
   }
 
   Widget _filtroErros() {
