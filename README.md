@@ -55,7 +55,7 @@ Um detalhe operacional validado: o login no portal precisa começar com um GET n
 2. Você arrasta um arquivo `.xml` de lote TISS para a área de upload. O app calcula o hash MD5 e extrai os metadados do lote.
 3. A validação local roda as regras por guia.
 4. As guias com dados bem formados são consultadas no portal, em lote: elegibilidade pela carteira e status da autorização pela senha.
-5. O resultado lista as guias com problema, cada uma com suas validações, filtros por tipo de erro e o tempo de processamento.
+5. O resultado lista as guias com problema, cada uma com suas validações, filtros por tipo de erro, busca textual e o tempo de processamento.
 
 Metadados exibidos no resultado: nome e tamanho do arquivo, versão do padrão TISS (lida de `ans:Padrao`), tipo de transação, hash MD5, prestador, registro ANS, número do lote, quantidade de guias e valor total informado (soma dos `valorTotalGeral` do XML).
 
@@ -64,7 +64,7 @@ Metadados exibidos no resultado: nome e tamanho do arquivo, versão do padrão T
 | Regra | Critério | Falha exibida |
 |---|---|---|
 | CRM do solicitante | conta literalmente os caracteres de `dadosSolicitante/profissionalSolicitante/numeroConselhoProfissional`; mais de 5 falha. Valor ausente ou vazio é ignorado; não há `trim` nem remoção de zeros. | "CRM deve ter no máximo 5 dígitos (<número extraído>)" |
-| Senha obrigatória | guia sem `<senha>` falha; quando há procedimento VPP, aplica-se a regra específica abaixo em vez desta mensagem genérica. | "Senha não informada" |
+| Senha obrigatória | guia sem `<senha>` não falha por isso; a obrigatoriedade vem da regra de procedimento VPP abaixo. A senha, quando presente, é sempre validada. | — |
 | Senha para procedimento VPP | um ou mais códigos com `VPP = Sim` exigem senha; é gerado um erro local único com todos os códigos aplicáveis. | "Senha obrigatória para procedimentos VPP: ..." |
 | Prefixo da senha | a senha começa com 5 | "senha deve começar com 5" |
 | Comprimento da senha | exatamente 10 caracteres | "senha deve ter exatamente 10 caracteres" |
@@ -81,6 +81,12 @@ Depois da validação local, cada guia com dados válidos é consultada. Carteir
 - **Autorização (senha)**: devolve a descrição do status da solicitação. Descrição com "autorizado" é sucesso; sem status, "Senha não encontrada no portal"; nos demais casos a descrição do portal é exibida.
 
 As consultas vão para `/api/consultas`, sempre em lote. O frontend limita cada chamada a 300 itens (`_maxConsultasPorLote` em `validador_controller.dart`) e particiona arquivos maiores em várias chamadas, recompondo os resultados por `tipo|chave`; ordem, duplicatas e a associação de cada resultado à guia de origem são preservadas, e um lote parcial ou falho é tratado explicitamente, sem ser lido como sucesso. O backend distribui o trabalho em até 10 sessões do portal (carteiras em série por sessão, senhas com até 3 simultâneas por sessão), preserva a ordem do lote e recupera falhas: sessão rejeitada (401/403) renova o login, falha transitória repete após pausa curta. Não há rota individual de elegibilidade ou autorização: ambas viajam só pelo lote.
+
+### Buscar no resultado
+
+O `Ctrl+F`/`F3` do navegador não funciona no app: o Flutter Web desenha o texto em `<canvas>`, e a busca nativa do navegador só varre o DOM. Por isso a busca é feita dentro do app.
+
+O atalho `F3` ou `Ctrl+F` foca o campo de busca no resultado. O campo filtra por número da guia ou pelo detalhe do erro, ignorando maiúsculas, e combina com os chips de tipo de erro; o contador ao lado mostra quantas linhas restaram. Não há navegação entre ocorrências (o próximo/anterior do navegador não se aplica ao canvas).
 
 ## Como rodar localmente
 

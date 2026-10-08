@@ -72,4 +72,8 @@ class AppStrings {
   static const String filtroCrm = 'CRM';
   static const String filtroSemResultado =
       'Nenhuma guia encontrada com este filtro.';
-}
+
+  static const String buscaDica = 'Buscar';
+    static const String buscaSemResultado =
+        'Nenhuma guia corresponde à busca.';
+  }
