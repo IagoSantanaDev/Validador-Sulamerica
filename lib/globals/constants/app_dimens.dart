@@ -36,10 +36,4 @@ class AppDimens {
 
   static const double larguraMaximaHome = 1200;
   static const double larguraMaximaResultado = 960;
-
-  static const double buscaAltura = 42;
-  static const double buscaLarguraMaxima = 320;
-  static const double buscaRaio = 2;
-  static const double buscaIconeTamanho = 18;
-  static const double buscaChipLargura = 46;
 }

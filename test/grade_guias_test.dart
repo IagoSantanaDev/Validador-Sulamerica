@@ -20,7 +20,7 @@ void main() {
         campo: 'numeroCarteira',
         mensagem: 'numeroCarteira não informado',
       ),
-      ErroValidacao(campo: 'crm', mensagem: 'CRM deve ter no máximo 5 dígitos'),
+      ErroValidacao(campo: 'senha', mensagem: 'senha não informada'),
     ],
     consultas: [
       ConsultaGuia(
@@ -36,31 +36,36 @@ void main() {
 
       expect(linhas, hasLength(3));
       expect(linhas[0].detalhe, 'numeroCarteira não informado');
-      expect(linhas[1].detalhe, 'CRM deve ter no máximo 5 dígitos');
-      expect(linhas[2].detalhe, 'Carteira não encontrada');
+      expect(linhas[1].detalhe, 'Carteira não encontrada');
       for (final LinhaGradeGuia linha in linhas) {
         expect(linha.guia, same(guiaMulti));
       }
+    });
+
+    test('senha não informada fica sempre por último', () {
+      final List<LinhaGradeGuia> linhas = linhasDeGuia(guiaMulti);
+
+      expect(linhas.last.detalhe, 'senha não informada');
     });
 
     test('sem consulta gera uma linha por erro local', () {
       const GuiaValidada soErroLocal = GuiaValidada(
         guia: guia,
         erros: [
-          ErroValidacao(campo: 'crm', mensagem: 'CRM deve ter no máximo 5 dígitos'),
+          ErroValidacao(campo: 'senha', mensagem: 'senha não informada'),
         ],
       );
 
       final List<LinhaGradeGuia> linhas = linhasDeGuia(soErroLocal);
       expect(linhas, hasLength(1));
-      expect(linhas.single.detalhe, 'CRM deve ter no máximo 5 dígitos');
+      expect(linhas.single.detalhe, 'senha não informada');
     });
 
     test('consulta bem-sucedida (Elegível: SIM) não vira linha de erro', () {
       const GuiaValidada elegivelSim = GuiaValidada(
         guia: guia,
         erros: [
-          ErroValidacao(campo: 'crm', mensagem: 'CRM deve ter no máximo 5 dígitos'),
+          ErroValidacao(campo: 'senha', mensagem: 'senha não informada'),
         ],
         consultas: [
           ConsultaGuia(
@@ -73,66 +78,31 @@ void main() {
 
       final List<LinhaGradeGuia> linhas = linhasDeGuia(elegivelSim);
       expect(linhas, hasLength(1));
-      expect(linhas.single.detalhe, 'CRM deve ter no máximo 5 dígitos');
+      expect(linhas.single.detalhe, 'senha não informada');
     });
   });
 
   group('agruparPorDetalhe - ordenação da grade', () {
-    test('detalhes iguais ficam agrupados preservando a ordem de chegada', () {
+    test('detalhes iguais ficam agrupados e senha não informada por último',
+        () {
       final List<LinhaGradeGuia> linhas = agruparPorDetalhe([
+        const LinhaGradeGuia(guia: guiaMulti, detalhe: 'Senha não informada'),
         const LinhaGradeGuia(
           guia: guiaMulti,
           detalhe: 'Carteira não encontrada',
         ),
-        const LinhaGradeGuia(guia: guiaMulti, detalhe: 'CRM inválido'),
+        const LinhaGradeGuia(guia: guiaMulti, detalhe: 'Senha não informada'),
         const LinhaGradeGuia(
           guia: guiaMulti,
           detalhe: 'Carteira não encontrada',
         ),
-        const LinhaGradeGuia(guia: guiaMulti, detalhe: 'CRM inválido'),
       ]);
 
       expect(linhas, hasLength(4));
       expect(linhas[0].detalhe, 'Carteira não encontrada');
       expect(linhas[1].detalhe, 'Carteira não encontrada');
-      expect(linhas[2].detalhe, 'CRM inválido');
-      expect(linhas[3].detalhe, 'CRM inválido');
-    });
-  });
-
-  group('filtrarPorTermo - busca textual', () {
-    test('termo vazio devolve todas as linhas', () {
-      final List<LinhaGradeGuia> linhas = linhasDeGuia(guiaMulti);
-
-      expect(filtrarPorTermo(linhas, ''), same(linhas));
-      expect(filtrarPorTermo(linhas, '   '), same(linhas));
-    });
-
-    test('acha por número da guia ignorando maiúsculas', () {
-      final List<LinhaGradeGuia> linhas = linhasDeGuia(guiaMulti);
-
-      expect(filtrarPorTermo(linhas, '111'), hasLength(3));
-    });
-
-    test('acha por detalhe ignorando maiúsculas', () {
-      final List<LinhaGradeGuia> linhas = linhasDeGuia(guiaMulti);
-
-      final List<LinhaGradeGuia> achadas =
-          filtrarPorTermo(linhas, 'carteira não');
-
-      expect(achadas, hasLength(2));
-      expect(
-              achadas.every(
-                (LinhaGradeGuia l) => l.detalhe.toLowerCase().contains('carteira'),
-              ),
-              isTrue,
-            );
-    });
-
-    test('termo sem correspondência devolve lista vazia', () {
-      final List<LinhaGradeGuia> linhas = linhasDeGuia(guiaMulti);
-
-      expect(filtrarPorTermo(linhas, 'zzzz'), isEmpty);
+      expect(linhas[2].detalhe, 'Senha não informada');
+      expect(linhas[3].detalhe, 'Senha não informada');
     });
   });
 
@@ -141,10 +111,7 @@ void main() {
       const GuiaValidada guiaLocal = GuiaValidada(
         guia: guia,
         erros: [
-          ErroValidacao(
-            campo: 'senha',
-            mensagem: 'senha deve começar com 5',
-          ),
+          ErroValidacao(campo: 'senha', mensagem: 'Senha não informada'),
         ],
       );
       final LinhaGradeGuia linha = linhasDeGuia(guiaLocal).single;

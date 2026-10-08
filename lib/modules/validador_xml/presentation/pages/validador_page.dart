@@ -1,14 +1,12 @@
 import 'dart:math';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../../../globals/constants/app_colors.dart';
 import '../../../../globals/constants/app_dimens.dart';
 import '../../../../globals/constants/app_strings.dart';
 import '../../../../globals/widgets/botao_texto.dart';
-import '../../../../globals/widgets/campo_busca.dart';
 import '../../../../globals/widgets/card_surface.dart';
 import '../../../../globals/widgets/icone_favicon.dart';
 import '../../../../globals/widgets/painel_status.dart';
@@ -51,24 +49,11 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
   String? _identificador;
 
   TipoErroGuia? _filtroErro;
-  final TextEditingController _buscaController = TextEditingController();
-  final FocusNode _buscaFocus = FocusNode();
-
-  @override
-  void dispose() {
-      _buscaController.removeListener(_rebuild);
-      _buscaController.dispose();
-      _buscaFocus.dispose();
-      super.dispose();
-    }
-
-    void _rebuild() => setState(() {});
 
   @override
   void initState() {
     super.initState();
-      _buscaController.addListener(_rebuild);
-      WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         context.read<ValidadorController>().verificarDisponibilidadeApi();
       }
@@ -91,33 +76,18 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
       });
     }
 
-    return CallbackShortcuts(
-          bindings: <ShortcutActivator, VoidCallback>{
-            const SingleActivator(LogicalKeyboardKey.f3): _focarBusca,
-            const SingleActivator(
-              LogicalKeyboardKey.keyF,
-              control: true,
-            ): _focarBusca,
-          },
-          child: Focus(autofocus: true, child: _corpo(context, controller)),
-        );
-      }
-
-      void _focarBusca() => _buscaFocus.requestFocus();
-
-      Widget _corpo(BuildContext context, ValidadorController controller) {
-        return Column(
-          children: [
-            NavbarSite(onTituloTap: _voltarParaHome),
-            Expanded(
-              child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 200),
-                child: _buildConteudo(context, controller),
-              ),
-            ),
-          ],
-        );
-      }
+    return Column(
+      children: [
+        NavbarSite(onTituloTap: _voltarParaHome),
+        Expanded(
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 200),
+            child: _buildConteudo(context, controller),
+          ),
+        ),
+      ],
+    );
+  }
 
   Widget _buildConteudo(BuildContext context, ValidadorController c) {
     final EstadoConexao conexao = c.estadoConexao;
@@ -265,8 +235,7 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
             for (final LinhaGradeGuia l in todasLinhas)
               if (tiposErroDeLinha(l).contains(_filtroErro)) l,
           ];
-        final List<LinhaGradeGuia> linhas =
-            agruparPorDetalhe(filtrarPorTermo(linhasFiltradas, _buscaController.text));
+    final List<LinhaGradeGuia> linhas = agruparPorDetalhe(linhasFiltradas);
     return SingleChildScrollView(
       key: const ValueKey('resultado'),
       child: Center(
@@ -305,31 +274,18 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
                 else ...[
                   const _TituloLista(),
                   const SizedBox(height: AppDimens.spaceSm),
-                                  Row(
-                                    children: [
-                                      Expanded(child: _filtroErros()),
-                                      const SizedBox(width: AppDimens.spaceMd),
-                                      CampoBusca(
-                                        controller: _buscaController,
-                                        focusNode: _buscaFocus,
-                                        total: linhas.length,
-                                        dica: AppStrings.buscaDica,
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: AppDimens.spaceSm),
-                                  if (linhas.isEmpty)
-                                    PainelStatus(
-                                      icone: Icons.filter_alt_off,
-                                      cor: AppColors.textMuted,
-                                      titulo: '',
-                                      mensagem: _buscaController.text.trim().isEmpty
-                                          ? AppStrings.filtroSemResultado
-                                          : AppStrings.buscaSemResultado,
-                                    )
-                                  else
-                                    GradeGuias(linhas: linhas),
-                                ],
+                  _filtroErros(),
+                  const SizedBox(height: AppDimens.spaceSm),
+                  if (linhas.isEmpty)
+                    const PainelStatus(
+                      icone: Icons.filter_alt_off,
+                      cor: AppColors.textMuted,
+                      titulo: '',
+                      mensagem: AppStrings.filtroSemResultado,
+                    )
+                  else
+                    GradeGuias(linhas: linhas),
+                ],
                 const SizedBox(height: AppDimens.spaceLg),
                 RodapeResultado(
                   tempoProcessamento: c.tempoProcessamento,
