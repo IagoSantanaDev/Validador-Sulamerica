@@ -1,5 +1,9 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import 'grade_guias_web.dart'
+    if (dart.library.html) 'grade_guias_web.dart'
+    if (dart.library.io) 'grade_guias_stub.dart' as web;
 import '../../../../globals/constants/app_colors.dart';
 import '../../../../globals/constants/app_dimens.dart';
 import '../../../../globals/constants/app_strings.dart';
@@ -18,9 +22,6 @@ class LinhaGradeGuia {
   final String detalhe;
 }
 
-bool _ehSenhaNaoInformada(String detalhe) =>
-    detalhe.toLowerCase().contains('senha não informada');
-
 List<LinhaGradeGuia> linhasDeGuia(GuiaValidada guia) {
   final List<LinhaGradeGuia> linhas = [
     for (final erro in guia.erros)
@@ -29,14 +30,6 @@ List<LinhaGradeGuia> linhasDeGuia(GuiaValidada guia) {
       if (!consulta.sucesso)
         LinhaGradeGuia(guia: guia, detalhe: consulta.descricao),
   ];
-
-  final int indiceSenha = linhas.indexWhere(
-    (l) => _ehSenhaNaoInformada(l.detalhe),
-  );
-  if (indiceSenha > -1 && indiceSenha != linhas.length - 1) {
-    final LinhaGradeGuia linhaSenha = linhas.removeAt(indiceSenha);
-    linhas.add(linhaSenha);
-  }
   return linhas;
 }
 
@@ -45,17 +38,7 @@ List<LinhaGradeGuia> agruparPorDetalhe(List<LinhaGradeGuia> linhas) {
   for (final LinhaGradeGuia linha in linhas) {
     grupos.putIfAbsent(linha.detalhe, () => []).add(linha);
   }
-  final List<LinhaGradeGuia> ordenado = [];
-  for (final MapEntry<String, List<LinhaGradeGuia>> entrada in grupos.entries) {
-    if (_ehSenhaNaoInformada(entrada.key)) continue;
-    ordenado.addAll(entrada.value);
-  }
-  for (final List<LinhaGradeGuia> lista in grupos.values) {
-    if (lista.isNotEmpty && _ehSenhaNaoInformada(lista.first.detalhe)) {
-      ordenado.addAll(lista);
-    }
-  }
-  return ordenado;
+  return [for (final List<LinhaGradeGuia> lista in grupos.values) ...lista];
 }
 
 TipoErroGuia? tipoErroDeLinha(LinhaGradeGuia linha) {
@@ -108,77 +91,26 @@ class GradeGuias extends StatelessWidget {
 
   final List<LinhaGradeGuia> linhas;
 
-  static const TableBorder _borda = TableBorder(
-    top: BorderSide(color: AppColors.border, width: 1),
-    bottom: BorderSide(color: AppColors.border, width: 1),
-    left: BorderSide(color: AppColors.border, width: 1),
-    right: BorderSide(color: AppColors.border, width: 1),
-    horizontalInside: BorderSide(color: AppColors.border, width: 1),
-    verticalInside: BorderSide(color: AppColors.border, width: 1),
-  );
-
   @override
   Widget build(BuildContext context) {
-    return Table(
-      columnWidths: const {
-        0: FixedColumnWidth(52),
-        1: FlexColumnWidth(1),
-        2: FlexColumnWidth(3),
-      },
-      defaultVerticalAlignment: TableCellVerticalAlignment.middle,
-      border: _borda,
-      children: [
-        const TableRow(
-          children: [
-            _Celula(texto: ''),
-            _Celula(texto: AppStrings.rotuloGuia, cabecalho: true),
-            _Celula(texto: AppStrings.rotuloDetalhes, cabecalho: true),
-          ],
-        ),
-        for (final LinhaGradeGuia linha in linhas) _linha(context, linha),
-      ],
+    if (kIsWeb) {
+      return web.GradeGuias(
+        linhas: linhas,
+        aoSelecionar: (guia) => _mostrarInformacoes(context, guia),
+      );
+    }
+
+    return _GradeGuiasTable(
+      linhas: linhas,
+      aoSelecionar: (guia) => _mostrarInformacoes(context, guia),
     );
   }
 
-  TableRow _linha(BuildContext context, LinhaGradeGuia linha) {
-    final ValueNotifier<bool> hover = ValueNotifier<bool>(false);
-    final GuiaValidada guia = linha.guia;
-    return TableRow(
-      children: [
-        _Celula(
-          hover: hover,
-          tap: () => _mostrarInformacoes(context, guia),
-          child: const Center(
-            child: Icon(
-              Icons.cancel,
-              size: AppDimens.itemIcone,
-              color: AppColors.error,
-            ),
-          ),
-        ),
-        _Celula(
-          hover: hover,
-          tap: () => _mostrarInformacoes(context, guia),
-          child: TextoApp.corpo(
-            guia.numeroGuiaPrestador,
-            peso: FontWeight.w700,
-            selecionavel: false,
-          ),
-        ),
-        _Celula(
-          hover: hover,
-          tap: () => _mostrarInformacoes(context, guia),
-          child: TextoApp.corpo(
-            linha.detalhe,
-            selecionavel: false,
-          ),
-        ),
-      ],
-    );
-  }
-
-  void _mostrarInformacoes(BuildContext context, GuiaValidada guia) {
-    showDialog<void>(
+  Future<void> _mostrarInformacoes(
+    BuildContext context,
+    GuiaValidada guia,
+  ) async {
+    await showDialog<void>(
       context: context,
       builder: (ctx) {
         final String? nome = guia.guia.nomeBeneficiario;
@@ -254,6 +186,83 @@ class GradeGuias extends StatelessWidget {
   }
 }
 
+class _GradeGuiasTable extends StatelessWidget {
+  const _GradeGuiasTable({
+    required this.linhas,
+    required this.aoSelecionar,
+  });
+
+  final List<LinhaGradeGuia> linhas;
+  final ValueChanged<GuiaValidada> aoSelecionar;
+
+  static const TableBorder _borda = TableBorder(
+    top: BorderSide(color: AppColors.border, width: 1),
+    bottom: BorderSide(color: AppColors.border, width: 1),
+    left: BorderSide(color: AppColors.border, width: 1),
+    right: BorderSide(color: AppColors.border, width: 1),
+    horizontalInside: BorderSide(color: AppColors.border, width: 1),
+    verticalInside: BorderSide(color: AppColors.border, width: 1),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    return Table(
+      columnWidths: const {
+        0: FixedColumnWidth(52),
+        1: FlexColumnWidth(1),
+        2: FlexColumnWidth(3),
+      },
+      defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+      border: _borda,
+      children: [
+        const TableRow(
+          children: [
+            _Celula(texto: ''),
+            _Celula(texto: AppStrings.rotuloGuia, cabecalho: true),
+            _Celula(texto: AppStrings.rotuloDetalhes, cabecalho: true),
+          ],
+        ),
+        for (final LinhaGradeGuia linha in linhas) _linha(linha),
+      ],
+    );
+  }
+
+  TableRow _linha(LinhaGradeGuia linha) {
+    final ValueNotifier<bool> hover = ValueNotifier<bool>(false);
+    final GuiaValidada guia = linha.guia;
+    return TableRow(
+      children: [
+        _Celula(
+          hover: hover,
+          tap: () => aoSelecionar(guia),
+          child: const Center(
+            child: Icon(
+              Icons.cancel,
+              size: AppDimens.itemIcone,
+              color: AppColors.error,
+            ),
+          ),
+        ),
+        _Celula(
+          hover: hover,
+          tap: () => aoSelecionar(guia),
+          child: TextoApp.corpo(
+            guia.numeroGuiaPrestador,
+            peso: FontWeight.w700,
+          ),
+        ),
+        _Celula(
+          hover: hover,
+          tap: () => aoSelecionar(guia),
+          child: TextoApp.corpo(
+            linha.detalhe,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _Celula extends StatelessWidget {
   const _Celula({
     this.texto,
@@ -276,7 +285,6 @@ class _Celula extends StatelessWidget {
           texto!,
           peso: cabecalho ? FontWeight.w700 : FontWeight.w400,
           cor: cabecalho ? AppColors.textMuted : null,
-          selecionavel: false,
         );
 
     if (tap == null || hover == null) {

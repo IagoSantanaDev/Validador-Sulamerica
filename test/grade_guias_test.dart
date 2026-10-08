@@ -20,7 +20,7 @@ void main() {
         campo: 'numeroCarteira',
         mensagem: 'numeroCarteira não informado',
       ),
-      ErroValidacao(campo: 'senha', mensagem: 'senha não informada'),
+      ErroValidacao(campo: 'crm', mensagem: 'CRM inválido'),
     ],
     consultas: [
       ConsultaGuia(
@@ -36,36 +36,37 @@ void main() {
 
       expect(linhas, hasLength(3));
       expect(linhas[0].detalhe, 'numeroCarteira não informado');
-      expect(linhas[1].detalhe, 'Carteira não encontrada');
+      expect(linhas[1].detalhe, 'CRM inválido');
+      expect(linhas[2].detalhe, 'Carteira não encontrada');
       for (final LinhaGradeGuia linha in linhas) {
         expect(linha.guia, same(guiaMulti));
       }
     });
 
-    test('senha não informada fica sempre por último', () {
+    test('mantém a ordem de erros locais antes das consultas', () {
       final List<LinhaGradeGuia> linhas = linhasDeGuia(guiaMulti);
 
-      expect(linhas.last.detalhe, 'senha não informada');
+      expect(linhas.last.detalhe, 'Carteira não encontrada');
     });
 
     test('sem consulta gera uma linha por erro local', () {
       const GuiaValidada soErroLocal = GuiaValidada(
         guia: guia,
         erros: [
-          ErroValidacao(campo: 'senha', mensagem: 'senha não informada'),
+          ErroValidacao(campo: 'crm', mensagem: 'CRM inválido'),
         ],
       );
 
       final List<LinhaGradeGuia> linhas = linhasDeGuia(soErroLocal);
       expect(linhas, hasLength(1));
-      expect(linhas.single.detalhe, 'senha não informada');
+      expect(linhas.single.detalhe, 'CRM inválido');
     });
 
     test('consulta bem-sucedida (Elegível: SIM) não vira linha de erro', () {
       const GuiaValidada elegivelSim = GuiaValidada(
         guia: guia,
         erros: [
-          ErroValidacao(campo: 'senha', mensagem: 'senha não informada'),
+          ErroValidacao(campo: 'crm', mensagem: 'CRM inválido'),
         ],
         consultas: [
           ConsultaGuia(
@@ -78,20 +79,19 @@ void main() {
 
       final List<LinhaGradeGuia> linhas = linhasDeGuia(elegivelSim);
       expect(linhas, hasLength(1));
-      expect(linhas.single.detalhe, 'senha não informada');
+      expect(linhas.single.detalhe, 'CRM inválido');
     });
   });
 
   group('agruparPorDetalhe - ordenação da grade', () {
-    test('detalhes iguais ficam agrupados e senha não informada por último',
-        () {
+    test('agrupa detalhes iguais sem reordenar categorias especiais', () {
       final List<LinhaGradeGuia> linhas = agruparPorDetalhe([
-        const LinhaGradeGuia(guia: guiaMulti, detalhe: 'Senha não informada'),
+        const LinhaGradeGuia(guia: guiaMulti, detalhe: 'CRM inválido'),
         const LinhaGradeGuia(
           guia: guiaMulti,
           detalhe: 'Carteira não encontrada',
         ),
-        const LinhaGradeGuia(guia: guiaMulti, detalhe: 'Senha não informada'),
+        const LinhaGradeGuia(guia: guiaMulti, detalhe: 'CRM inválido'),
         const LinhaGradeGuia(
           guia: guiaMulti,
           detalhe: 'Carteira não encontrada',
@@ -99,10 +99,10 @@ void main() {
       ]);
 
       expect(linhas, hasLength(4));
-      expect(linhas[0].detalhe, 'Carteira não encontrada');
-      expect(linhas[1].detalhe, 'Carteira não encontrada');
-      expect(linhas[2].detalhe, 'Senha não informada');
-      expect(linhas[3].detalhe, 'Senha não informada');
+      expect(linhas[0].detalhe, 'CRM inválido');
+      expect(linhas[1].detalhe, 'CRM inválido');
+      expect(linhas[2].detalhe, 'Carteira não encontrada');
+      expect(linhas[3].detalhe, 'Carteira não encontrada');
     });
   });
 

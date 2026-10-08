@@ -8,6 +8,8 @@ import 'modules/validador_xml/data/services/validador_xml_service_locator.dart';
 import 'modules/validador_xml/presentation/pages/validador_page.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+
   configurarDependenciasGlobais(baseUrlPadrao: AppConfig.baseUrlApi);
   configurarDependenciasValidadorXml(getIt);
   runApp(const ValidadorApp());

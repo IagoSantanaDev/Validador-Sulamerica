@@ -64,7 +64,7 @@ Metadados exibidos no resultado: nome e tamanho do arquivo, versão do padrão T
 | Regra | Critério | Falha exibida |
 |---|---|---|
 | CRM do solicitante | conta literalmente os caracteres de `dadosSolicitante/profissionalSolicitante/numeroConselhoProfissional`; mais de 5 falha. Valor ausente ou vazio é ignorado; não há `trim` nem remoção de zeros. | "CRM deve ter no máximo 5 dígitos (<número extraído>)" |
-| Senha obrigatória | guia sem `<senha>` falha; quando há procedimento VPP, aplica-se a regra específica abaixo em vez desta mensagem genérica. | "Senha não informada" |
+| Senha obrigatória | guia sem `<senha>` não falha por isso; a obrigatoriedade vem da regra de procedimento VPP abaixo. A senha, quando presente, é sempre validada. | — |
 | Senha para procedimento VPP | um ou mais códigos com `VPP = Sim` exigem senha; é gerado um erro local único com todos os códigos aplicáveis. | "Senha obrigatória para procedimentos VPP: ..." |
 | Prefixo da senha | a senha começa com 5 | "senha deve começar com 5" |
 | Comprimento da senha | exatamente 10 caracteres | "senha deve ter exatamente 10 caracteres" |
@@ -81,6 +81,10 @@ Depois da validação local, cada guia com dados válidos é consultada. Carteir
 - **Autorização (senha)**: devolve a descrição do status da solicitação. Descrição com "autorizado" é sucesso; sem status, "Senha não encontrada no portal"; nos demais casos a descrição do portal é exibida.
 
 As consultas vão para `/api/consultas`, sempre em lote. O frontend limita cada chamada a 300 itens (`_maxConsultasPorLote` em `validador_controller.dart`) e particiona arquivos maiores em várias chamadas, recompondo os resultados por `tipo|chave`; ordem, duplicatas e a associação de cada resultado à guia de origem são preservadas, e um lote parcial ou falho é tratado explicitamente, sem ser lido como sucesso. O backend distribui o trabalho em até 10 sessões do portal (carteiras em série por sessão, senhas com até 3 simultâneas por sessão), preserva a ordem do lote e recupera falhas: sessão rejeitada (401/403) renova o login, falha transitória repete após pausa curta. Não há rota individual de elegibilidade ou autorização: ambas viajam só pelo lote.
+
+### Selecionar texto no resultado
+
+Os textos do resultado podem ser selecionados e copiados, inclusive números de guia e detalhes da grade. A seleção é habilitada apenas nessa área para não interferir nos controles da página.
 
 ## Como rodar localmente
 
