@@ -1,0 +1,77 @@
+{
+  "formato": 1,
+  "geradoEm": "2026-10-25T14:44:47.613068Z",
+  "referenciaVigencia": "2026-10-25",
+  "tabelas": {
+    "18": {
+      "tabela": "18",
+      "snapshot": "20261025",
+      "arquivos": [
+        "tuss-18_20261025.json"
+      ],
+      "totalItens": 3595,
+      "dataset": "tuss-18.json",
+      "sha256": "dbb2f968a3c3ebe26716a8fefcada49a2e913d2f5cb55a80e1ffbd8221e19d6c"
+    },
+    "19": {
+      "tabela": "19",
+      "snapshot": "20260526",
+      "arquivos": [
+        "tuss-1920260526(1).json",
+        "tuss-1920260526(2).json",
+        "tuss-1920260526(3).json",
+        "tuss-1920260526(4).json",
+        "tuss-1920260526(5).json",
+        "tuss-1920260526(6).json",
+        "tuss-1920260526(7).json",
+        "tuss-1920260526(8).json",
+        "tuss-1920260526(9).json",
+        "tuss-1920260526(10).json",
+        "tuss-1920260526(11).json",
+        "tuss-1920260526(12).json",
+        "tuss-1920260526(13).json",
+        "tuss-1920260526(14).json",
+        "tuss-1920260526(15).json",
+        "tuss-1920260526(16).json",
+        "tuss-1920260526(17).json",
+        "tuss-1920260526(18).json",
+        "tuss-1920260526(19).json",
+        "tuss-1920260526(20).json",
+        "tuss-1920260526(21).json",
+        "tuss-1920260526(22).json",
+        "tuss-1920260526(23).json",
+        "tuss-1920260526(24).json",
+        "tuss-1920260526(25).json",
+        "tuss-1920260526(26).json",
+        "tuss-1920260526(27).json",
+        "tuss-1920260526(28).json",
+        "tuss-1920260526(29).json",
+        "tuss-1920260526(30).json",
+        "tuss-1920260526(31).json"
+      ],
+      "totalItens": 1389786,
+      "dataset": null,
+      "sha256": null
+    },
+    "20": {
+      "tabela": "20",
+      "snapshot": "20260525",
+      "arquivos": [
+        "tuss-2020260525(1).json"
+      ],
+      "totalItens": 43376,
+      "dataset": "tuss-20.json",
+      "sha256": "7e1c92f56bc6354d7f4519ee99ea1ab65cf0c4e2840e1ff06fc430556f5bde01"
+    },
+    "22": {
+      "tabela": "22",
+      "snapshot": "20261023",
+      "arquivos": [
+        "tuss-22_20261023.json"
+      ],
+      "totalItens": 5969,
+      "dataset": "tuss-22.json",
+      "sha256": "76fc3410c1f49e1a0603d9deace17c07cde81ddd6f1696c262d698e12d79b030"
+    }
+  }
+}
