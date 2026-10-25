@@ -1,9 +1,11 @@
-class ErroValidacao {
-  const ErroValidacao({
-    required this.campo,
-    required this.mensagem,
-  });
+import 'package:freezed_annotation/freezed_annotation.dart';
 
-  final String campo;
-  final String mensagem;
+part 'erro_validacao.freezed.dart';
+
+@freezed
+abstract class ErroValidacao with _$ErroValidacao {
+  const factory ErroValidacao({
+    required String campo,
+    required String mensagem,
+  }) = _ErroValidacao;
 }

@@ -1,27 +1,29 @@
+import 'package:freezed_annotation/freezed_annotation.dart';
+
 import 'consulta_guia.dart';
 import 'erro_validacao.dart';
 import 'guia_tiss.dart';
 
-class GuiaValidada {
-  const GuiaValidada({
-    required this.guia,
-    required this.erros,
-    this.consultas = const [],
-  });
+part 'guia_validada.freezed.dart';
 
-  final GuiaTiss guia;
-  final List<ErroValidacao> erros;
+@freezed
+abstract class GuiaValidada with _$GuiaValidada {
+  const factory GuiaValidada({
+    required GuiaTiss guia,
+    required List<ErroValidacao> erros,
+    @Default([]) List<ConsultaGuia> consultas,
+  }) = _GuiaValidada;
 
-  final List<ConsultaGuia> consultas;
+  const GuiaValidada._();
 
   bool get temErro => erros.isNotEmpty;
 
-  bool get temFalhaConsulta => consultas.any((c) => !c.sucesso);
+  bool get temFalhaConsulta => consultas.any((consulta) => !consulta.sucesso);
 
   ConsultaGuia? get consulta {
     if (consultas.isEmpty) return null;
-    for (final ConsultaGuia c in consultas) {
-      if (!c.sucesso) return c;
+    for (final ConsultaGuia consulta in consultas) {
+      if (!consulta.sucesso) return consulta;
     }
     return consultas.first;
   }

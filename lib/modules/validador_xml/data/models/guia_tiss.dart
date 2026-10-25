@@ -1,20 +1,18 @@
+import 'package:freezed_annotation/freezed_annotation.dart';
+
 import 'procedimento.dart';
 import 'profissional_solicitante.dart';
 
-class GuiaTiss {
-  const GuiaTiss({
-    required this.numeroGuiaPrestador,
-    required this.numeroCarteira,
-    required this.senha,
-    this.nomeBeneficiario,
-    this.solicitante,
-    this.procedimentos = const [],
-  });
+part 'guia_tiss.freezed.dart';
 
-  final String numeroGuiaPrestador;
-  final String? numeroCarteira;
-  final String? senha;
-  final String? nomeBeneficiario;
-  final ProfissionalSolicitante? solicitante;
-  final List<Procedimento> procedimentos;
+@freezed
+abstract class GuiaTiss with _$GuiaTiss {
+  const factory GuiaTiss({
+    required String numeroGuiaPrestador,
+    required String? numeroCarteira,
+    required String? senha,
+    String? nomeBeneficiario,
+    ProfissionalSolicitante? solicitante,
+    @Default([]) List<Procedimento> procedimentos,
+  }) = _GuiaTiss;
 }
