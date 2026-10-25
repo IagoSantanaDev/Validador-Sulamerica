@@ -28,6 +28,24 @@ Opções:
 A tabela 19 é validada e contada, mas não gera dataset: ela é consultada por
 código na API, via backend, por causa do volume (1.389.786 itens).
 
+## Uso no app
+
+Os datasets são indexados por `id` em `TussBaseLocalDatasource`. O
+`ClassificadorTussLocal` localiza cada código do XML e compara a tabela onde
+ele existe com o `codigoTabela` declarado:
+
+- mesma tabela: `Encontrado`, com vigência calculada na data da validação;
+- outra tabela: `TabelaDivergente`;
+- tabela com base local e código ausente: `NaoEncontrado`;
+- `00` e `90`–`99`: `SemReferenciaTuss`, sem erro de código;
+- tabela fora das conhecidas: `TabelaDesconhecida`, sem consulta de rede;
+- tabela válida sem base local (a 19 hoje): consulta no proxy.
+
+As tabelas conhecidas vêm do manifesto mais a lista oficial injetada da
+`tuss-87`. Enquanto essa lista não existir, tabelas sem manifesto são tratadas
+como desconhecidas. As bases locais não se sobrepõem: 18, 19, 20 e 22 não
+compartilham nenhum `id`, então a tabela encontrada é única.
+
 ## Invariantes
 
 O script falha, sem substituir os datasets anteriores, quando encontra:
