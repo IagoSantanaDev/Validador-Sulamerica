@@ -162,9 +162,17 @@ class XmlLoteGuiasDatasource {
       final String? quantidadeTexto =
           _textoDoFilhoAninhado(elemento, const ['quantidadeExecutada']);
       final int quantidade = int.tryParse(quantidadeTexto ?? '') ?? 1;
+      final String? codigoTabela = _textoDoFilhoAninhado(
+        elemento,
+        const ['procedimento', 'codigoTabela'],
+      );
 
       resultado.add(
-        Procedimento(codigo: codigo, quantidade: quantidade),
+        Procedimento(
+          codigo: codigo,
+          quantidade: quantidade,
+          codigoTabela: codigoTabela,
+        ),
       );
     }
 

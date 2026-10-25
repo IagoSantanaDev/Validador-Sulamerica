@@ -16,6 +16,7 @@ T _$identity<T>(T value) => value;
 mixin _$Procedimento {
   String get codigo;
   int get quantidade;
+  String? get codigoTabela;
 
   /// Create a copy of Procedimento
   /// with the given fields replaced by the non-null parameter values.
@@ -32,15 +33,18 @@ mixin _$Procedimento {
             other is Procedimento &&
             (identical(other.codigo, codigo) || other.codigo == codigo) &&
             (identical(other.quantidade, quantidade) ||
-                other.quantidade == quantidade));
+                other.quantidade == quantidade) &&
+            (identical(other.codigoTabela, codigoTabela) ||
+                other.codigoTabela == codigoTabela));
   }
 
   @override
-  int get hashCode => Object.hash(runtimeType, codigo, quantidade);
+  int get hashCode =>
+      Object.hash(runtimeType, codigo, quantidade, codigoTabela);
 
   @override
   String toString() {
-    return 'Procedimento(codigo: $codigo, quantidade: $quantidade)';
+    return 'Procedimento(codigo: $codigo, quantidade: $quantidade, codigoTabela: $codigoTabela)';
   }
 }
 
@@ -50,7 +54,7 @@ abstract mixin class $ProcedimentoCopyWith<$Res> {
           Procedimento value, $Res Function(Procedimento) _then) =
       _$ProcedimentoCopyWithImpl;
   @useResult
-  $Res call({String codigo, int quantidade});
+  $Res call({String codigo, int quantidade, String? codigoTabela});
 }
 
 /// @nodoc
@@ -67,6 +71,7 @@ class _$ProcedimentoCopyWithImpl<$Res> implements $ProcedimentoCopyWith<$Res> {
   $Res call({
     Object? codigo = null,
     Object? quantidade = null,
+    Object? codigoTabela = freezed,
   }) {
     return _then(_self.copyWith(
       codigo: null == codigo
@@ -77,6 +82,10 @@ class _$ProcedimentoCopyWithImpl<$Res> implements $ProcedimentoCopyWith<$Res> {
           ? _self.quantidade
           : quantidade // ignore: cast_nullable_to_non_nullable
               as int,
+      codigoTabela: freezed == codigoTabela
+          ? _self.codigoTabela
+          : codigoTabela // ignore: cast_nullable_to_non_nullable
+              as String?,
     ));
   }
 }
@@ -174,13 +183,14 @@ extension ProcedimentoPatterns on Procedimento {
 
   @optionalTypeArgs
   TResult maybeWhen<TResult extends Object?>(
-    TResult Function(String codigo, int quantidade)? $default, {
+    TResult Function(String codigo, int quantidade, String? codigoTabela)?
+        $default, {
     required TResult orElse(),
   }) {
     final _that = this;
     switch (_that) {
       case _Procedimento() when $default != null:
-        return $default(_that.codigo, _that.quantidade);
+        return $default(_that.codigo, _that.quantidade, _that.codigoTabela);
       case _:
         return orElse();
     }
@@ -201,12 +211,13 @@ extension ProcedimentoPatterns on Procedimento {
 
   @optionalTypeArgs
   TResult when<TResult extends Object?>(
-    TResult Function(String codigo, int quantidade) $default,
+    TResult Function(String codigo, int quantidade, String? codigoTabela)
+        $default,
   ) {
     final _that = this;
     switch (_that) {
       case _Procedimento():
-        return $default(_that.codigo, _that.quantidade);
+        return $default(_that.codigo, _that.quantidade, _that.codigoTabela);
       case _:
         throw StateError('Unexpected subclass');
     }
@@ -226,12 +237,13 @@ extension ProcedimentoPatterns on Procedimento {
 
   @optionalTypeArgs
   TResult? whenOrNull<TResult extends Object?>(
-    TResult? Function(String codigo, int quantidade)? $default,
+    TResult? Function(String codigo, int quantidade, String? codigoTabela)?
+        $default,
   ) {
     final _that = this;
     switch (_that) {
       case _Procedimento() when $default != null:
-        return $default(_that.codigo, _that.quantidade);
+        return $default(_that.codigo, _that.quantidade, _that.codigoTabela);
       case _:
         return null;
     }
@@ -241,12 +253,15 @@ extension ProcedimentoPatterns on Procedimento {
 /// @nodoc
 
 class _Procedimento implements Procedimento {
-  const _Procedimento({required this.codigo, required this.quantidade});
+  const _Procedimento(
+      {required this.codigo, required this.quantidade, this.codigoTabela});
 
   @override
   final String codigo;
   @override
   final int quantidade;
+  @override
+  final String? codigoTabela;
 
   /// Create a copy of Procedimento
   /// with the given fields replaced by the non-null parameter values.
@@ -263,15 +278,18 @@ class _Procedimento implements Procedimento {
             other is _Procedimento &&
             (identical(other.codigo, codigo) || other.codigo == codigo) &&
             (identical(other.quantidade, quantidade) ||
-                other.quantidade == quantidade));
+                other.quantidade == quantidade) &&
+            (identical(other.codigoTabela, codigoTabela) ||
+                other.codigoTabela == codigoTabela));
   }
 
   @override
-  int get hashCode => Object.hash(runtimeType, codigo, quantidade);
+  int get hashCode =>
+      Object.hash(runtimeType, codigo, quantidade, codigoTabela);
 
   @override
   String toString() {
-    return 'Procedimento(codigo: $codigo, quantidade: $quantidade)';
+    return 'Procedimento(codigo: $codigo, quantidade: $quantidade, codigoTabela: $codigoTabela)';
   }
 }
 
@@ -283,7 +301,7 @@ abstract mixin class _$ProcedimentoCopyWith<$Res>
       __$ProcedimentoCopyWithImpl;
   @override
   @useResult
-  $Res call({String codigo, int quantidade});
+  $Res call({String codigo, int quantidade, String? codigoTabela});
 }
 
 /// @nodoc
@@ -301,6 +319,7 @@ class __$ProcedimentoCopyWithImpl<$Res>
   $Res call({
     Object? codigo = null,
     Object? quantidade = null,
+    Object? codigoTabela = freezed,
   }) {
     return _then(_Procedimento(
       codigo: null == codigo
@@ -311,6 +330,10 @@ class __$ProcedimentoCopyWithImpl<$Res>
           ? _self.quantidade
           : quantidade // ignore: cast_nullable_to_non_nullable
               as int,
+      codigoTabela: freezed == codigoTabela
+          ? _self.codigoTabela
+          : codigoTabela // ignore: cast_nullable_to_non_nullable
+              as String?,
     ));
   }
 }
