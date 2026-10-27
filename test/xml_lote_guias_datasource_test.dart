@@ -108,6 +108,42 @@ void main() {
       );
     });
 
+    test('extrai datas de autorização e de execução', () {
+      const String xml = '''
+<mensagemTISS>
+  <guiaSP-SADT>
+    <dadosAutorizacao><dataAutorizacao> 2026-10-01 </dataAutorizacao></dadosAutorizacao>
+    <procedimentosExecutados><procedimentoExecutado>
+      <dataExecucao> 2026-10-14 </dataExecucao>
+      <procedimento><codigoProcedimento>40301281</codigoProcedimento></procedimento>
+    </procedimentoExecutado></procedimentosExecutados>
+  </guiaSP-SADT>
+</mensagemTISS>
+''';
+
+      final guia = datasource.extrairLote(xml).guias.single;
+
+      expect(guia.dataAutorizacao, '2026-10-01');
+      expect(guia.procedimentos.single.dataExecucao, '2026-10-14');
+    });
+
+    test('mantém datas nulas quando o XML não informa', () {
+      const String xml = '''
+<mensagemTISS>
+  <guiaSP-SADT>
+    <procedimentosExecutados><procedimentoExecutado>
+      <procedimento><codigoProcedimento>40301281</codigoProcedimento></procedimento>
+    </procedimentoExecutado></procedimentosExecutados>
+  </guiaSP-SADT>
+</mensagemTISS>
+''';
+
+      final guia = datasource.extrairLote(xml).guias.single;
+
+      expect(guia.dataAutorizacao, isNull);
+      expect(guia.procedimentos.single.dataExecucao, isNull);
+    });
+
     test('mantém metadados opcionais nulos e distingue lote sem guias', () {
       const String xml =
           '<mensagemTISS><numeroLote>8</numeroLote></mensagemTISS>';
