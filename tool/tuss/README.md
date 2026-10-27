@@ -37,7 +37,8 @@ ele existe com o `codigoTabela` declarado:
 - mesma tabela: `Encontrado`, com vigência calculada na data da validação;
 - outra tabela: `TabelaDivergente`;
 - tabela com base local e código ausente: `NaoEncontrado`;
-- `00` e `90`–`99`: `SemReferenciaTuss`, sem erro de código;
+- `00` e `90`–`99`: `SemReferenciaTuss`, sem erro de código — mas se o código
+  existir numa tabela oficial, vira `TabelaDivergente`;
 - tabela fora das conhecidas: `TabelaDesconhecida`, sem consulta de rede;
 - tabela válida sem base local (a 19 hoje): consulta no proxy.
 
