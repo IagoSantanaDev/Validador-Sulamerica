@@ -39,6 +39,7 @@ class AppStrings {
   static const String rotuloDetalhes = 'Detalhes';
   static const String rotuloCarteira = 'Carteira';
   static const String rotuloSenha = 'Senha';
+  static const String rotuloDataAutorizacao = 'Data de autorização';
   static const String rotuloBeneficiario = 'Beneficiário';
   static const String rotuloElegibilidade = 'Elegibilidade';
   static const String dialogoFechar = 'Fechar';
@@ -70,6 +71,7 @@ class AppStrings {
   static const String filtroCarteira = 'Carteira';
   static const String filtroProcedimento = 'Procedimento';
   static const String filtroCrm = 'CRM';
+  static const String filtroData = 'Data';
   static const String filtroSemResultado =
       'Nenhuma guia encontrada com este filtro.';
 }

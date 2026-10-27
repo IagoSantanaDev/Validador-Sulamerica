@@ -17,6 +17,7 @@ mixin _$Procedimento {
   String get codigo;
   int get quantidade;
   String? get codigoTabela;
+  String? get dataExecucao;
 
   /// Create a copy of Procedimento
   /// with the given fields replaced by the non-null parameter values.
@@ -35,16 +36,18 @@ mixin _$Procedimento {
             (identical(other.quantidade, quantidade) ||
                 other.quantidade == quantidade) &&
             (identical(other.codigoTabela, codigoTabela) ||
-                other.codigoTabela == codigoTabela));
+                other.codigoTabela == codigoTabela) &&
+            (identical(other.dataExecucao, dataExecucao) ||
+                other.dataExecucao == dataExecucao));
   }
 
   @override
   int get hashCode =>
-      Object.hash(runtimeType, codigo, quantidade, codigoTabela);
+      Object.hash(runtimeType, codigo, quantidade, codigoTabela, dataExecucao);
 
   @override
   String toString() {
-    return 'Procedimento(codigo: $codigo, quantidade: $quantidade, codigoTabela: $codigoTabela)';
+    return 'Procedimento(codigo: $codigo, quantidade: $quantidade, codigoTabela: $codigoTabela, dataExecucao: $dataExecucao)';
   }
 }
 
@@ -54,7 +57,11 @@ abstract mixin class $ProcedimentoCopyWith<$Res> {
           Procedimento value, $Res Function(Procedimento) _then) =
       _$ProcedimentoCopyWithImpl;
   @useResult
-  $Res call({String codigo, int quantidade, String? codigoTabela});
+  $Res call(
+      {String codigo,
+      int quantidade,
+      String? codigoTabela,
+      String? dataExecucao});
 }
 
 /// @nodoc
@@ -72,6 +79,7 @@ class _$ProcedimentoCopyWithImpl<$Res> implements $ProcedimentoCopyWith<$Res> {
     Object? codigo = null,
     Object? quantidade = null,
     Object? codigoTabela = freezed,
+    Object? dataExecucao = freezed,
   }) {
     return _then(_self.copyWith(
       codigo: null == codigo
@@ -85,6 +93,10 @@ class _$ProcedimentoCopyWithImpl<$Res> implements $ProcedimentoCopyWith<$Res> {
       codigoTabela: freezed == codigoTabela
           ? _self.codigoTabela
           : codigoTabela // ignore: cast_nullable_to_non_nullable
+              as String?,
+      dataExecucao: freezed == dataExecucao
+          ? _self.dataExecucao
+          : dataExecucao // ignore: cast_nullable_to_non_nullable
               as String?,
     ));
   }
@@ -183,14 +195,16 @@ extension ProcedimentoPatterns on Procedimento {
 
   @optionalTypeArgs
   TResult maybeWhen<TResult extends Object?>(
-    TResult Function(String codigo, int quantidade, String? codigoTabela)?
+    TResult Function(String codigo, int quantidade, String? codigoTabela,
+            String? dataExecucao)?
         $default, {
     required TResult orElse(),
   }) {
     final _that = this;
     switch (_that) {
       case _Procedimento() when $default != null:
-        return $default(_that.codigo, _that.quantidade, _that.codigoTabela);
+        return $default(_that.codigo, _that.quantidade, _that.codigoTabela,
+            _that.dataExecucao);
       case _:
         return orElse();
     }
@@ -211,13 +225,15 @@ extension ProcedimentoPatterns on Procedimento {
 
   @optionalTypeArgs
   TResult when<TResult extends Object?>(
-    TResult Function(String codigo, int quantidade, String? codigoTabela)
+    TResult Function(String codigo, int quantidade, String? codigoTabela,
+            String? dataExecucao)
         $default,
   ) {
     final _that = this;
     switch (_that) {
       case _Procedimento():
-        return $default(_that.codigo, _that.quantidade, _that.codigoTabela);
+        return $default(_that.codigo, _that.quantidade, _that.codigoTabela,
+            _that.dataExecucao);
       case _:
         throw StateError('Unexpected subclass');
     }
@@ -237,13 +253,15 @@ extension ProcedimentoPatterns on Procedimento {
 
   @optionalTypeArgs
   TResult? whenOrNull<TResult extends Object?>(
-    TResult? Function(String codigo, int quantidade, String? codigoTabela)?
+    TResult? Function(String codigo, int quantidade, String? codigoTabela,
+            String? dataExecucao)?
         $default,
   ) {
     final _that = this;
     switch (_that) {
       case _Procedimento() when $default != null:
-        return $default(_that.codigo, _that.quantidade, _that.codigoTabela);
+        return $default(_that.codigo, _that.quantidade, _that.codigoTabela,
+            _that.dataExecucao);
       case _:
         return null;
     }
@@ -254,7 +272,10 @@ extension ProcedimentoPatterns on Procedimento {
 
 class _Procedimento implements Procedimento {
   const _Procedimento(
-      {required this.codigo, required this.quantidade, this.codigoTabela});
+      {required this.codigo,
+      required this.quantidade,
+      this.codigoTabela,
+      this.dataExecucao});
 
   @override
   final String codigo;
@@ -262,6 +283,8 @@ class _Procedimento implements Procedimento {
   final int quantidade;
   @override
   final String? codigoTabela;
+  @override
+  final String? dataExecucao;
 
   /// Create a copy of Procedimento
   /// with the given fields replaced by the non-null parameter values.
@@ -280,16 +303,18 @@ class _Procedimento implements Procedimento {
             (identical(other.quantidade, quantidade) ||
                 other.quantidade == quantidade) &&
             (identical(other.codigoTabela, codigoTabela) ||
-                other.codigoTabela == codigoTabela));
+                other.codigoTabela == codigoTabela) &&
+            (identical(other.dataExecucao, dataExecucao) ||
+                other.dataExecucao == dataExecucao));
   }
 
   @override
   int get hashCode =>
-      Object.hash(runtimeType, codigo, quantidade, codigoTabela);
+      Object.hash(runtimeType, codigo, quantidade, codigoTabela, dataExecucao);
 
   @override
   String toString() {
-    return 'Procedimento(codigo: $codigo, quantidade: $quantidade, codigoTabela: $codigoTabela)';
+    return 'Procedimento(codigo: $codigo, quantidade: $quantidade, codigoTabela: $codigoTabela, dataExecucao: $dataExecucao)';
   }
 }
 
@@ -301,7 +326,11 @@ abstract mixin class _$ProcedimentoCopyWith<$Res>
       __$ProcedimentoCopyWithImpl;
   @override
   @useResult
-  $Res call({String codigo, int quantidade, String? codigoTabela});
+  $Res call(
+      {String codigo,
+      int quantidade,
+      String? codigoTabela,
+      String? dataExecucao});
 }
 
 /// @nodoc
@@ -320,6 +349,7 @@ class __$ProcedimentoCopyWithImpl<$Res>
     Object? codigo = null,
     Object? quantidade = null,
     Object? codigoTabela = freezed,
+    Object? dataExecucao = freezed,
   }) {
     return _then(_Procedimento(
       codigo: null == codigo
@@ -333,6 +363,10 @@ class __$ProcedimentoCopyWithImpl<$Res>
       codigoTabela: freezed == codigoTabela
           ? _self.codigoTabela
           : codigoTabela // ignore: cast_nullable_to_non_nullable
+              as String?,
+      dataExecucao: freezed == dataExecucao
+          ? _self.dataExecucao
+          : dataExecucao // ignore: cast_nullable_to_non_nullable
               as String?,
     ));
   }

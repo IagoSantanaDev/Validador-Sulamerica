@@ -11,6 +11,7 @@ abstract class GuiaTiss with _$GuiaTiss {
     required String numeroGuiaPrestador,
     required String? numeroCarteira,
     required String? senha,
+    String? dataAutorizacao,
     String? nomeBeneficiario,
     ProfissionalSolicitante? solicitante,
     @Default([]) List<Procedimento> procedimentos,

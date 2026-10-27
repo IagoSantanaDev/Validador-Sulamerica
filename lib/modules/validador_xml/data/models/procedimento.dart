@@ -8,5 +8,6 @@ abstract class Procedimento with _$Procedimento {
     required String codigo,
     required int quantidade,
     String? codigoTabela,
+    String? dataExecucao,
   }) = _Procedimento;
 }

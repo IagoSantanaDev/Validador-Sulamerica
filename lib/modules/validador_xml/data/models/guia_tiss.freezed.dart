@@ -17,6 +17,7 @@ mixin _$GuiaTiss {
   String get numeroGuiaPrestador;
   String? get numeroCarteira;
   String? get senha;
+  String? get dataAutorizacao;
   String? get nomeBeneficiario;
   ProfissionalSolicitante? get solicitante;
   List<Procedimento> get procedimentos;
@@ -38,6 +39,8 @@ mixin _$GuiaTiss {
             (identical(other.numeroCarteira, numeroCarteira) ||
                 other.numeroCarteira == numeroCarteira) &&
             (identical(other.senha, senha) || other.senha == senha) &&
+            (identical(other.dataAutorizacao, dataAutorizacao) ||
+                other.dataAutorizacao == dataAutorizacao) &&
             (identical(other.nomeBeneficiario, nomeBeneficiario) ||
                 other.nomeBeneficiario == nomeBeneficiario) &&
             (identical(other.solicitante, solicitante) ||
@@ -52,13 +55,14 @@ mixin _$GuiaTiss {
       numeroGuiaPrestador,
       numeroCarteira,
       senha,
+      dataAutorizacao,
       nomeBeneficiario,
       solicitante,
       const DeepCollectionEquality().hash(procedimentos));
 
   @override
   String toString() {
-    return 'GuiaTiss(numeroGuiaPrestador: $numeroGuiaPrestador, numeroCarteira: $numeroCarteira, senha: $senha, nomeBeneficiario: $nomeBeneficiario, solicitante: $solicitante, procedimentos: $procedimentos)';
+    return 'GuiaTiss(numeroGuiaPrestador: $numeroGuiaPrestador, numeroCarteira: $numeroCarteira, senha: $senha, dataAutorizacao: $dataAutorizacao, nomeBeneficiario: $nomeBeneficiario, solicitante: $solicitante, procedimentos: $procedimentos)';
   }
 }
 
@@ -71,6 +75,7 @@ abstract mixin class $GuiaTissCopyWith<$Res> {
       {String numeroGuiaPrestador,
       String? numeroCarteira,
       String? senha,
+      String? dataAutorizacao,
       String? nomeBeneficiario,
       ProfissionalSolicitante? solicitante,
       List<Procedimento> procedimentos});
@@ -93,6 +98,7 @@ class _$GuiaTissCopyWithImpl<$Res> implements $GuiaTissCopyWith<$Res> {
     Object? numeroGuiaPrestador = null,
     Object? numeroCarteira = freezed,
     Object? senha = freezed,
+    Object? dataAutorizacao = freezed,
     Object? nomeBeneficiario = freezed,
     Object? solicitante = freezed,
     Object? procedimentos = null,
@@ -109,6 +115,10 @@ class _$GuiaTissCopyWithImpl<$Res> implements $GuiaTissCopyWith<$Res> {
       senha: freezed == senha
           ? _self.senha
           : senha // ignore: cast_nullable_to_non_nullable
+              as String?,
+      dataAutorizacao: freezed == dataAutorizacao
+          ? _self.dataAutorizacao
+          : dataAutorizacao // ignore: cast_nullable_to_non_nullable
               as String?,
       nomeBeneficiario: freezed == nomeBeneficiario
           ? _self.nomeBeneficiario
@@ -237,6 +247,7 @@ extension GuiaTissPatterns on GuiaTiss {
             String numeroGuiaPrestador,
             String? numeroCarteira,
             String? senha,
+            String? dataAutorizacao,
             String? nomeBeneficiario,
             ProfissionalSolicitante? solicitante,
             List<Procedimento> procedimentos)?
@@ -250,6 +261,7 @@ extension GuiaTissPatterns on GuiaTiss {
             _that.numeroGuiaPrestador,
             _that.numeroCarteira,
             _that.senha,
+            _that.dataAutorizacao,
             _that.nomeBeneficiario,
             _that.solicitante,
             _that.procedimentos);
@@ -277,6 +289,7 @@ extension GuiaTissPatterns on GuiaTiss {
             String numeroGuiaPrestador,
             String? numeroCarteira,
             String? senha,
+            String? dataAutorizacao,
             String? nomeBeneficiario,
             ProfissionalSolicitante? solicitante,
             List<Procedimento> procedimentos)
@@ -289,6 +302,7 @@ extension GuiaTissPatterns on GuiaTiss {
             _that.numeroGuiaPrestador,
             _that.numeroCarteira,
             _that.senha,
+            _that.dataAutorizacao,
             _that.nomeBeneficiario,
             _that.solicitante,
             _that.procedimentos);
@@ -315,6 +329,7 @@ extension GuiaTissPatterns on GuiaTiss {
             String numeroGuiaPrestador,
             String? numeroCarteira,
             String? senha,
+            String? dataAutorizacao,
             String? nomeBeneficiario,
             ProfissionalSolicitante? solicitante,
             List<Procedimento> procedimentos)?
@@ -327,6 +342,7 @@ extension GuiaTissPatterns on GuiaTiss {
             _that.numeroGuiaPrestador,
             _that.numeroCarteira,
             _that.senha,
+            _that.dataAutorizacao,
             _that.nomeBeneficiario,
             _that.solicitante,
             _that.procedimentos);
@@ -343,6 +359,7 @@ class _GuiaTiss implements GuiaTiss {
       {required this.numeroGuiaPrestador,
       required this.numeroCarteira,
       required this.senha,
+      this.dataAutorizacao,
       this.nomeBeneficiario,
       this.solicitante,
       final List<Procedimento> procedimentos = const []})
@@ -354,6 +371,8 @@ class _GuiaTiss implements GuiaTiss {
   final String? numeroCarteira;
   @override
   final String? senha;
+  @override
+  final String? dataAutorizacao;
   @override
   final String? nomeBeneficiario;
   @override
@@ -385,6 +404,8 @@ class _GuiaTiss implements GuiaTiss {
             (identical(other.numeroCarteira, numeroCarteira) ||
                 other.numeroCarteira == numeroCarteira) &&
             (identical(other.senha, senha) || other.senha == senha) &&
+            (identical(other.dataAutorizacao, dataAutorizacao) ||
+                other.dataAutorizacao == dataAutorizacao) &&
             (identical(other.nomeBeneficiario, nomeBeneficiario) ||
                 other.nomeBeneficiario == nomeBeneficiario) &&
             (identical(other.solicitante, solicitante) ||
@@ -399,13 +420,14 @@ class _GuiaTiss implements GuiaTiss {
       numeroGuiaPrestador,
       numeroCarteira,
       senha,
+      dataAutorizacao,
       nomeBeneficiario,
       solicitante,
       const DeepCollectionEquality().hash(_procedimentos));
 
   @override
   String toString() {
-    return 'GuiaTiss(numeroGuiaPrestador: $numeroGuiaPrestador, numeroCarteira: $numeroCarteira, senha: $senha, nomeBeneficiario: $nomeBeneficiario, solicitante: $solicitante, procedimentos: $procedimentos)';
+    return 'GuiaTiss(numeroGuiaPrestador: $numeroGuiaPrestador, numeroCarteira: $numeroCarteira, senha: $senha, dataAutorizacao: $dataAutorizacao, nomeBeneficiario: $nomeBeneficiario, solicitante: $solicitante, procedimentos: $procedimentos)';
   }
 }
 
@@ -420,6 +442,7 @@ abstract mixin class _$GuiaTissCopyWith<$Res>
       {String numeroGuiaPrestador,
       String? numeroCarteira,
       String? senha,
+      String? dataAutorizacao,
       String? nomeBeneficiario,
       ProfissionalSolicitante? solicitante,
       List<Procedimento> procedimentos});
@@ -443,6 +466,7 @@ class __$GuiaTissCopyWithImpl<$Res> implements _$GuiaTissCopyWith<$Res> {
     Object? numeroGuiaPrestador = null,
     Object? numeroCarteira = freezed,
     Object? senha = freezed,
+    Object? dataAutorizacao = freezed,
     Object? nomeBeneficiario = freezed,
     Object? solicitante = freezed,
     Object? procedimentos = null,
@@ -459,6 +483,10 @@ class __$GuiaTissCopyWithImpl<$Res> implements _$GuiaTissCopyWith<$Res> {
       senha: freezed == senha
           ? _self.senha
           : senha // ignore: cast_nullable_to_non_nullable
+              as String?,
+      dataAutorizacao: freezed == dataAutorizacao
+          ? _self.dataAutorizacao
+          : dataAutorizacao // ignore: cast_nullable_to_non_nullable
               as String?,
       nomeBeneficiario: freezed == nomeBeneficiario
           ? _self.nomeBeneficiario
