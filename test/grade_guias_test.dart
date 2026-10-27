@@ -135,6 +135,22 @@ void main() {
       expect(rotuloTipoErro(TipoErroGuia.crm), 'CRM');
     });
 
+    test('erro de tabela TUSS é filtrado como Procedimento', () {
+      const GuiaValidada guiaTuss = GuiaValidada(
+        guia: guia,
+        erros: [
+          ErroValidacao(
+            campo: 'tuss',
+            mensagem: 'Código 50001043 pertence à tabela 22, não à 18.',
+          ),
+        ],
+      );
+      final LinhaGradeGuia linha = linhasDeGuia(guiaTuss).single;
+
+      expect(tipoErroDeLinha(linha), TipoErroGuia.procedimento);
+      expect(rotuloTipoErro(TipoErroGuia.procedimento), 'Procedimento');
+    });
+
     test('erro local VPP aparece nos filtros Senha e Procedimento', () {
       const GuiaValidada guiaVpp = GuiaValidada(
         guia: guia,

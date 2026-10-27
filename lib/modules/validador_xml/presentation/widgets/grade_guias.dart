@@ -53,6 +53,7 @@ TipoErroGuia? tipoErroDeLinha(LinhaGradeGuia linha) {
     if (erro.campo == 'senha') return TipoErroGuia.senha;
     if (erro.campo == 'numeroCarteira') return TipoErroGuia.carteira;
     if (erro.campo == 'procedimentos') return TipoErroGuia.procedimento;
+    if (erro.campo == 'tuss') return TipoErroGuia.procedimento;
     if (erro.campo == 'crm') return TipoErroGuia.crm;
   }
   return null;
@@ -151,13 +152,14 @@ class GradeGuias extends StatelessWidget {
                       }
                     }
                     return RotuloValor(
-                      rotulo: erro.campo == 'procedimentos'
-                          ? AppStrings.filtroProcedimento
-                          : erro.campo == 'senha'
-                              ? AppStrings.rotuloSenha
-                              : erro.campo == 'crm'
-                                  ? AppStrings.filtroCrm
-                                  : AppStrings.rotuloCarteira,
+                      rotulo:
+                          erro.campo == 'procedimentos' || erro.campo == 'tuss'
+                              ? AppStrings.filtroProcedimento
+                              : erro.campo == 'senha'
+                                  ? AppStrings.rotuloSenha
+                                  : erro.campo == 'crm'
+                                      ? AppStrings.filtroCrm
+                                      : AppStrings.rotuloCarteira,
                       valor: valor,
                     );
                   },

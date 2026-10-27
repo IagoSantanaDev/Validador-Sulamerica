@@ -22,14 +22,18 @@ dependencies:
   cookie_jar: ^4.0.8
   logger: ^2.4.0
   cupertino_icons: ^1.0.8
+  freezed_annotation: ^3.1.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   mocktail: ^1.0.4
   flutter_lints: ^4.0.0
+  freezed: ^3.2.5
+  build_runner: ^2.15.1
 
 flutter:
   uses-material-design: true
   assets:
     - web/favicon.ico
+    - assets/tuss/

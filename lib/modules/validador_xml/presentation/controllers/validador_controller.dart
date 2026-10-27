@@ -9,6 +9,7 @@ import '../../../../globals/network/app_exception.dart';
 import '../../../../globals/network/result.dart';
 import '../../data/datasources/xml_lote_guias_datasource.dart';
 import '../../data/datasources/xml_lote_guias_exceptions.dart';
+import '../../data/datasources/tuss_base_local_exceptions.dart';
 import '../../data/models/consulta_guia.dart';
 import '../../data/models/consulta_lote.dart';
 import '../../data/models/guia_validada.dart';
@@ -19,6 +20,7 @@ import '../../data/repositories/regras/regra_senha_prefixo.dart';
 import '../../data/repositories/validador_guias_repository.dart';
 import '../../data/repositories/validador_guias_repository_impl.dart';
 import '../../data/services/sul_america_backend_service.dart';
+import '../../data/services/classificador_tuss_local.dart';
 
 enum StatusValidador { semArquivo, arquivoPronto, validando, concluido, erro }
 
@@ -31,7 +33,10 @@ class ValidadorController extends ChangeNotifier {
     ValidadorGuiasRepository? repository,
     SulAmericaBackendService? service,
     RegraCredenciaisPortal? regraCredenciais,
-  })  : _repository = repository ?? ValidadorGuiasRepositoryImpl(),
+  })  : _repository = repository ??
+            ValidadorGuiasRepositoryImpl(
+              classificadorTuss: ClassificadorTussLocal(),
+            ),
         _service = service ?? _servicePadrao(),
         _regraCredenciais = regraCredenciais ?? const RegraCredenciaisPortal();
 
@@ -124,6 +129,7 @@ class ValidadorController extends ChangeNotifier {
     final Stopwatch cronometro = Stopwatch()..start();
     try {
       final String conteudoXml = _decodificarXml(bytes);
+      await _repository.preparar();
       final LoteGuiasExtraido lote = _datasource.extrairLote(conteudoXml);
       final InformacoesLote informacoes = lote.informacoes;
       final List<GuiaValidada> resultadoBruto =
@@ -144,6 +150,10 @@ class ValidadorController extends ChangeNotifier {
       _resultado = const [];
       _status = StatusValidador.erro;
       _mensagemErro = erro.toString();
+    } on TussBaseLocalInvalidaException catch (erro) {
+      _resultado = const [];
+      _status = StatusValidador.erro;
+      _mensagemErro = 'Não foi possível carregar a base TUSS: ${erro.mensagem}';
     } catch (erro) {
       _resultado = const [];
       _status = StatusValidador.erro;
