@@ -70,6 +70,7 @@ Metadados exibidos no resultado: nome e tamanho do arquivo, versão do padrão T
 | Comprimento da senha | exatamente 10 caracteres | "senha deve ter exatamente 10 caracteres" |
 | Carteira (antes da consulta) | 20 dígitos, segmentos 3-5-4-4-4 | "Número da carteira inválido" |
 | Senha (antes da consulta) | 10 dígitos começando com 5 | "Senha inválida" |
+| Autorização posterior à execução | a `dataAutorizacao` da guia é comparada com a `dataExecucao` de cada procedimento; se for posterior a alguma, falha. As datas divergentes são agregadas em um erro único; datas ausentes ou inválidas são ignoradas. | "Data de autorização (\<autorização\>) posterior à execução (\<datas\>)" |
 
 O conjunto VPP em runtime é um snapshot de 2.792 códigos com `VPP = Sim`, gerado em `lib/modules/validador_xml/data/repositories/regras/codigos_vpp.dart`. A fonte de referência `debug/KAN-07/procedimentos_vpp_sim.json` identifica `LISTA DE SERVIÇOES QUE EXIGEM AUTORIZAÇÃO.pdf` e o critério `VPP = Sim`, mas não informa edição ou data de vigência. Ao atualizar a fonte, atualize o conjunto Dart junto; o teste `regra_senha_procedimento_test.dart` verifica contagem, unicidade e igualdade integral. O app não lê o JSON em runtime, e o teste também não: ele valida o conjunto gerado contra a contagem esperada em código.
 
