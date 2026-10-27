@@ -1,24 +1,30 @@
+import 'package:freezed_annotation/freezed_annotation.dart';
+
 import 'consulta_guia.dart';
 
-class ConsultaLoteItem {
-  const ConsultaLoteItem({required this.tipo, required this.chave});
+part 'consulta_lote.freezed.dart';
 
-  final TipoConsultaGuia tipo;
-  final String chave;
+@freezed
+abstract class ConsultaLoteItem with _$ConsultaLoteItem {
+  const factory ConsultaLoteItem({
+    required TipoConsultaGuia tipo,
+    required String chave,
+  }) = _ConsultaLoteItem;
 }
 
-class ResultadoConsultaLote {
-  const ResultadoConsultaLote({
-    required this.chave,
-    required this.tipo,
-    required this.sucesso,
-    this.elegivel,
-    this.rotuloElegibilidade,
-    this.statusSenha,
-    this.erro,
-  });
+@freezed
+abstract class ResultadoConsultaLote with _$ResultadoConsultaLote {
+  const factory ResultadoConsultaLote({
+    required String chave,
+    required TipoConsultaGuia tipo,
+    required bool sucesso,
+    bool? elegivel,
+    String? rotuloElegibilidade,
+    String? statusSenha,
+    String? erro,
+  }) = _ResultadoConsultaLote;
 
-  factory ResultadoConsultaLote.fromJson(Map<String, dynamic> json) {
+  static ResultadoConsultaLote fromJson(Map<String, dynamic> json) {
     final String tipo = json['tipo'] as String? ?? '';
     return ResultadoConsultaLote(
       chave: json['chave'] as String? ?? '',
@@ -32,12 +38,4 @@ class ResultadoConsultaLote {
       erro: json['erro'] as String?,
     );
   }
-
-  final String chave;
-  final TipoConsultaGuia tipo;
-  final bool sucesso;
-  final bool? elegivel;
-  final String? rotuloElegibilidade;
-  final String? statusSenha;
-  final String? erro;
 }

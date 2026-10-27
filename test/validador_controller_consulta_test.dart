@@ -126,6 +126,9 @@ class _FakeValidadorGuiasRepository implements ValidadorGuiasRepository {
   final List<GuiaValidada> retorno;
 
   @override
+  Future<void> preparar() async {}
+
+  @override
   List<GuiaValidada> validarLote(String conteudoXml) => retorno;
 
   @override

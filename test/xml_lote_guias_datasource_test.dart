@@ -24,7 +24,7 @@ void main() {
         <ans:dadosAutorizacao><ans:senha> 5000000001 </ans:senha></ans:dadosAutorizacao>
         <ans:valorTotalGuia>10.00</ans:valorTotalGuia>
         <ans:procedimentosExecutados><ans:procedimentoExecutado>
-          <ans:procedimento><ans:codigoProcedimento>0040301281</ans:codigoProcedimento></ans:procedimento>
+          <ans:procedimento><ans:codigoProcedimento>0040301281</ans:codigoProcedimento><ans:codigoTabela> 22 </ans:codigoTabela></ans:procedimento>
           <ans:quantidadeExecutada>2</ans:quantidadeExecutada>
         </ans:procedimentoExecutado></ans:procedimentosExecutados>
       </ans:guiaSP-SADT>
@@ -55,7 +55,26 @@ void main() {
       expect(lote.guias.first.numeroCarteira, ' 00123 ');
       expect(lote.guias.first.senha, ' 5000000001 ');
       expect(lote.guias.first.procedimentos.single.codigo, '0040301281');
+      expect(lote.guias.first.procedimentos.single.codigoTabela, '22');
       expect(lote.guias.first.procedimentos.single.quantidade, 2);
+    });
+
+    test('mantém codigoTabela nulo quando o XML não informa', () {
+      const String xml = '''
+<mensagemTISS>
+  <guiaSP-SADT>
+    <procedimentosExecutados><procedimentoExecutado>
+      <procedimento><codigoProcedimento>30101492</codigoProcedimento></procedimento>
+    </procedimentoExecutado></procedimentosExecutados>
+  </guiaSP-SADT>
+</mensagemTISS>
+''';
+
+      final procedimento =
+          datasource.extrairLote(xml).guias.single.procedimentos.single;
+
+      expect(procedimento.codigo, '30101492');
+      expect(procedimento.codigoTabela, isNull);
     });
 
     test('extrai guia com prefixo tiss e preserva valores literais', () {

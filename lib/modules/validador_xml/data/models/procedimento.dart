@@ -1,23 +1,12 @@
-class Procedimento {
-  const Procedimento({
-    required this.codigo,
-    required this.quantidade,
-  });
+import 'package:freezed_annotation/freezed_annotation.dart';
 
-  final String codigo;
-  final int quantidade;
+part 'procedimento.freezed.dart';
 
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is Procedimento &&
-          runtimeType == other.runtimeType &&
-          codigo == other.codigo &&
-          quantidade == other.quantidade;
-
-  @override
-  int get hashCode => codigo.hashCode ^ quantidade.hashCode;
-
-  @override
-  String toString() => 'Procedimento($codigo x$quantidade)';
+@freezed
+abstract class Procedimento with _$Procedimento {
+  const factory Procedimento({
+    required String codigo,
+    required int quantidade,
+    String? codigoTabela,
+  }) = _Procedimento;
 }

@@ -1,23 +1,19 @@
-class InformacoesLote {
-  const InformacoesLote({
-    this.versao,
-    this.tipoTransacao,
-    this.hash,
-    this.prestadorCnpjCpf,
-    this.operadoraRegistroANS,
-    this.numeroLote,
-    this.qtdGuias,
-    this.valorTotalInformado,
-  });
+import 'package:freezed_annotation/freezed_annotation.dart';
 
-  final String? versao;
-  final String? tipoTransacao;
-  final String? hash;
-  final String? prestadorCnpjCpf;
-  final String? operadoraRegistroANS;
-  final String? numeroLote;
-  final int? qtdGuias;
-  final String? valorTotalInformado;
+part 'informacoes_lote.freezed.dart';
+
+@freezed
+abstract class InformacoesLote with _$InformacoesLote {
+  const factory InformacoesLote({
+    String? versao,
+    String? tipoTransacao,
+    String? hash,
+    String? prestadorCnpjCpf,
+    String? operadoraRegistroANS,
+    String? numeroLote,
+    int? qtdGuias,
+    String? valorTotalInformado,
+  }) = _InformacoesLote;
 
   static const InformacoesLote vazio = InformacoesLote();
 }
