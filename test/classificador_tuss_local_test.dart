@@ -198,16 +198,34 @@ void main() {
       expect((resultado! as TussTabelaDesconhecida).tabela, '87');
     });
 
-    test('não trata tabelas 00 e 90–99 como erro de código', () async {
+    test('não trata tabelas 00 e 90–99 como erro quando o código é próprio',
+        () async {
       final ClassificadorTussLocal classificador = _classificador();
       await classificador.preparar();
 
       for (final String tabela in ['00', '90', '98', '99']) {
         final ResultadoConsultaTuss? resultado = classificador.classificar(
-          codigo: '60036842',
+          codigo: '12345678',
           tabela: tabela,
         );
         expect(resultado, isA<TussSemReferencia>(), reason: tabela);
+      }
+    });
+
+    test('detecta código de tabela oficial declarado como 90 ou 98', () async {
+      final ClassificadorTussLocal classificador = _classificador();
+      await classificador.preparar();
+
+      for (final String tabela in ['00', '90', '98']) {
+        final ResultadoConsultaTuss? resultado = classificador.classificar(
+          codigo: '60036842',
+          tabela: tabela,
+        );
+        expect(resultado, isA<TussTabelaDivergente>(), reason: tabela);
+        final TussTabelaDivergente divergente =
+            resultado! as TussTabelaDivergente;
+        expect(divergente.tabelaDeclarada, tabela);
+        expect(divergente.tabelaEncontrada, '18');
       }
     });
 

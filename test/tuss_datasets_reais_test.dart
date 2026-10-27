@@ -76,5 +76,24 @@ void main() {
 
       expect(resultado, isNull);
     });
+
+    test('acusa código oficial declarado como 98', () {
+      final ResultadoConsultaTuss? resultado = classificador.classificar(
+        codigo: '30101492',
+        tabela: '98',
+      );
+
+      expect(resultado, isA<TussTabelaDivergente>());
+      expect((resultado! as TussTabelaDivergente).tabelaEncontrada, '22');
+    });
+
+    test('aceita código próprio na tabela 90', () {
+      final ResultadoConsultaTuss? resultado = classificador.classificar(
+        codigo: '00000000',
+        tabela: '90',
+      );
+
+      expect(resultado, isA<TussSemReferencia>());
+    });
   });
 }

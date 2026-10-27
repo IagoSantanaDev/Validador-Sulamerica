@@ -6,7 +6,7 @@ import '../models/tuss_item.dart';
 ///
 /// Retorna `null` quando a tabela declarada é válida, não tem base local e o
 /// código precisa ser consultado no proxy. Tabelas `00` e `90`–`99` não têm
-/// referência TUSS e nunca geram erro de código.
+/// referência TUSS: nelas o código só é erro quando existe numa tabela oficial.
 class ClassificadorTussLocal {
   ClassificadorTussLocal({
     TussBaseLocalDatasource? base,
@@ -43,14 +43,9 @@ class ClassificadorTussLocal {
 
     final String codigoLimpo = codigo.trim();
     final String tabelaLimpa = tabela.trim();
+    final bool semReferencia = tabelaSemReferencia(tabelaLimpa);
 
-    if (tabelaSemReferencia(tabelaLimpa)) {
-      return ResultadoConsultaTuss.semReferencia(
-        codigo: codigoLimpo,
-        tabela: tabelaLimpa,
-      );
-    }
-    if (!tabelaConhecida(tabelaLimpa)) {
+    if (!semReferencia && !tabelaConhecida(tabelaLimpa)) {
       return ResultadoConsultaTuss.tabelaDesconhecida(
         codigo: codigoLimpo,
         tabela: tabelaLimpa,
@@ -58,6 +53,21 @@ class ClassificadorTussLocal {
     }
 
     final TussItem? item = _base.buscar(codigoLimpo);
+
+    if (semReferencia) {
+      if (item == null) {
+        return ResultadoConsultaTuss.semReferencia(
+          codigo: codigoLimpo,
+          tabela: tabelaLimpa,
+        );
+      }
+      return ResultadoConsultaTuss.tabelaDivergente(
+        codigo: codigoLimpo,
+        tabelaDeclarada: tabelaLimpa,
+        tabelaEncontrada: item.tabela,
+      );
+    }
+
     if (item == null) {
       if (!_base.temBaseLocal(tabelaLimpa)) return null;
       return ResultadoConsultaTuss.naoEncontrado(
