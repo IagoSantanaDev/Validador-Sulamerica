@@ -5,6 +5,7 @@ import '../models/guia_validada.dart';
 import '../services/classificador_tuss_local.dart';
 import 'regras/regra_codigo_bilateral.dart';
 import 'regras/regra_crm_tamanho.dart';
+import 'regras/regra_data_autorizacao.dart';
 import 'regras/regra_senha_prefixo.dart';
 import 'regras/regra_senha_procedimento.dart';
 import 'regras/regra_tuss.dart';
@@ -23,6 +24,7 @@ class ValidadorGuiasRepositoryImpl implements ValidadorGuiasRepository {
               const RegraCrmTamanho(),
               const RegraSenhaProcedimento(),
               const RegraSenhaPrefixo(),
+              const RegraDataAutorizacao(),
               const RegraCodigoBilateral(),
               if (classificadorTuss != null) RegraTuss(classificadorTuss),
             ];
