@@ -123,6 +123,10 @@ class XmlLoteGuiasDatasource {
         const ['dadosBeneficiario', 'numeroCarteira'],
       ),
       senha: _textoLiteralDeElementoDescendente(guiaElement, 'senha'),
+      dataAutorizacao: _textoDoFilhoAninhado(
+        guiaElement,
+        const ['dadosAutorizacao', 'dataAutorizacao'],
+      ),
       nomeBeneficiario: _textoDoFilhoAninhado(
             guiaElement,
             const ['dadosBeneficiario', 'nomeBeneficiario'],
@@ -172,6 +176,8 @@ class XmlLoteGuiasDatasource {
           codigo: codigo,
           quantidade: quantidade,
           codigoTabela: codigoTabela,
+          dataExecucao:
+              _textoDoFilhoAninhado(elemento, const ['dataExecucao']),
         ),
       );
     }
