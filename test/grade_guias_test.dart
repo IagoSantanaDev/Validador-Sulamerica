@@ -170,6 +170,23 @@ void main() {
       );
     });
 
+    test('erro de data de autorização é filtrado como Data', () {
+      const GuiaValidada guiaData = GuiaValidada(
+        guia: guia,
+        erros: [
+          ErroValidacao(
+            campo: 'dataAutorizacao',
+            mensagem:
+                'Data de autorização (2026-10-14) posterior à execução (2026-10-01)',
+          ),
+        ],
+      );
+      final LinhaGradeGuia linha = linhasDeGuia(guiaData).single;
+
+      expect(tipoErroDeLinha(linha), TipoErroGuia.data);
+      expect(rotuloTipoErro(TipoErroGuia.data), 'Data');
+    });
+
     test('linha da consulta de elegibilidade é filtrada pelo motivo', () {
       const GuiaValidada guiaConsulta = GuiaValidada(
         guia: guia,
