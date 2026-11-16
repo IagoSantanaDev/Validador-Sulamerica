@@ -272,8 +272,8 @@ extension GuiaValidadaPatterns on GuiaValidada {
 class _GuiaValidada extends GuiaValidada {
   const _GuiaValidada(
       {required this.guia,
-      required final List<ErroValidacao> erros,
-      final List<ConsultaGuia> consultas = const []})
+      required List<ErroValidacao> erros,
+      List<ConsultaGuia> consultas = const []})
       : _erros = erros,
         _consultas = consultas,
         super._();

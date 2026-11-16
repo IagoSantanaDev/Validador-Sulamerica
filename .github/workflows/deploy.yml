@@ -1,0 +1,83 @@
+name: Validar e publicar no GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  API_URL: ${{ vars.API_URL || 'https://validador-api-rw0a.onrender.com' }}
+
+jobs:
+  build-and-test:
+    name: Validação, testes e build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configurar Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      # Cache extra para os pacotes do Pub mesmo sem pubspec.lock
+      - name: Cache de pacotes Pub
+        uses: actions/cache@v4
+        with:
+          path: ~/.pub-cache
+          key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pub-
+
+      - name: Instalar dependências
+        run: flutter pub get
+
+      - name: Análise estática
+        run: flutter analyze --no-fatal-infos
+
+      - name: Testes automatizados
+        run: flutter test
+
+      - name: Configurar Pages
+        uses: actions/configure-pages@v5
+
+      # Build único já preparado para o GitHub Pages e com --pwa-strategy=none
+      - name: Build web para o Pages
+        run: >
+          flutter build web --release
+          --base-href "/${{ github.event.repository.name }}/"
+          --pwa-strategy=none
+          --dart-define=API_URL=${{ env.API_URL }}
+
+      - name: Enviar artefato do Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/web
+
+  deploy:
+    name: Deploy no GitHub Pages
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      # Não precisa baixar Flutter nem rodar build novamente
+      - name: Publicar no Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

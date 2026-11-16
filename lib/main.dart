@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import 'globals/constants/app_config.dart';
 import 'globals/constants/app_strings.dart';

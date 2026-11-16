@@ -2,7 +2,7 @@
 import 'dart:html' as html;
 import 'dart:ui_web' as ui_web;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import '../../../../globals/constants/app_colors.dart';
 import '../../../../globals/constants/app_dimens.dart';
 import '../../../../globals/constants/app_strings.dart';

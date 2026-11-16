@@ -362,7 +362,7 @@ class _GuiaTiss implements GuiaTiss {
       this.dataAutorizacao,
       this.nomeBeneficiario,
       this.solicitante,
-      final List<Procedimento> procedimentos = const []})
+      List<Procedimento> procedimentos = const []})
       : _procedimentos = procedimentos;
 
   @override

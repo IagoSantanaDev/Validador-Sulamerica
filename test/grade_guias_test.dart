@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:validador_xml_sulamerica/modules/validador_xml/data/models/consulta_guia.dart';
 import 'package:validador_xml_sulamerica/modules/validador_xml/data/models/erro_validacao.dart';

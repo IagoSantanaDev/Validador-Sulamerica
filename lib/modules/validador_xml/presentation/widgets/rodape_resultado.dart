@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../../../../globals/constants/app_strings.dart';
 import '../../../../globals/widgets/botao_texto.dart';

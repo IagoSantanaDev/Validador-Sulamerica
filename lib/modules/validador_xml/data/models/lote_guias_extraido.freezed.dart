@@ -259,7 +259,7 @@ extension LoteGuiasExtraidoPatterns on LoteGuiasExtraido {
 
 class _LoteGuiasExtraido implements LoteGuiasExtraido {
   const _LoteGuiasExtraido(
-      {required this.informacoes, required final List<GuiaTiss> guias})
+      {required this.informacoes, required List<GuiaTiss> guias})
       : _guias = guias;
 
   @override
