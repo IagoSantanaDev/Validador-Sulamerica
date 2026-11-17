@@ -12,5 +12,7 @@ adaptador web do Dio usa XHR e não entrega chunks.
 
 - O contrato quebra e exige deploy coordenado do backend e do front.
 - O resultado não é retido depois do fim; recarregar a página perde o lote.
+- Após a execução ser descartada, repetir a mesma chave cria nova execução e
+  pode duplicar consultas; esse risco é aceito para evitar retenção de resultados.
 - Cloudflare/Render exigem heartbeat e `X-Accel-Buffering: no` para não
   bufferizar o stream.

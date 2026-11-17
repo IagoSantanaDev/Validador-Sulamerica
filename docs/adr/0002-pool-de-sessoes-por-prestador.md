@@ -2,9 +2,11 @@
 
 Cada login criava uma sessão do portal só para aquele token, e lotes grandes
 abriam até 9 sessões extras. Com 12 usuários e teto de 10 sessões, isso gerava
-evicção em cascata e logins repetidos. Decidimos manter um pool de 4 sessões por
-identificador, criadas sob demanda e compartilhadas pelos usuários daquele
-prestador, com elegibilidade serial por sessão e senhas até 3 em paralelo.
+evicção em cascata e logins repetidos. Como o cenário usa exatamente dois
+identificadores, com um trio de credenciais por prestador, decidimos manter um
+pool de 4 sessões por identificador (8 no total), criadas sob demanda e
+compartilhadas pelos usuários daquele prestador, com elegibilidade serial por
+sessão e senhas até 3 em paralelo.
 
 ## Consequences
 

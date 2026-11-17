@@ -6,6 +6,11 @@ validador.
 
 ## Linguagem
 
+**Usuário do aplicativo**:
+Pessoa que utiliza o Validador para analisar arquivos XML; não é o prestador nem
+o identificador enviado ao backend.
+_Avoid_: Prestador, identificador de prestador
+
 **Prestador**:
 Organização atendida pelo portal, identificada por um CNPJ.
 _Avoid_: Cliente, empresa, conta
@@ -14,6 +19,11 @@ _Avoid_: Cliente, empresa, conta
 Valor público enviado pelo app para o backend resolver as credenciais do
 prestador. Não é a credencial do portal.
 _Avoid_: Login, usuário, CNPJ
+
+**Credenciais do portal**:
+Conjunto de valores usados para autenticar um prestador no portal SulAmérica.
+Cada identificador de prestador resolve um único conjunto.
+_Avoid_: Login
 
 **Sessão do portal**:
 Conexão autenticada com o portal SulAmérica, com seus cookies, mantida no

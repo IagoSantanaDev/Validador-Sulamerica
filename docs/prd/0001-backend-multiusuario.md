@@ -26,8 +26,12 @@ site ao mesmo tempo, os resultados do validador são comprometidos.
 - Render free é obrigatório: 0,1 CPU, 512 MB, instância única.
 - A sessão do portal vive em memória; não há réplica nem estado compartilhado.
 - O front pode mudar de forma ampla, com deploy coordenado.
+- O cenário tem 12 pessoas, exatamente dois identificadores de prestador e um
+  trio de credenciais por identificador. As pessoas compartilham esses acessos.
 - Credenciais continuam resolvidas no servidor, **um trio `code/user/senha` por
   identificador**. O front continua enviando apenas o identificador.
+- A API continua pública e sem autenticação individual nesta entrega; o risco
+  de chamadas diretas por terceiros que conheçam um identificador é aceito.
 - Nenhum segredo, token ou chave pode ir para log, URL ou repositório.
 
 ## 2. Objetivos
@@ -38,12 +42,14 @@ site ao mesmo tempo, os resultados do validador são comprometidos.
 - Reaproveitar sessões do portal em vez de abrir uma por login/lote.
 - Manter o processo confortavelmente abaixo de 512 MB.
 - Preservar as regras de negócio atuais (carteira, senha, elegibilidade).
-- Manter a API RESTful, com autenticação por `Authorization: Bearer`.
+- Proteger operações de sessão lógica com `Authorization: Bearer`; a criação
+  de sessão permanece pública por identificador, conforme risco aceito.
 
 ### Não objetivos
 
 - Réplica horizontal, persistência em banco ou estado compartilhado.
 - Retomar lote depois de recarregar a página.
+- Autenticação individual, SSO ou autorização por pessoa usuária.
 - Manter `/api/login` e `/api/consultas` durante a transição.
 - Trocar o portal, o fluxo de credenciais ou as regras de elegibilidade.
 - Implementar fallback de polling para o SSE nesta entrega.
@@ -52,13 +58,14 @@ site ao mesmo tempo, os resultados do validador são comprometidos.
 
 | Métrica | Alvo |
 |---|---|
-| 12 lotes de 300 itens submetidos juntos | todos concluem; 429 só quando a fila passar de 24 |
+| 12 lotes de 300 itens submetidos juntos | todos concluem; a 25ª execução recebe 429 quando as 24 vagas totais estão ocupadas |
 | Logins no portal por lote | 0 (pool já aquecido) |
 | Sessões do portal no processo | ≤ 8 (4 por identificador) |
 | Memória RSS no harness local | < 200 MB |
 | Retenção de resultado após o fim | 0 (descartado) |
 | Requisições síncronas > 30 s | 0 (SSE não conta) |
 | Rate limit | por token em `/api/lotes`; por identificador em `/api/sessoes` |
+| Tempo de processamento | Sem SLA numérico antes do harness; registrar p50 e p95 |
 
 ## 4. Arquitetura alvo
 
@@ -68,10 +75,10 @@ Flutter Web                         Backend (1 instância)                Portal
 POST /api/sessoes  ------------>  RepositorioSessoes (token -> id)
                                    PoolSessoesPortal[identificador]
                                      └─ 4 SessaoPortal (login tardio)
-POST /api/lotes    ------------>  AgendadorLotes (fila 24, FIFO justa)
+POST /api/lotes    ------------>  AgendadorLotes (24 execuções totais)
                                      └─ workers por sessão
 GET  /api/lotes/{id}/eventos --->  ExecucaoLote (progresso + resultado)
-       (SSE via fetch)               └─ sem retenção após o fim
+       (SSE via fetch; máximo de 1 stream por lote)
 GET  /api/status   ------------>  contadores + sonda do portal
 ```
 
@@ -81,7 +88,7 @@ GET  /api/status   ------------>  contadores + sonda do portal
 |---|---|
 | `RepositorioSessoes` | tokens opacos, identificador associado, idempotência |
 | `PoolSessoesPortal` | 4 sessões por identificador, login tardio, renovação |
-| `AgendadorLotes` | fila de 24, justiça entre lotes, workers, cancelamento |
+| `AgendadorLotes` | limite total de 24 execuções, justiça por identificador e lote, workers, cancelamento |
 | `ExecucaoLote` | estado, progresso, resultados, buffer de eventos, assinantes |
 | `SseLote` | codificação `text/event-stream`, heartbeat, replay `desde` |
 | `ValidadorApi` | rotas, validação de payload, Bearer, CORS, rate limit |
@@ -91,8 +98,10 @@ GET  /api/status   ------------>  contadores + sonda do portal
 - Elegibilidade é serial **por sessão** (o form do portal tem estado).
 - Senhas rodam até 3 em paralelo **por sessão**.
 - Semáforo global de requisições ao portal: 16.
-- Justiça: fila por identificador em rodízio entre lotes; um lote grande não
-  bloqueia os demais até terminar.
+- Justiça: rodízio entre identificadores e, dentro de cada identificador,
+  entre lotes; muitos lotes de um prestador não monopolizam o portal.
+- Capacidade: máximo de 24 execuções no total, incluindo processamento e fila;
+  a 25ª recebe 429.
 - Falha de sessão (401/403): renovar login da sessão e repetir uma vez.
 - Falha transitória de rede: aguardar 500 ms e repetir uma vez.
 - Falha de formato: erro no item, sem tocar o portal.
@@ -110,12 +119,15 @@ menos uma sessão do portal autenticada.
 POST /api/sessoes
 Content-Type: application/json
 
-{"identificadorPrestador": "27372066000169"}
+{"identificadorPrestador": "<identificador-redigido>"}
 ```
 
 - `201 Created`: `{"token": "<32 hex>", "identificadorPrestador": "..."}`
 - `400`: identificador ausente/vazio.
 - `401`: identificador desconhecido ou credencial recusada.
+- `500`: falha interna do backend, sem detalhe interno na resposta.
+- `502`: resposta inválida ou inesperada do portal.
+- `503`: portal indisponível ou falha de rede.
 - `429`: limite de criação de sessões.
 
 ### 5.2 `POST /api/lotes`
@@ -139,7 +151,8 @@ Content-Type: application/json
 - `409`: mesma `Idempotency-Key` com payload diferente.
 - Repetição com a mesma chave e mesmo payload devolve o mesmo `202` e o mesmo
   `id` enquanto a execução existir, sem duplicar trabalho no portal. Depois do
-  fim (sem retenção), a mesma chave cria uma nova execução.
+  fim (sem retenção), a mesma chave cria uma nova execução. Retry tardio pode
+  repetir consultas no portal; esse risco é aceito para não reter resultados.
 
 ### 5.3 `GET /api/lotes/{id}/eventos`
 
@@ -153,6 +166,8 @@ Accept: text/event-stream
   `Cache-Control: no-cache`, `X-Accel-Buffering: no`, `Connection: keep-alive`.
 - `401`: token inválido.
 - `404`: lote inexistente, já descartado ou de outro token.
+- No máximo um stream ativo por lote; nova conexão encerra e substitui a
+  anterior. Reconexão usa o último id recebido enquanto a execução existir.
 - Eventos:
 
 ```text
@@ -178,6 +193,8 @@ data: {"mensagem": "..."}
   **somente enquanto o lote está ativo**.
 - O resultado final é descartado depois de entregue; não há retenção.
 - Sem assinantes por 30 s: o lote é cancelado e a fila é liberada.
+- `GET /api/lotes/*/eventos` não usa rate limit de portal; o limite de um
+  stream ativo por lote restringe conexões simultâneas.
 
 ### 5.4 `GET /api/status`
 
@@ -189,10 +206,15 @@ Mantém o health check fora do rate limit. Passa a devolver contadores:
   "sessoesAtivas": 3,
   "lotes": {"ativos": 2, "naFila": 1, "concluidos": 17},
   "memoriaRssMb": 42,
+  "rateLimit": {"rejeicoes429": 0},
+  "falhasPortal": {"502": 0, "503": 0},
   "portalSulAmerica": {"alcançavel": true, "status": 200},
   "timestamp": "..."
 }
 ```
+
+Os contadores são agregados e não incluem token, identificador, carteira ou
+senha. Alertas operacionais são configurados pelo operador fora do código.
 
 ### 5.5 Rotas removidas
 
@@ -231,7 +253,7 @@ Invariantes:
 |---|---|
 | Sessões do portal | 4 por identificador, 8 no total |
 | Requisições simultâneas ao portal | 16 |
-| Lotes ativos + na fila | 24 |
+| Execuções processando + aguardando | 24 no total; a 25ª recebe 429 |
 | Itens por lote | 300 |
 | Corpo máximo | 1 MB |
 | Heartbeat SSE | 15 s |
@@ -250,12 +272,21 @@ abaixo de 512 MB.
 - Token gerado com `Random.secure()` (16 bytes).
 - Lote só é acessível pelo token que o criou.
 - `Idempotency-Key` é escopada ao token.
-- Rate limit por token, por identificador e global; `/api/status` e `/eventos`
-  ficam fora do limite de portal.
+- Rate limit de 20/min por token em `/api/lotes`, 20/min por identificador em
+  `/api/sessoes` e backstop global de 120/min. `/api/status` e `/eventos` ficam
+  fora do rate limit de portal.
 - CORS permite `Authorization`, `Idempotency-Key` e `Last-Event-ID`; expõe
-  `Location`.
-- Logs não imprimem credenciais, tokens, carteira ou senha em claro.
-- Nenhuma nova variável de ambiente; credenciais e CORS continuam como estão.
+  `Location`; produção usa a allowlist já configurada no Render, sem copiar
+  valores de origem para esta documentação.
+- CORS não autentica chamadas diretas. `POST /api/sessoes` permanece público;
+  qualquer caller que conheça identificador pode obter token e consultar o
+  portal. Risco aceito nesta entrega, sem garantia de confidencialidade.
+- Mitigações compensatórias: allowlist de origens no browser, rate limits,
+  limite de 24 execuções, um stream por lote e alertas operacionais.
+- Logs estruturados não imprimem credenciais, tokens, identificadores,
+  carteiras ou senhas. `/api/status` expõe somente contadores agregados.
+- Nenhuma nova variável de ambiente nem fornecedor de telemetria; alertas são
+  configurados pelo operador fora do código.
 
 ## 9. Plano de tarefas em worktrees
 
@@ -284,24 +315,24 @@ em branco não entram na conta.
 
 ### Visão geral
 
-| ID | Tarefa | Depende de | Wave | Orçamento |
-|---|---|---|---|---|
-| T1 | Núcleo HTTP (JSON, CORS, Bearer) | — | 1 | 250 |
-| T2 | Rate limit por token/identificador/global | — | 1 | 160 |
-| T3 | Execução de lote + codificação SSE | — | 1 | 380 |
-| T7 | Front: cliente SSE + serviço HTTP | contrato | 1 | 450 |
-| T4 | Pool de sessões + concorrência do `SessaoPortal` | T3 | 2 | 380 |
-| T8 | Front: controller assíncrono | T7 | 2 | 450 |
-| T5 | Agendador de lotes | T3, T4 | 3 | 300 |
-| T6 | Rotas e wiring final | T1, T2, T3, T4, T5 | 4 | 400 |
-| T9 | Harness de carga 12 usuários | T6 | 5 | 220 |
-| T10 | Documentação, ADRs e memória | todas | 6 | 0 |
+| ID | Tarefa | Depende de | Wave | Orçamento | Estado |
+|---|---|---|---|---|---|
+| T1 | Núcleo HTTP (JSON, CORS, Bearer) | — | 1 | 250 | Concluída em `main` (`76ccf8f`) |
+| T2 | Rate limit por token/identificador/global | — | 1 | 160 | Concluída em `main` (`f653589`) |
+| T3 | Execução de lote + codificação SSE | — | 1 | 380 | Concluída em `main` (`f2c03df`) |
+| T7 | Front: cliente SSE + serviço HTTP | contrato | 1 | 450 | Concluída em `main` (`5df2b26`) |
+| T4 | Pool de sessões + concorrência do `SessaoPortal` | T3 | 2 | 380 | Pendente |
+| T8 | Front: controller assíncrono | T7 | 2 | 450 | Pendente |
+| T5 | Agendador de lotes | T3, T4 | 3 | 300 | Pendente |
+| T6 | Rotas e wiring final | T1, T2, T3, T4, T5 | 4 | 400 | Pendente |
+| T9 | Harness de carga 12 usuários | T6 | 5 | 220 | Pendente |
+| T10 | Documentação, ADRs e memória | todas | 6 | 0 | Pendente |
 
-### T1 — Núcleo HTTP
+### T1 — Núcleo HTTP (concluída)
 
 **Worktree:** `t1-nucleo-http`
 
-**Arquivos novos**
+**Arquivos existentes — reutilizar**
 
 - `backend/lib/http/json.dart`: leitura de corpo com limite de 1 MB, respostas
   JSON, erro padronizado, `Retry-After`.
@@ -321,11 +352,11 @@ em branco não entram na conta.
   CORS com lista, wildcard, `Vary: Origin`, preflight e headers permitidos.
 - `dart analyze` e `dart test` verdes no pacote `backend/`.
 
-### T2 — Rate limit
+### T2 — Rate limit (concluída)
 
 **Worktree:** `t2-rate-limit`
 
-**Arquivos novos**
+**Arquivos existentes — reutilizar**
 
 - `backend/lib/http/rate_limit.dart`
 - `backend/test/http/rate_limit_test.dart`
@@ -346,11 +377,11 @@ em branco não entram na conta.
 - `Retry-After` presente e numérico.
 - Testes verdes.
 
-### T3 — Execução de lote + SSE
+### T3 — Execução de lote + SSE (concluída)
 
 **Worktree:** `t3-execucao-sse`
 
-**Arquivos novos**
+**Arquivos existentes — reutilizar**
 
 - `backend/lib/modules/sulamerica/data/execucao_lote.dart`
 - `backend/lib/http/sse.dart`
@@ -418,8 +449,9 @@ em branco não entram na conta.
 
 **Responsabilidades**
 
-- Fila de até 24 execuções; excedente → `FilaCheiaException` (vira 429).
-- FIFO justa por identificador, em rodízio entre lotes.
+- Máximo de 24 execuções totais, incluindo as processando e aguardando; a 25ª
+  recebe `FilaCheiaException` (vira 429).
+- Rodízio entre identificadores e, dentro de cada identificador, entre lotes.
 - Workers por sessão: 1 elegibilidade serial, até 3 senhas paralelas.
 - Semáforo global de 16 requisições ao portal.
 - Atualiza progresso da execução a cada item; emite progresso agregado no máximo
@@ -450,35 +482,44 @@ em branco não entram na conta.
 
 - `POST /api/sessoes`, `POST /api/lotes`, `GET /api/lotes/{id}/eventos`,
   `GET /api/status`; remover `/api/login` e `/api/consultas`.
+- `POST /api/sessoes` é público; não existe identidade individual nesta entrega.
 - Validar payload antes do token, como hoje.
 - Idempotência por token + chave; 409 para payload diferente.
+- Uma conexão SSE ativa por lote; nova conexão fecha e substitui a anterior.
 - SSE com `Response` stream, `context['shelf.io.buffer_output'] = false`.
 - `RepositorioSessoes`: tokens (máx. 200, TTL 12 h), dono do lote, idempotência.
 - `/api/status` com contadores e RSS (`ProcessInfo.currentRss`).
-- Logger de produção: `ProductionFilter`, `SimplePrinter`, nível `info`.
+- Contadores agregados incluem rejeições 429 e falhas upstream 502/503, sem
+  identificadores ou dados de consulta.
+- Logs de produção estruturados em JSON por `LogPrinter` do pacote `logger`
+  existente, nível `info`; sem dependência nova.
 
 **Aceite**
 
 - Contrato completo coberto por testes: 201, 202, 400, 401, 404, 409, 413, 429,
-  SSE, replay, cancelamento e ownership.
+  500, 502, 503, SSE, replay, substituição de assinante, cancelamento e ownership.
 - Nenhuma referência a `/api/login` ou `/api/consultas` no backend.
 - `dart analyze` e `dart test` verdes.
 
-### T7 — Front: cliente SSE + serviço HTTP
+### T7 — Front: cliente SSE + serviço HTTP (concluída)
 
 **Worktree:** `t7-front-sse`
 
-**Arquivos**
+**Arquivos existentes — reutilizar**
 
-- Novo: `lib/globals/network/sse_client.dart` (export condicional)
-- Novo: `lib/globals/network/sse_client_stub.dart`
-- Novo: `lib/globals/network/sse_client_web.dart` (`package:web` + `fetch` +
+- `lib/globals/network/sse_client.dart` (export condicional)
+- `lib/globals/network/sse_client_stub.dart`
+- `lib/globals/network/sse_client_web.dart` (`package:web` + `fetch` +
   `ReadableStream`)
-- Novo: `lib/modules/validador_xml/data/models/lote_remoto.dart`
-- Reescrever: `lib/modules/validador_xml/data/services/sul_america_backend_service.dart`
-- Editar: `pubspec.yaml`/`pubspec.lock` (`web`)
-- Testes: `test/globals/network/sse_client_test.dart`,
+- `lib/modules/validador_xml/data/models/lote_remoto.dart`
+- `lib/modules/validador_xml/data/services/sul_america_backend_service.dart`
+- `pubspec.yaml`/`pubspec.lock` já incluem `web`.
+- Testes existentes: `test/globals/network/sse_client_test.dart`,
   `test/modules/validador_xml/data/services/sul_america_backend_service_test.dart`
+
+O cliente SSE, modelo e serviço HTTP foram adicionados em `5df2b26`. O serviço
+mantém métodos antigos temporários; T8 deve migrar o controller e removê-los.
+Não recriar esses arquivos nem introduzir cliente paralelo.
 
 **Mudanças**
 
@@ -508,14 +549,20 @@ em branco não entram na conta.
 - Editar: `lib/modules/validador_xml/presentation/controllers/validador_controller.dart`
 - Editar: `lib/modules/validador_xml/presentation/widgets/barra_progresso_envio.dart`
   (se necessário para progresso real)
-- Testes: `test/modules/validador_xml/presentation/controllers/validador_controller_test.dart`
+- Testes existentes: `test/validador_controller_test.dart` e
+  `test/validador_controller_consulta_test.dart`
 
 **Mudanças**
 
-- Fluxo: `POST /api/sessoes` → chunks de 300 → `POST /api/lotes` → SSE.
+- Fluxo: `POST /api/sessoes` → chunks sequenciais de até 300 →
+  `POST /api/lotes` → SSE; progresso acumulado por arquivo.
 - Progresso real por evento; não usar mais “etapas” fictícias.
 - 401: reautenticar uma vez e recriar o lote.
 - 429: aguardar `Retry-After`/backoff e tentar de novo; sem duplicar lote.
+- Reconectar SSE com esperas de 2 s, 4 s e 8 s, no máximo 3 vezes, usando o
+  último id recebido; depois manter itens pendentes para retentativa manual.
+- A retentativa manual pode repetir consultas se a execução anterior terminou
+  antes da reconexão, pois resultados concluídos não são retidos.
 - Sem retomada após recarregar; remover qualquer persistência de lote.
 - Manter `_consultasPendentes` e o botão de retentativa para itens que falharam
   no portal.
@@ -524,7 +571,7 @@ em branco não entram na conta.
 **Aceite**
 
 - 12 lotes simulados via fake do serviço; progresso e resultado aplicados.
-- Queda de SSE reconecta com `desde` até o limite configurado.
+- Queda de SSE reconecta até 3 vezes (2/4/8 s); depois itens ficam pendentes.
 - Recarregar não tenta retomar.
 - `flutter test` e `flutter analyze` verdes.
 
@@ -541,14 +588,16 @@ em branco não entram na conta.
 
 - `SessaoPortal` fake com latência configurável.
 - Sobe a API em porta efêmera; 12 clientes enviam 300 itens cada.
-- Mede conclusão, 429 por fila, tempo total e RSS.
+- Testa os 12 clientes em um identificador e divididos entre os dois.
+- Mede conclusão, 429 por fila, duração p50/p95 e RSS; não há SLA numérico
+  antes de medir o comportamento real do portal.
 - Não toca o portal real; não usa credenciais.
 
 **Aceite**
 
-- 12 lotes concluem sem 429 com fila de 24.
+- 12 lotes concluem sem 429 com limite de 24 execuções totais.
 - O 25º lote recebe 429 com `Retry-After`.
-- RSS registrado no relatório do teste.
+- RSS e duração p50/p95 registrados no relatório do teste.
 - Teste não depende de rede.
 
 ### T10 — Documentação e memória
@@ -561,15 +610,20 @@ em branco não entram na conta.
 - `GLOSSARY.md`: revisar termos contra o código final.
 - `docs/adr/0001-lotes-assincronos-com-sse.md`: revisar decisão e consequências.
 - `docs/adr/0002-pool-de-sessoes-por-prestador.md`: revisar decisão e consequências.
+- `docs/adr/0003-api-publica-com-controles-compensatorios.md`: registrar risco e
+  controles compensatórios da API pública.
 - `.agents/memoria.md`: causas raiz confirmadas e como evitar regressão (arquivo
   local, não versionado).
-- `render.yaml`: comentários atualizados (sem novas variáveis).
+- `render.yaml`: comentários atualizados; produção exige allowlist CORS já
+  configurada no Render, sem valores de origem ou credenciais na documentação.
 
 **Aceite**
 
 - Nenhum comando, rota ou caminho citado está errado.
 - README não menciona rotas removidas.
 - ADRs explicam o porquê, não o como.
+- Nenhum identificador real, origem específica ou credencial é copiado para
+  documentação; CORS allowlist não é apresentada como autenticação.
 - `dart test` e `flutter test` continuam verdes.
 
 ## 10. Orquestração
@@ -596,8 +650,8 @@ Orçamento: ≤ 500 linhas úteis (testes, comentários e linhas em branco não
 contam). Rode a medição e reporte o número.
 
 Implemente, escreva os testes da tarefa e rode:
-- backend: dart analyze && dart test
-- front: flutter analyze && flutter test
+- backend: rode `dart analyze` e `dart test` dentro de `backend/`
+- front: rode `flutter analyze` e `flutter test` na raiz
 
 Commit em Conventional Commits pt-BR, uma linha, sem body. Não dê push.
 Reporte: resumo, arquivos, linhas úteis, testes executados e riscos.
@@ -607,18 +661,30 @@ Reporte: resumo, arquivos, linhas úteis, testes executados e riscos.
 
 ### Backend
 
-- `cd backend && dart analyze`
-- `cd backend && dart test`
+No PowerShell, a partir da raiz:
+
+```powershell
+Push-Location backend
+dart analyze
+dart test
+Pop-Location
+```
+
 - Testes novos por componente e integração de rotas.
 - Testes existentes de parser, credenciais, TLS e falhas de sessão continuam
   valendo, ajustados apenas onde o contrato mudou.
 
 ### Front
 
-- `flutter analyze`
-- `flutter test`
-- `flutter build web --release --dart-define=API_URL=https://validador-api.onrender.com`
-  na validação final.
+Na raiz do projeto:
+
+```powershell
+flutter analyze
+flutter test
+flutter build web --release --dart-define="API_URL=<origem-da-api-redigida>"
+```
+
+Substitua o placeholder pela origem configurada antes do build final.
 
 ### Manual (após deploy)
 
@@ -628,6 +694,10 @@ Reporte: resumo, arquivos, linhas úteis, testes executados e riscos.
 4. Lote de 300 itens → progresso contínuo, sem 429.
 5. Recarregar a página no meio → lote é cancelado após 30 s; front não retoma.
 6. Dois navegadores em paralelo → tokens e lotes independentes.
+7. `/api/status` expõe somente contadores agregados; logs não contêm credenciais,
+   tokens, identificadores, carteiras ou senhas.
+8. CORS aceita apenas as origens configuradas no Render; chamada direta à API
+   continua possível e não é bloqueada por CORS.
 
 ## 12. Rollout e rollback
 
@@ -649,13 +719,18 @@ Reporte: resumo, arquivos, linhas úteis, testes executados e riscos.
 | Deploy quebrado entre backend e front | janela coordenada e rollback documentado |
 | Sem retenção/retomada | decisão explícita; front avisa e permite reenviar |
 | Token vazando em log | Bearer, nenhum token em URL; revisão de log nos testes |
+| API pública sem identidade individual | risco aceito; allowlist CORS, rate limits, limites de execução/stream, logs redigidos e alertas operacionais; controles não protegem confidencialidade contra chamadas diretas |
+| Retry após execução descartada | a mesma chave pode criar nova execução; risco de consulta duplicada aceito para evitar retenção de resultado |
 
 ## 14. Definition of Done
 
 - Todas as tarefas T1–T10 mergeadas e com push.
+- T1, T2, T3 e T7 já estão concluídas em `main`; as demais permanecem pendentes.
 - Nenhuma rota antiga permanece.
 - `dart analyze`, `dart test`, `flutter analyze`, `flutter test` verdes.
-- Harness de 12 usuários verde e RSS reportado.
+- Harness de 12 usuários verde; RSS e duração p50/p95 reportados, sem SLA
+  numérico até existir baseline.
 - Budget de 500 linhas úteis respeitado em todas as worktrees.
 - README, GLOSSARY e ADRs atualizados.
-- Nenhum arquivo temporário, credencial ou artefato de build versionado.
+- Nenhum arquivo temporário, identificador real, origem específica, credencial
+  ou artefato de build versionado.
