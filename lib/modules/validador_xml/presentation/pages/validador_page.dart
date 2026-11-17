@@ -141,14 +141,16 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
                   const SizedBox(height: AppDimens.spaceLg),
                   _painelConexao(c, conexao),
                 ],
-                const SizedBox(height: AppDimens.spaceLg),
-                DropZoneSite(
-                  onArquivoSelecionado: (nome, bytes) =>
-                      context.read<ValidadorController>().definirArquivo(
-                            nomeArquivo: nome,
-                            bytes: bytes,
-                          ),
-                ),
+                if (conexao != EstadoConexao.verificando) ...[
+                  const SizedBox(height: AppDimens.spaceLg),
+                  DropZoneSite(
+                    onArquivoSelecionado: (nome, bytes) =>
+                        context.read<ValidadorController>().definirArquivo(
+                              nomeArquivo: nome,
+                              bytes: bytes,
+                            ),
+                  ),
+                ],
                 if (c.status == StatusValidador.erro && c.mensagemErro != null)
                   Padding(
                     padding: const EdgeInsets.only(top: AppDimens.spaceLg),

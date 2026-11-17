@@ -46,7 +46,7 @@ void main() {
 
     expect(find.text(AppStrings.apiVerificandoTitulo), findsNothing);
     expect(find.text(AppStrings.apiIndisponivelTitulo), findsNothing);
-    expect(find.text(AppStrings.dropZoneTexto), findsOneWidget);
+    expect(find.text(AppStrings.dropZoneTexto), findsNothing);
 
     adapter.resposta.complete(
       ResponseBody.fromBytes(
@@ -58,6 +58,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    expect(find.text(AppStrings.dropZoneTexto), findsOneWidget);
   });
 
   testWidgets('API indisponível não bloqueia a seleção de XML', (
