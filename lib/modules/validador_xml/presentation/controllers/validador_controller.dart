@@ -500,8 +500,11 @@ class ValidadorController extends ChangeNotifier {
     _etapaConsultaBackend = EtapaConsultaBackend.concluida;
   }
 
-  void _registrarConsultasPendentes(Iterable<ConsultaLoteItem> itens) =>
-      itens.forEach((item) => _consultasPendentes[_chaveConsulta(item)] = item);
+  void _registrarConsultasPendentes(Iterable<ConsultaLoteItem> itens) {
+    for (final ConsultaLoteItem item in itens) {
+      _consultasPendentes[_chaveConsulta(item)] = item;
+    }
+  }
 
   Future<
     ({

@@ -8,13 +8,18 @@ import '../models/tuss_item.dart';
 /// código precisa ser consultado no proxy. Tabelas `00` e `90`–`99` não têm
 /// referência TUSS: nelas o código só é erro quando existe numa tabela oficial.
 class ClassificadorTussLocal {
-  ClassificadorTussLocal({
+  factory ClassificadorTussLocal({
     TussBaseLocalDatasource? base,
     Set<String> tabelasOficiais = const {},
     DateTime Function() relogio = DateTime.now,
-  })  : _base = base ?? TussBaseLocalDatasource(),
-        _tabelasOficiais = tabelasOficiais,
-        _relogio = relogio;
+  }) =>
+      ClassificadorTussLocal._(
+        base ?? TussBaseLocalDatasource(),
+        tabelasOficiais,
+        relogio,
+      );
+
+  ClassificadorTussLocal._(this._base, this._tabelasOficiais, this._relogio);
 
   final TussBaseLocalDatasource _base;
   final Set<String> _tabelasOficiais;

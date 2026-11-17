@@ -121,18 +121,34 @@ class RelatorioIngestao {
 }
 
 class IngestaoTuss {
-  IngestaoTuss({
-    required this.entrada,
-    required this.saida,
-    required this.relatorio,
+  factory IngestaoTuss({
+    required String entrada,
+    required String saida,
+    required String relatorio,
     required DateTime hoje,
     Map<String, int> contagensEsperadas = _contagensEsperadasPadrao,
     Set<String> tabelasComDataset = _tabelasComDatasetPadrao,
     Map<int, int> totalApiMedido = _totalApiMedidoPadrao,
-  })  : _hoje = DateTime.utc(hoje.year, hoje.month, hoje.day),
-        _contagensEsperadas = contagensEsperadas,
-        _tabelasComDataset = tabelasComDataset,
-        _totalApiMedido = totalApiMedido;
+  }) =>
+      IngestaoTuss._(
+        entrada,
+        saida,
+        relatorio,
+        DateTime.utc(hoje.year, hoje.month, hoje.day),
+        contagensEsperadas,
+        tabelasComDataset,
+        totalApiMedido,
+      );
+
+  IngestaoTuss._(
+    this.entrada,
+    this.saida,
+    this.relatorio,
+    this._hoje,
+    this._contagensEsperadas,
+    this._tabelasComDataset,
+    this._totalApiMedido,
+  );
 
   final String entrada;
   final String saida;
