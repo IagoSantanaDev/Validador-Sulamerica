@@ -28,6 +28,14 @@ class RecursoNaoEncontradoException extends AppException {
       : super('Recurso não encontrado (404).');
 }
 
+class FilaCheiaException extends AppException {
+  const FilaCheiaException({this.retryAfter, String? mensagem})
+      : super(mensagem ?? 'A fila de lotes está cheia. Tente novamente.');
+
+  /// Valor de `Retry-After` devolvido pelo backend, quando presente.
+  final Duration? retryAfter;
+}
+
 class ErroServidorException extends AppException {
   const ErroServidorException({required this.statusCode, String? mensagem})
       : super(mensagem ?? 'Erro do servidor.');
