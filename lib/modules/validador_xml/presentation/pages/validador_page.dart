@@ -137,7 +137,7 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
                   cor: AppColors.textMuted,
                   alinhamento: TextAlign.center,
                 ),
-                if (conexao == EstadoConexao.apiIndisponivel) ...[
+                if (conexao != EstadoConexao.pronto) ...[
                   const SizedBox(height: AppDimens.spaceLg),
                   _painelConexao(c, conexao),
                 ],

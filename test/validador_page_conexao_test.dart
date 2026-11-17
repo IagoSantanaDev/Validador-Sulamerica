@@ -28,7 +28,7 @@ class _AdapterStatusPendente implements HttpClientAdapter {
 }
 
 void main() {
-  testWidgets('não exibe painel enquanto verifica a conexão', (
+  testWidgets('oculta a dropzone enquanto verifica a conexão', (
     WidgetTester tester,
   ) async {
     final GetIt getIt = GetIt.instance;
@@ -44,8 +44,9 @@ void main() {
     await tester.pumpWidget(const MaterialApp(home: ValidadorPage()));
     await tester.pump();
 
-    expect(find.text(AppStrings.apiVerificandoTitulo), findsNothing);
+    expect(find.text(AppStrings.apiVerificandoTitulo), findsOneWidget);
     expect(find.text(AppStrings.apiIndisponivelTitulo), findsNothing);
+    expect(find.text(AppStrings.apiTentarNovamente), findsNothing);
     expect(find.text(AppStrings.dropZoneTexto), findsNothing);
 
     adapter.resposta.complete(
@@ -58,6 +59,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    expect(find.text(AppStrings.apiVerificandoTitulo), findsNothing);
     expect(find.text(AppStrings.dropZoneTexto), findsOneWidget);
   });
 
