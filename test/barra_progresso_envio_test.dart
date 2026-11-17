@@ -8,7 +8,7 @@ void main() {
     WidgetTester tester,
   ) async {
     const String etapa = 'Consultando SulAmérica...';
-    final SemanticsTester semantics = SemanticsTester(tester);
+    final SemanticsHandle semantics = tester.ensureSemantics();
     await tester.pumpWidget(
       const MaterialApp(
         home: Scaffold(
@@ -23,7 +23,7 @@ void main() {
     expect(indicador.value, isNull);
     expect(indicador.color, AppColors.petroleo);
     expect(indicador.backgroundColor, AppColors.track);
-    expect(semantics, includesNodeWith(label: etapa));
+    expect(find.bySemanticsLabel(etapa), findsOneWidget);
 
     semantics.dispose();
   });
