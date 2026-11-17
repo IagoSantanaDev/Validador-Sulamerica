@@ -53,47 +53,57 @@ class _DropZoneSiteState extends State<DropZoneSite> {
                         onCreated: (controller) => _controller = controller,
                         onHover: () => _definirArrasto(true),
                         onLeave: () => _definirArrasto(false),
-                        onDropFile: (arquivo) {
+                        onError: (erro) {
                           _definirArrasto(false);
-                          _processarArquivo(arquivo);
+                          _mostrarFalha(erro);
+                        },
+                        onDropFile: (arquivo) async {
+                          _definirArrasto(false);
+                          await _processarArquivo(arquivo);
                         },
                       ),
                     ),
                     Positioned.fill(
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: AppDimens.spaceLg,
-                          vertical: AppDimens.spaceXl,
+                      child: MouseRegion(
+                        opaque: false,
+                        cursor: SystemMouseCursors.click,
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.translucent,
+                          onTap: _selecionarPorClique,
+                          child: const SizedBox.expand(),
                         ),
-                        child: MouseRegion(
-                          cursor: SystemMouseCursors.click,
-                          child: GestureDetector(
-                            behavior: HitTestBehavior.opaque,
-                            onTap: _selecionarPorClique,
-                            child: _arrastandoArquivo
-                                ? const Icon(
-                                    Icons.upload_outlined,
-                                    size: AppDimens.dropZoneIconeArrasto,
-                                    color: AppColors.navy,
-                                  )
-                                : const Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      Icon(
-                                        Icons.description_outlined,
-                                        size: AppDimens.dropZoneIcone,
-                                        color: AppColors.textLight,
-                                      ),
-                                      SizedBox(height: AppDimens.spaceMd),
-                                      TextoApp.corpo(
-                                        AppStrings.dropZoneTexto,
-                                        cor: AppColors.textLight,
-                                        alinhamento: TextAlign.center,
-                                        selecionavel: false,
-                                      ),
-                                    ],
-                                  ),
+                      ),
+                    ),
+                    Positioned.fill(
+                      child: IgnorePointer(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: AppDimens.spaceLg,
+                            vertical: AppDimens.spaceXl,
                           ),
+                          child: _arrastandoArquivo
+                              ? const Icon(
+                                  Icons.upload_outlined,
+                                  size: AppDimens.dropZoneIconeArrasto,
+                                  color: AppColors.navy,
+                                )
+                              : const Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      Icons.description_outlined,
+                                      size: AppDimens.dropZoneIcone,
+                                      color: AppColors.textLight,
+                                    ),
+                                    SizedBox(height: AppDimens.spaceMd),
+                                    TextoApp.corpo(
+                                      AppStrings.dropZoneTexto,
+                                      cor: AppColors.textLight,
+                                      alinhamento: TextAlign.center,
+                                      selecionavel: false,
+                                    ),
+                                  ],
+                                ),
                         ),
                       ),
                     ),
@@ -113,24 +123,45 @@ class _DropZoneSiteState extends State<DropZoneSite> {
   }
 
   Future<void> _selecionarPorClique() async {
-    final List<dynamic> arquivos = await _controller.pickFiles(
-      multiple: false,
-      mime: const ['text/xml', 'application/xml'],
-    );
-    if (arquivos.isEmpty) return;
-    await _processarArquivo(arquivos.first);
+    try {
+      final arquivos = await _controller.pickFiles(
+        multiple: false,
+        mime: const ['text/xml', 'application/xml'],
+      );
+      if (arquivos.isEmpty) return;
+      await _processarArquivo(arquivos.first);
+    } on Exception catch (erro) {
+      _mostrarFalha(erro);
+    }
   }
 
-  Future<void> _processarArquivo(dynamic arquivo) async {
-    final String nome = await _controller.getFilename(arquivo);
+  Future<void> _processarArquivo(DropzoneFileInterface arquivo) async {
+    late final String nome;
+    late final Uint8List bytes;
+    try {
+      nome = await _controller.getFilename(arquivo);
 
-    if (!nome.toLowerCase().endsWith(_extensaoValida)) {
-      _mostrarSnack(AppStrings.mensagemArquivoInvalidoExtensao);
+      if (!nome.toLowerCase().endsWith(_extensaoValida)) {
+        _mostrarSnack(AppStrings.mensagemArquivoInvalidoExtensao);
+        return;
+      }
+
+      bytes = await _controller.getFileData(arquivo);
+    } on Exception catch (erro) {
+      _mostrarFalha(erro);
       return;
     }
 
-    final Uint8List bytes = await _controller.getFileData(arquivo);
     widget.onArquivoSelecionado(nome, bytes);
+  }
+
+  void _mostrarFalha(Object? erro) {
+    final String? detalhe = erro?.toString();
+    _mostrarSnack(
+      detalhe == null || detalhe.isEmpty
+          ? AppStrings.mensagemFalhaCarregamentoArquivo
+          : '${AppStrings.mensagemFalhaCarregamentoArquivo}: $detalhe',
+    );
   }
 
   void _mostrarSnack(String mensagem) {
