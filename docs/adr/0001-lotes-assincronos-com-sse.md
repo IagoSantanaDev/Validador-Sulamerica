@@ -14,5 +14,9 @@ adaptador web do Dio usa XHR e não entrega chunks.
 - O resultado não é retido depois do fim; recarregar a página perde o lote.
 - Após a execução ser descartada, repetir a mesma chave cria nova execução e
   pode duplicar consultas; esse risco é aceito para evitar retenção de resultados.
+- Sem assinantes por 30 s, a execução cancela fila e chamadas Dio em andamento
+  com `CancelToken` por execução. O cancelamento libera recursos locais, mas não
+  garante que o portal interrompa uma operação já recebida; chamadas canceladas
+  não são repetidas.
 - Cloudflare/Render exigem heartbeat e `X-Accel-Buffering: no` para não
   bufferizar o stream.

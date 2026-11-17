@@ -102,8 +102,19 @@ GET  /api/status   ------------>  contadores + sonda do portal
   entre lotes; muitos lotes de um prestador não monopolizam o portal.
 - Capacidade: máximo de 24 execuções no total, incluindo processamento e fila;
   a 25ª recebe 429.
-- Falha de sessão (401/403): renovar login da sessão e repetir uma vez.
-- Falha transitória de rede: aguardar 500 ms e repetir uma vez.
+- Falha de sessão (401/403): renovar login e repetir a consulta uma vez.
+  Consultas que observaram a mesma geração da sessão compartilham o resultado
+  da renovação, seja sucesso ou falha; uma consulta posterior pode tentar nova
+  renovação.
+- Falha transitória de rede em consulta: aguardar 500 ms e repetir uma vez.
+  O orçamento é por categoria: no máximo uma repetição por falha de sessão e
+  uma por falha de rede, até 3 tentativas de consulta no total.
+- Login feito durante renovação tem seu próprio retry de rede após 500 ms, uma
+  vez; se ainda falhar, todas as consultas da mesma geração recebem a falha.
+- Cancelamento de execução remove itens pendentes e cancela chamadas Dio ativas
+  com token próprio da execução; chamadas canceladas não são repetidas. O
+  cancelamento local não garante que o portal interrompa uma operação já
+  recebida.
 - Falha de formato: erro no item, sem tocar o portal.
 
 ## 5. Contrato HTTP
@@ -128,7 +139,11 @@ Content-Type: application/json
 - `500`: falha interna do backend, sem detalhe interno na resposta.
 - `502`: resposta inválida ou inesperada do portal.
 - `503`: portal indisponível ou falha de rede.
-- `429`: limite de criação de sessões.
+- `429`: limite de criação de sessões por taxa ou por capacidade. Expurgar
+  tokens expirados antes de verificar o teto de 200; não remover tokens ainda
+  válidos para abrir espaço. A resposta de limite de capacidade não inclui
+  `Retry-After`; o front só repete criação uma vez quando esse header estiver
+  presente.
 
 ### 5.2 `POST /api/lotes`
 
@@ -192,7 +207,10 @@ data: {"mensagem": "..."}
 - `desde` (ou `Last-Event-ID`) replica eventos a partir do id informado,
   **somente enquanto o lote está ativo**.
 - O resultado final é descartado depois de entregue; não há retenção.
-- Sem assinantes por 30 s: o lote é cancelado e a fila é liberada.
+- Sem assinantes por 30 s: o lote é cancelado, itens pendentes são removidos e
+  as chamadas Dio ativas são canceladas; esse cancelamento não garante que o
+  portal pare o processamento que já recebeu. Chamadas canceladas não entram
+  na política de retry.
 - `GET /api/lotes/*/eventos` não usa rate limit de portal; o limite de um
   stream ativo por lote restringe conexões simultâneas.
 
@@ -244,6 +262,8 @@ Invariantes:
 - Um token pertence a exatamente um identificador.
 - Uma execução pertence a exatamente um token.
 - Resultado só é entregue ao dono do token.
+- Token com stream ou execução ativos não expira; após a última atividade
+  autenticada e o fim de todos os vínculos ativos, começa o TTL ocioso.
 - Nenhuma sessão do portal é encerrada no meio de uma consulta.
 - O processo não retém resultado depois do fim.
 
@@ -259,7 +279,7 @@ Invariantes:
 | Heartbeat SSE | 15 s |
 | Carência de cancelamento | 30 s |
 | Retenção após o fim | nenhuma |
-| Tokens | máx. 200, TTL ocioso de 12 h |
+| Tokens | máx. 200 válidos; TTL deslizante de 12 h após última atividade autenticada e fim de streams/execuções ativos |
 | Sessões ociosas do portal | sem TTL; teto fixo de 8 |
 
 Memória estimada: ~30 MB de base AOT + 8 sessões + até 24 execuções ativas
@@ -420,8 +440,14 @@ em branco não entram na conta.
 **Mudanças**
 
 - `consultarBeneficiario` e `consultarSenha` deixam de depender do campo mutável
-  `_ultimoStatusFalha`; devolvem tipo com `dados` + `status` (ou falha tipada).
-- Renovação de login protegida por trava por sessão.
+  `_ultimoStatusFalha`; devolvem resultado tipado por chamada, com `dados` +
+  `status` no sucesso ou categoria + `status` na falha.
+- Renovação coalescida por geração da sessão: consultas concorrentes que
+  observaram a mesma geração compartilham sucesso ou falha; consulta posterior
+  pode iniciar nova renovação.
+- Consulta repete uma vez após renovar sessão e uma vez após falha transitória
+  de rede, em até 3 tentativas. O login de renovação tem um retry de rede
+  próprio após 500 ms; falha final é compartilhada pela geração.
 - `HttpClient` com `maxConnectionsPerHost: 8` e `idleTimeout: 10s`, mantendo a
   validação de CA/hostname.
 - Pool: 4 sessões por identificador, criação tardia, login único por sessão,
@@ -430,8 +456,12 @@ em branco não entram na conta.
 
 **Aceite**
 
-- Duas consultas concorrentes na mesma sessão não corrompem status.
-- 401/403 renova uma vez; falha de rede repete uma vez.
+- Duas consultas concorrentes na mesma sessão não corrompem status nem
+  compartilham resultado de outra chamada.
+- 401/403 concorrentes na mesma geração compartilham uma renovação e seu
+  resultado, inclusive falha; uma consulta posterior pode tentar novamente.
+- Consulta repete no máximo uma vez por categoria (sessão e rede); login de
+  renovação repete falha transitória de rede uma vez após 500 ms.
 - Pool nunca passa de 4 sessões por identificador.
 - `POST /api/sessoes` falha com 401 se o login inicial falhar.
 - Logins concorrentes em `garantirAutenticada()` resultam em **um** login por
@@ -456,14 +486,20 @@ em branco não entram na conta.
 - Semáforo global de 16 requisições ao portal.
 - Atualiza progresso da execução a cada item; emite progresso agregado no máximo
   a cada 500 ms.
-- Cancelamento remove itens pendentes da fila.
+- Cancelamento remove itens pendentes e cancela chamadas Dio em andamento com
+  `CancelToken` próprio da execução, sem cancelar chamadas de outros lotes que
+  compartilham a sessão. Cancelamento não dispara retry e não garante que o
+  portal interrompa operação já recebida.
 
 **Aceite**
 
 - 12 lotes de 300 itens progridem juntos; nenhum termina antes dos demais por
   monopolização.
 - Fila cheia devolve erro específico.
-- Cancelar libera a fila e não executa itens pendentes.
+- Cancelar libera a fila, não executa itens pendentes e cancela chamadas ativas
+  sem fechar a sessão do portal nem repetir chamadas canceladas.
+- Cancelar uma execução não cancela chamadas concorrentes de outra execução
+  que compartilhe a mesma sessão.
 - Testes verdes.
 
 ### T6 — Rotas e wiring
@@ -487,7 +523,10 @@ em branco não entram na conta.
 - Idempotência por token + chave; 409 para payload diferente.
 - Uma conexão SSE ativa por lote; nova conexão fecha e substitui a anterior.
 - SSE com `Response` stream, `context['shelf.io.buffer_output'] = false`.
-- `RepositorioSessoes`: tokens (máx. 200, TTL 12 h), dono do lote, idempotência.
+- `RepositorioSessoes`: até 200 tokens válidos, dono do lote e idempotência;
+  expurga expirados antes de criar, rejeita com 429 sem eviction se ainda
+  estiver cheio. TTL deslizante de 12 h, renovado por uso autenticado; stream
+  ou execução ativos pinam o token e o TTL começa após o último vínculo acabar.
 - `/api/status` com contadores e RSS (`ProcessInfo.currentRss`).
 - Contadores agregados incluem rejeições 429 e falhas upstream 502/503, sem
   identificadores ou dados de consulta.
@@ -498,6 +537,8 @@ em branco não entram na conta.
 
 - Contrato completo coberto por testes: 201, 202, 400, 401, 404, 409, 413, 429,
   500, 502, 503, SSE, replay, substituição de assinante, cancelamento e ownership.
+- Testes cobrem limite de 200 tokens sem eviction, expiração/pin de tokens e
+  distinção entre 429 de taxa (com `Retry-After`) e capacidade (sem header).
 - Nenhuma referência a `/api/login` ou `/api/consultas` no backend.
 - `dart analyze` e `dart test` verdes.
 
@@ -559,6 +600,9 @@ Não recriar esses arquivos nem introduzir cliente paralelo.
 - Progresso real por evento; não usar mais “etapas” fictícias.
 - 401: reautenticar uma vez e recriar o lote.
 - 429: aguardar `Retry-After`/backoff e tentar de novo; sem duplicar lote.
+- Em `POST /api/sessoes`, repetir uma vez somente se 429 trouxer
+  `Retry-After`; sem header, exibir a mensagem de limite de capacidade sem
+  retry automático.
 - Reconectar SSE com esperas de 2 s, 4 s e 8 s, no máximo 3 vezes, usando o
   último id recebido; depois manter itens pendentes para retentativa manual.
 - A retentativa manual pode repetir consultas se a execução anterior terminou
@@ -572,6 +616,8 @@ Não recriar esses arquivos nem introduzir cliente paralelo.
 
 - 12 lotes simulados via fake do serviço; progresso e resultado aplicados.
 - Queda de SSE reconecta até 3 vezes (2/4/8 s); depois itens ficam pendentes.
+- 429 em `POST /api/sessoes` com `Retry-After` tenta uma vez; sem header não
+  dispara retry automático.
 - Recarregar não tenta retomar.
 - `flutter test` e `flutter analyze` verdes.
 
@@ -721,6 +767,7 @@ Substitua o placeholder pela origem configurada antes do build final.
 | Token vazando em log | Bearer, nenhum token em URL; revisão de log nos testes |
 | API pública sem identidade individual | risco aceito; allowlist CORS, rate limits, limites de execução/stream, logs redigidos e alertas operacionais; controles não protegem confidencialidade contra chamadas diretas |
 | Retry após execução descartada | a mesma chave pode criar nova execução; risco de consulta duplicada aceito para evitar retenção de resultado |
+| Cancelamento de chamada em andamento | Dio interrompe a requisição local, mas o portal pode concluir operação já recebida; chamadas canceladas não são repetidas |
 
 ## 14. Definition of Done
 
