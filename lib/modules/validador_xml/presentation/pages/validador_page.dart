@@ -91,21 +91,26 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
 
   Widget _buildConteudo(BuildContext context, ValidadorController c) {
     final EstadoConexao conexao = c.estadoConexao;
-    if (conexao != EstadoConexao.pronto) {
-      return _painelConexao(c, conexao);
-    }
-
     if (c.status == StatusValidador.concluido) {
       return _buildResultado(context, c);
     }
 
     if (c.status == StatusValidador.arquivoPronto ||
         c.status == StatusValidador.validando) {
+      final String textoEtapa = switch (c.etapaConsultaBackend) {
+        EtapaConsultaBackend.consultando => AppStrings.consultandoSulAmerica,
+        EtapaConsultaBackend.aguardandoRetentativa =>
+          AppStrings.consultasAguardandoRetentativa,
+        _ => AppStrings.lendoValidandoXml,
+      };
       return Center(
         child: Padding(
           padding: const EdgeInsets.only(top: AppDimens.spaceXs),
-          child: BarraProgressoEnvio(
-            nomeArquivo: c.nomeArquivo ?? '',
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              BarraProgressoEnvio(textoEtapa: textoEtapa),
+            ],
           ),
         ),
       );
@@ -132,6 +137,10 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
                   cor: AppColors.textMuted,
                   alinhamento: TextAlign.center,
                 ),
+                if (conexao != EstadoConexao.pronto) ...[
+                  const SizedBox(height: AppDimens.spaceLg),
+                  _painelConexao(c, conexao),
+                ],
                 const SizedBox(height: AppDimens.spaceLg),
                 DropZoneSite(
                   onArquivoSelecionado: (nome, bytes) =>
@@ -265,6 +274,41 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
                     ),
                   ),
                   const SizedBox(height: AppDimens.spaceLg),
+                  if (c.mensagemAvisoConsultaBackend != null) ...[
+                    PainelStatus(
+                      icone: Icons.info_outline,
+                      cor: AppColors.primary,
+                      titulo: AppStrings.avisoConsultaBackendTitulo,
+                      mensagem: c.mensagemAvisoConsultaBackend,
+                    ),
+                    const SizedBox(height: AppDimens.spaceLg),
+                  ],
+                  if (c.temConsultasPendentes) ...[
+                    PainelStatus(
+                      icone: c.etapaConsultaBackend ==
+                              EtapaConsultaBackend.consultando
+                          ? Icons.sync
+                          : Icons.sync_problem,
+                      cor: AppColors.primary,
+                      titulo:
+                          '${AppStrings.consultasPendentesTitulo} '
+                          '(${c.totalConsultasPendentes})',
+                      mensagem: c.etapaConsultaBackend ==
+                              EtapaConsultaBackend.consultando
+                          ? AppStrings.consultasPendentesEmAndamento
+                          : AppStrings.consultasPendentesMensagem,
+                    ),
+                    if (c.etapaConsultaBackend !=
+                        EtapaConsultaBackend.consultando)
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: BotaoTexto(
+                          rotulo: AppStrings.apiTentarNovamente,
+                          onPressed: c.retentarConsultasPendentes,
+                        ),
+                      ),
+                    const SizedBox(height: AppDimens.spaceLg),
+                  ],
                   if (comProblema.isEmpty)
                     const PainelStatus(
                       icone: Icons.check_circle_outline,

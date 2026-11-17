@@ -2,13 +2,12 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../../../globals/constants/app_colors.dart';
 import '../../../../globals/constants/app_dimens.dart';
-import '../../../../globals/constants/app_strings.dart';
 import '../../../../globals/widgets/textos.dart';
 
 class BarraProgressoEnvio extends StatelessWidget {
-  const BarraProgressoEnvio({super.key, required this.nomeArquivo});
+  const BarraProgressoEnvio({super.key, required this.textoEtapa});
 
-  final String nomeArquivo;
+  final String textoEtapa;
 
   @override
   Widget build(BuildContext context) {
@@ -21,27 +20,18 @@ class BarraProgressoEnvio extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              TextoApp.detalhe(
-                '${AppStrings.uploadEnviandoArquivo} $nomeArquivo...',
-              ),
+              TextoApp.detalhe(textoEtapa, alinhamento: TextAlign.center),
               const SizedBox(height: AppDimens.spaceSm),
               ClipRRect(
                 borderRadius: BorderRadius.circular(AppDimens.radiusSm),
                 child: SizedBox(
                   height: AppDimens.progressoAltura,
-                  child: Stack(
-                    children: [
-                      Container(color: AppColors.track),
-                      Positioned.fill(
-                        child: Align(
-                          alignment: Alignment.centerLeft,
-                          child: FractionallySizedBox(
-                            widthFactor: AppDimens.progressoFatorCheio,
-                            child: Container(color: AppColors.petroleo),
-                          ),
-                        ),
-                      ),
-                    ],
+                  child: LinearProgressIndicator(
+                    value: null,
+                    minHeight: AppDimens.progressoAltura,
+                    color: AppColors.petroleo,
+                    backgroundColor: AppColors.track,
+                    semanticsLabel: textoEtapa,
                   ),
                 ),
               ),

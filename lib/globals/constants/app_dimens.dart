@@ -24,7 +24,6 @@ class AppDimens {
   static const double dropZoneVao = 5;
 
   static const double progressoAltura = 18;
-  static const double progressoFatorCheio = 0.98;
   static const double rotuloLarguraPadrao = 200;
   static const double dropZoneIcone = 48;
   static const double dropZoneIconeArrasto = 64;

@@ -5,12 +5,15 @@ class AppStrings {
   static const String valorIndisponivel = '—';
   static const String mensagemArquivoInvalidoExtensao =
       'Selecione um arquivo com extensão .xml';
+  static const String mensagemFalhaCarregamentoArquivo =
+      'Não foi possível carregar o arquivo. Tente novamente.';
 
   static const String jumbotronLegenda =
       'Validação online de arquivos XML no padrão TISS da ANS.';
   static const String dropZoneTexto =
       'Clique aqui para selecionar o arquivo ou arraste ele para cá para iniciar a validação.';
-  static const String uploadEnviandoArquivo = 'Enviando arquivo';
+  static const String lendoValidandoXml = 'Lendo e validando XML...';
+  static const String consultandoSulAmerica = 'Consultando SulAmérica...';
 
   static const String resultadoTitulo = 'Resultado da Validação';
   static const String protocoloRotulo = 'Protocolo nº';
@@ -18,6 +21,18 @@ class AppStrings {
   static const String processadoEmSufix = ' segundos';
   static const String validarOutroArquivo = 'Validar outro arquivo';
   static const String validacoesPorGuia = 'Validações por guia';
+  static const String consultasPendentesTitulo =
+      'Consultas ao portal pendentes';
+  static const String avisoConsultaBackendTitulo =
+      'Aviso na consulta ao portal';
+  static const String consultasPendentesMensagem =
+      'Algumas consultas ao portal não puderam ser concluídas após as '
+      'tentativas automáticas. '
+      'Elas não foram classificadas como erros do XML.';
+  static const String consultasPendentesEmAndamento =
+      'Tentando consultar os itens pendentes...';
+  static const String consultasAguardandoRetentativa =
+      'Aguardando nova tentativa automática para consultas sem resposta...';
 
   static const String metadadoNome = 'Nome';
   static const String metadadoTamanho = 'Tamanho';
