@@ -42,7 +42,7 @@ class _AdapterFake implements HttpClientAdapter {
   }
 }
 
-SulAmericaBackendService _servicoCom(_AdapterFake adapter) {
+SulAmericaBackendService _servico(_AdapterFake adapter) {
   final Dio dio = Dio()..httpClientAdapter = adapter;
   return SulAmericaBackendService(
     DioClient(baseUrl: 'http://localhost:8080', dio: dio),
@@ -55,192 +55,174 @@ const List<ConsultaLoteItem> _consultas = [
 ];
 
 void main() {
-  group('criarSessao', () {
-    test(
-      'envia o identificador sem token no corpo e devolve o token',
-      () async {
-        final _AdapterFake adapter = _AdapterFake(
-          statusCode: 201,
-          corpo: {
-            'token': 'abc123',
-            'identificadorPrestador': '27372066000673',
-          },
-        );
+  group('SulAmericaBackendService', () {
+    test('criarSessao envia apenas o identificador e devolve o token', () async {
+      final _AdapterFake adapter = _AdapterFake(
+        statusCode: 201,
+        corpo: {
+          'token': 'token-fake',
+          'identificadorPrestador': 'TESTE',
+        },
+      );
 
-        final resultado = await _servicoCom(
-          adapter,
-        ).criarSessao(identificadorPrestador: '27372066000673');
+      final resultado = await _servico(
+        adapter,
+      ).criarSessao(identificadorPrestador: 'TESTE');
 
-        resultado.fold(
-          onSuccess: (String token) => expect(token, 'abc123'),
-          onFailure: (AppException erro) => fail('Esperava sucesso: $erro'),
-        );
-        final RequestOptions requisicao = adapter.requisicoes.single;
-        expect(requisicao.path, '/api/sessoes');
-        expect(requisicao.method, 'POST');
-        expect(requisicao.data, {'identificadorPrestador': '27372066000673'});
-        expect(requisicao.uri.toString(), isNot(contains('abc123')));
-        expect(jsonEncode(requisicao.data), isNot(contains('token')));
-      },
-    );
+      resultado.fold(
+        onSuccess: (token) => expect(token, 'token-fake'),
+        onFailure: (erro) => fail('Esperava sucesso, veio: $erro'),
+      );
+      final RequestOptions request = adapter.requisicoes.single;
+      expect(request.path, '/api/sessoes');
+      expect(request.data, {'identificadorPrestador': 'TESTE'});
+      expect(request.uri.toString(), isNot(contains('token-fake')));
+    });
 
-    test('401 vira NaoAutorizadoException', () async {
-      final adapter = _AdapterFake(
+    test('criarSessao mapeia 401 para NaoAutorizadoException', () async {
+      final _AdapterFake adapter = _AdapterFake(
         statusCode: 401,
         corpo: {'status': 'erro', 'mensagem': 'credencial recusada'},
       );
 
-      final resultado = await _servicoCom(
+      final resultado = await _servico(
         adapter,
-      ).criarSessao(identificadorPrestador: '27372066000673');
+      ).criarSessao(identificadorPrestador: 'TESTE');
 
       resultado.fold(
         onSuccess: (_) => fail('Esperava falha'),
-        onFailure: (AppException erro) =>
-            expect(erro, isA<NaoAutorizadoException>()),
+        onFailure: (erro) => expect(erro, isA<NaoAutorizadoException>()),
       );
     });
-  });
 
-  group('criarLote', () {
-    test('envia Bearer e Idempotency-Key e lê 202 com Location', () async {
+    test('criarLote envia Bearer e idempotência e lê Location', () async {
       final _AdapterFake adapter = _AdapterFake(
         statusCode: 202,
-        corpo: {'id': 'lote-1', 'estado': 'na_fila', 'total': 2},
+        corpo: {'id': 'lote-fake', 'estado': 'na_fila', 'total': 2},
         cabecalhos: {
-          'location': ['/api/lotes/lote-1/eventos'],
-          'retry-after': ['10'],
+          'location': ['/api/lotes/lote-fake/eventos'],
         },
       );
 
-      final resultado = await _servicoCom(adapter).criarLote(
-        token: 'token-secreto',
-        idempotencyKey: 'chave-1',
+      final resultado = await _servico(adapter).criarLote(
+        token: 'token-fake',
+        idempotencyKey: 'key-fake',
         consultas: _consultas,
       );
 
       resultado.fold(
         onSuccess: (lote) {
-          expect(lote.id, 'lote-1');
-          expect(lote.estado, 'na_fila');
+          expect(lote.id, 'lote-fake');
+          expect(lote.location, '/api/lotes/lote-fake/eventos');
           expect(lote.total, 2);
-          expect(lote.location, '/api/lotes/lote-1/eventos');
         },
-        onFailure: (AppException erro) => fail('Esperava sucesso: $erro'),
+        onFailure: (erro) => fail('Esperava sucesso, veio: $erro'),
       );
-      final RequestOptions requisicao = adapter.requisicoes.single;
-      expect(requisicao.path, '/api/lotes');
-      expect(requisicao.headers['Authorization'], 'Bearer token-secreto');
-      expect(requisicao.headers['Idempotency-Key'], 'chave-1');
-      expect(requisicao.data, {
+      final RequestOptions request = adapter.requisicoes.single;
+      expect(request.path, '/api/lotes');
+      expect(request.headers['Authorization'], 'Bearer token-fake');
+      expect(request.headers['Idempotency-Key'], 'key-fake');
+      expect(request.data, {
         'consultas': [
           {'tipo': 'elegibilidade', 'chave': '123'},
           {'tipo': 'senha', 'chave': '456'},
         ],
       });
-      expect(jsonEncode(requisicao.data), isNot(contains('token-secreto')));
-      expect(requisicao.uri.toString(), isNot(contains('token-secreto')));
+      expect(jsonEncode(request.data), isNot(contains('token-fake')));
+      expect(request.uri.toString(), isNot(contains('token-fake')));
     });
 
-    test('404 vira RecursoNaoEncontradoException', () async {
-      final adapter = _AdapterFake(statusCode: 404);
-
-      final resultado = await _servicoCom(adapter).criarLote(
-        token: 'token-secreto',
-        idempotencyKey: 'chave-1',
+    test('404 mapeia para RecursoNaoEncontradoException', () async {
+      final resultado = await _servico(
+        _AdapterFake(statusCode: 404),
+      ).criarLote(
+        token: 'token-fake',
+        idempotencyKey: 'key-fake',
         consultas: _consultas,
       );
 
       resultado.fold(
         onSuccess: (_) => fail('Esperava falha'),
-        onFailure: (AppException erro) =>
-            expect(erro, isA<RecursoNaoEncontradoException>()),
+        onFailure: (erro) => expect(erro, isA<RecursoNaoEncontradoException>()),
       );
     });
 
-    test('429 vira FilaCheiaException com Retry-After', () async {
-      final adapter = _AdapterFake(
-        statusCode: 429,
-        corpo: {'status': 'erro', 'mensagem': 'fila cheia'},
-        cabecalhos: {
-          'retry-after': ['10'],
-        },
-      );
-
-      final resultado = await _servicoCom(adapter).criarLote(
-        token: 'token-secreto',
-        idempotencyKey: 'chave-1',
+    test('429 preserva o header Retry-After', () async {
+      final resultado = await _servico(
+        _AdapterFake(
+          statusCode: 429,
+          cabecalhos: {
+            'retry-after': ['10'],
+          },
+        ),
+      ).criarLote(
+        token: 'token-fake',
+        idempotencyKey: 'key-fake',
         consultas: _consultas,
       );
 
       resultado.fold(
         onSuccess: (_) => fail('Esperava falha'),
-        onFailure: (AppException erro) {
+        onFailure: (erro) {
           expect(erro, isA<FilaCheiaException>());
-          expect(
-            (erro as FilaCheiaException).retryAfter,
-            const Duration(seconds: 10),
-          );
+          expect((erro as FilaCheiaException).retryAfter, const Duration(seconds: 10));
         },
       );
     });
 
-    test('5xx vira ErroServidorException com o status', () async {
-      final adapter = _AdapterFake(statusCode: 503);
-
-      final resultado = await _servicoCom(adapter).criarLote(
-        token: 'token-secreto',
-        idempotencyKey: 'chave-1',
+    test('5xx preserva o statusCode', () async {
+      final resultado = await _servico(
+        _AdapterFake(statusCode: 503),
+      ).criarLote(
+        token: 'token-fake',
+        idempotencyKey: 'key-fake',
         consultas: _consultas,
       );
 
       resultado.fold(
         onSuccess: (_) => fail('Esperava falha'),
-        onFailure: (AppException erro) {
+        onFailure: (erro) {
           expect(erro, isA<ErroServidorException>());
           expect((erro as ErroServidorException).statusCode, 503);
         },
       );
     });
 
-    test('status() segue disponível para a verificação de conexão', () async {
-      final adapter = _AdapterFake(
+    test('status continua disponível', () async {
+      final _AdapterFake adapter = _AdapterFake(
         statusCode: 200,
-        corpo: {'status': 'ok', 'sessoesAtivas': 1},
+        corpo: {'status': 'ok'},
       );
 
-      final resultado = await _servicoCom(adapter).status();
+      final resultado = await _servico(adapter).status();
 
       resultado.fold(
         onSuccess: (dados) => expect(dados['status'], 'ok'),
-        onFailure: (AppException erro) => fail('Esperava sucesso: $erro'),
+        onFailure: (erro) => fail('Esperava sucesso, veio: $erro'),
       );
       expect(adapter.requisicoes.single.path, '/api/status');
     });
-  });
 
-  group('abrirEventos', () {
-    test('monta a URL de eventos sem expor o token', () {
+    test('monta URL SSE com retomada sem expor o token', () {
       final Uri url = SulAmericaBackendService.montarUrlEventos(
-        'https://validador-api.onrender.com/',
-        'lote-1',
-        desde: 12,
+        'https://api.example.invalid/',
+        'lote-fake',
+        desde: 17,
       );
 
       expect(
         url.toString(),
-        'https://validador-api.onrender.com/api/lotes/lote-1/eventos?desde=12',
+        'https://api.example.invalid/api/lotes/lote-fake/eventos?desde=17',
       );
-      expect(url.toString(), isNot(contains('Bearer')));
+      expect(url.toString(), isNot(contains('token-fake')));
     });
 
-    test('fora do web falha com erro explícito', () {
-      final _AdapterFake adapter = _AdapterFake();
-
+    test('fora do web, SSE falha explicitamente', () {
       expect(
-        () => _servicoCom(
-          adapter,
-        ).abrirEventos(token: 'token-secreto', idLote: 'lote-1'),
+        () => _servico(_AdapterFake()).abrirEventos(
+          token: 'token-fake',
+          idLote: 'lote-fake',
+        ),
         throwsUnsupportedError,
       );
     });

@@ -38,8 +38,10 @@ DioClient _criarClienteComRespostaFalsa({
   required Map<String, dynamic> corpo,
 }) {
   final Dio dio = Dio()
-    ..httpClientAdapter =
-        _FakeHttpClientAdapter(statusCode: statusCode, corpo: corpo);
+    ..httpClientAdapter = _FakeHttpClientAdapter(
+      statusCode: statusCode,
+      corpo: corpo,
+    );
   return DioClient(baseUrl: 'https://exemplo.com', dio: dio);
 }
 
@@ -96,7 +98,7 @@ void main() {
       );
     });
 
-    test('não registra o corpo de erro do endpoint de login', () async {
+    test('não registra o corpo de erro de lote com dados sensíveis', () async {
       final DioClient client = _criarClienteComRespostaFalsa(
         statusCode: 401,
         corpo: {'mensagem': 'PORTAL_SENHA_PRIVADA'},
@@ -106,8 +108,12 @@ void main() {
       await runZoned<Future<void>>(
         () async {
           await client.post<dynamic>(
-            '/api/login',
-            corpo: {'identificadorPrestador': '27372066000673'},
+            '/api/lotes',
+            corpo: {
+              'consultas': [
+                {'tipo': 'senha', 'chave': 'PRIVATE_QUERY_DATA'},
+              ],
+            },
             parser: (dados) => dados,
           );
         },
@@ -117,31 +123,34 @@ void main() {
       );
 
       expect(linhasLog.join('\n'), isNot(contains('PORTAL_SENHA_PRIVADA')));
+      expect(linhasLog.join('\n'), isNot(contains('PRIVATE_QUERY_DATA')));
       expect(
         linhasLog.join('\n'),
-        contains('-> POST https://exemplo.com/api/login'),
+        contains('-> POST https://exemplo.com/api/lotes'),
       );
     });
 
-    test('mapeia status 500 para ErroServidorException com o statusCode',
-        () async {
-      final DioClient client = _criarClienteComRespostaFalsa(
-        statusCode: 500,
-        corpo: {'mensagem': 'falha interna'},
-      );
+    test(
+      'mapeia status 500 para ErroServidorException com o statusCode',
+      () async {
+        final DioClient client = _criarClienteComRespostaFalsa(
+          statusCode: 500,
+          corpo: {'mensagem': 'falha interna'},
+        );
 
-      final resultado = await client.get<dynamic>(
-        '/instavel',
-        parser: (dados) => dados,
-      );
+        final resultado = await client.get<dynamic>(
+          '/instavel',
+          parser: (dados) => dados,
+        );
 
-      resultado.fold(
-        onSuccess: (_) => fail('Esperava falha'),
-        onFailure: (erro) {
-          expect(erro, isA<ErroServidorException>());
-          expect((erro as ErroServidorException).statusCode, 500);
-        },
-      );
-    });
+        resultado.fold(
+          onSuccess: (_) => fail('Esperava falha'),
+          onFailure: (erro) {
+            expect(erro, isA<ErroServidorException>());
+            expect((erro as ErroServidorException).statusCode, 500);
+          },
+        );
+      },
+    );
   });
 }
