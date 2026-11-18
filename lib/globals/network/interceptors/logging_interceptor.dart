@@ -5,6 +5,10 @@ import 'package:flutter/foundation.dart';
 
 class LoggingInterceptor extends Interceptor {
   static const int _maxCaracteresCorpo = 180;
+  static const Set<String> _rotasComDadosSensives = {
+    '/api/sessoes',
+    '/api/lotes',
+  };
 
   @override
   void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
@@ -22,8 +26,7 @@ class LoggingInterceptor extends Interceptor {
         '${_urlDe(response.requestOptions)} -> ${response.statusCode}',
       );
 
-      if (!_urlDe(response.requestOptions).contains('/api/login') &&
-          !_urlDe(response.requestOptions).contains('/api/consultas')) {
+      if (!_corpoContemDadosSensives(response.requestOptions)) {
         _logarCorpo('resposta', response.data);
       }
     }
@@ -45,14 +48,14 @@ class LoggingInterceptor extends Interceptor {
   }
 
   void _logarCorpoSemPii(RequestOptions options, String rotulo, dynamic dados) {
-    final String url = _urlDe(options);
-    if (url.contains('/api/login') || url.contains('/api/consultas')) {
-      return;
-    }
+    if (_corpoContemDadosSensives(options)) return;
     _logarCorpo(rotulo, dados);
   }
 
   String _urlDe(RequestOptions options) => '${options.baseUrl}${options.path}';
+
+  bool _corpoContemDadosSensives(RequestOptions options) =>
+      _rotasComDadosSensives.contains(options.uri.path);
 
   void _logarCorpo(String rotulo, dynamic dados) {
     final String? texto = _resumir(dados);

@@ -93,39 +93,6 @@ class SulAmericaBackendService {
     );
   }
 
-  // Compatibilidade temporária com o controller atual (removido em T8).
-  Future<Result<String>> login({required String identificadorPrestador}) {
-    return _requisitar<String>(
-      metodo: 'POST',
-      caminho: '/api/login',
-      corpo: {'identificadorPrestador': identificadorPrestador},
-      parser: (dynamic dados, Response<dynamic> _) =>
-          (dados as Map)['token'] as String,
-    );
-  }
-
-  // Compatibilidade temporária com o controller atual (removido em T8).
-  Future<Result<List<ResultadoConsultaLote>>> consultarLote({
-    required String token,
-    required List<ConsultaLoteItem> consultas,
-  }) {
-    return _requisitar<List<ResultadoConsultaLote>>(
-      metodo: 'POST',
-      caminho: '/api/consultas',
-      cabecalhos: {'Authorization': 'Bearer $token'},
-      corpo: {'consultas': _serializarConsultas(consultas)},
-      parser: (dynamic dados, Response<dynamic> _) {
-        final Object? resultados = (dados as Map)['resultados'];
-        if (resultados is! List) return const [];
-        return [
-          for (final Object? item in resultados)
-            if (item is Map)
-              ResultadoConsultaLote.fromJson(item.cast<String, dynamic>()),
-        ];
-      },
-    );
-  }
-
   static Uri montarUrlEventos(String baseUrl, String idLote, {int? desde}) {
     final String base = baseUrl.endsWith('/')
         ? baseUrl.substring(0, baseUrl.length - 1)
@@ -234,4 +201,3 @@ class SulAmericaBackendService {
     return ErroDesconhecidoException(erro.toString());
   }
 }
-
