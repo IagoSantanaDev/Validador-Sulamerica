@@ -341,12 +341,12 @@ em branco não entram na conta.
 | T2 | Rate limit por token/identificador/global | — | 1 | 160 | Concluída em `main` (`f653589`) |
 | T3 | Execução de lote + codificação SSE | — | 1 | 380 | Concluída em `main` (`f2c03df`) |
 | T7 | Front: cliente SSE + serviço HTTP | contrato | 1 | 450 | Concluída em `main` (`5df2b26`) |
-| T4 | Pool de sessões + concorrência do `SessaoPortal` | T3 | 2 | 380 | Pendente |
-| T8 | Front: controller assíncrono | T7 | 2 | 450 | Pendente |
-| T5 | Agendador de lotes | T3, T4 | 3 | 300 | Pendente |
-| T6 | Rotas e wiring final | T1, T2, T3, T4, T5 | 4 | 400 | Pendente |
-| T9 | Harness de carga 12 usuários | T6 | 5 | 220 | Pendente |
-| T10 | Documentação, ADRs e memória | todas | 6 | 0 | Pendente |
+| T4 | Pool de sessões + concorrência do `SessaoPortal` | T3 | 2 | 380 | Implementada localmente; aguardando integração |
+| T8 | Front: controller assíncrono | T7 | 2 | 450 | Implementada localmente; aguardando integração |
+| T5 | Agendador de lotes | T3, T4 | 3 | 300 | Implementada localmente; aguardando integração |
+| T6 | Rotas e wiring final | T1, T2, T3, T4, T5 | 4 | 400 | Implementada localmente; aguardando integração |
+| T9 | Harness de carga 12 usuários | T6 | 5 | 220 | Implementada localmente; aguardando integração |
+| T10 | Documentação, ADRs e memória | todas | 6 | 0 | Implementada localmente; aguardando integração |
 
 ### T1 — Núcleo HTTP (concluída)
 
@@ -772,7 +772,8 @@ Substitua o placeholder pela origem configurada antes do build final.
 ## 14. Definition of Done
 
 - Todas as tarefas T1–T10 mergeadas e com push.
-- T1, T2, T3 e T7 já estão concluídas em `main`; as demais permanecem pendentes.
+- T1, T2, T3 e T7 já estão concluídas em `main`; T4–T6 e T8–T10 estão
+  implementadas localmente e aguardam integração.
 - Nenhuma rota antiga permanece.
 - `dart analyze`, `dart test`, `flutter analyze`, `flutter test` verdes.
 - Harness de 12 usuários verde; RSS e duração p50/p95 reportados, sem SLA

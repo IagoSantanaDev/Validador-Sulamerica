@@ -43,6 +43,31 @@ _Avoid_: Batch, job, requisição
 Estado no servidor do processamento de um lote, da fila ao resultado final.
 _Avoid_: Job, tarefa, processo
 
+**Agendador de lotes**:
+Componente em memória que limita a capacidade e alterna trabalho entre
+identificadores e lotes.
+_Avoid_: Fila global sem justiça
+
+**Pool de sessões do portal**:
+Conjunto limitado de sessões autenticadas compartilhadas por um identificador
+de prestador.
+_Avoid_: Sessão lógica, sessão do usuário
+
+**Token de sessão lógica**:
+Token opaco enviado no header `Authorization: Bearer` para associar operações
+ao identificador e às execuções do cliente.
+_Avoid_: Credencial do portal
+
+**Chave de idempotência**:
+Valor fornecido pelo cliente para reconhecer reenvios do mesmo lote sem criar
+execuções duplicadas enquanto a execução original estiver disponível.
+_Avoid_: Identificador de sessão
+
+**Evento SSE**:
+Atualização do progresso ou resultado de uma execução enviada por um stream
+HTTP enquanto o lote está ativo.
+_Avoid_: Retomada persistente
+
 **Consulta**:
 Item de um lote que pede elegibilidade de uma carteira ou o status de uma senha.
 _Avoid_: Requisição, pesquisa, verificação

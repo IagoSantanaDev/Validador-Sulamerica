@@ -1,20 +1,19 @@
 # Pool de sessões do portal por prestador
 
-Cada login criava uma sessão do portal só para aquele token, e lotes grandes
-abriam até 9 sessões extras. Com 12 usuários e teto de 10 sessões, isso gerava
-evicção em cascata e logins repetidos. Como o cenário usa exatamente dois
-identificadores, com um trio de credenciais por prestador, decidimos manter um
-pool de 4 sessões por identificador (8 no total), criadas sob demanda e
-compartilhadas pelos usuários daquele prestador, com elegibilidade serial por
-sessão e senhas até 3 em paralelo. Resultados de consulta são tipados por
-chamada, e renovações concorrentes da mesma geração compartilham sucesso ou
-falha; cada consulta tem um retry de sessão e um de rede, enquanto o login de
-renovação pode repetir falha de rede uma vez.
+Cada login independente criava uma sessão do portal, e lotes grandes abriam
+sessões extras. Sob concorrência, isso causava evicção e logins repetidos.
+Decidimos manter um pool limitado de sessões por identificador, criadas sob
+demanda e compartilhadas pelas sessões lógicas. O agendador escolhe primeiro
+uma sessão autenticada menos ocupada; elegibilidades permanecem serializadas
+por sessão, e consultas de senha podem usar concorrência limitada. Resultados
+de consulta são tipados por chamada, e falhas transitórias de transporte podem
+ser repetidas sem tratar rejeições HTTP como falha de rede.
 
 ## Consequences
 
-- Todos os usuários do mesmo identificador dividem a capacidade do pool.
-- Uma sessão expirada afeta todos que a usam; compartilhar a renovação evita
-  rajadas de login e concorrência sobre cookies, ao custo de rastrear a geração
-  e propagar uma falha tipada por chamada.
-- O teto de 4 é empírico: se o portal rejeitar concorrência, ele precisa cair.
+- Usuários do mesmo identificador dividem a capacidade e o estado de sessão do
+  pool.
+- Uma sessão expirada afeta chamadas que a utilizam; coalescer a renovação por
+  geração evita logins concorrentes e inconsistência dos cookies.
+- O limite por identificador é fixo na instância. Réplicas horizontais ou
+  estado compartilhado ficam fora desta decisão.
