@@ -341,12 +341,12 @@ em branco não entram na conta.
 | T2 | Rate limit por token/identificador/global | — | 1 | 160 | Concluída em `main` (`f653589`) |
 | T3 | Execução de lote + codificação SSE | — | 1 | 380 | Concluída em `main` (`f2c03df`) |
 | T7 | Front: cliente SSE + serviço HTTP | contrato | 1 | 450 | Concluída em `main` (`5df2b26`) |
-| T4 | Pool de sessões + concorrência do `SessaoPortal` | T3 | 2 | 380 | Implementada localmente; aguardando integração |
-| T8 | Front: controller assíncrono | T7 | 2 | 450 | Implementada localmente; aguardando integração |
-| T5 | Agendador de lotes | T3, T4 | 3 | 300 | Implementada localmente; aguardando integração |
-| T6 | Rotas e wiring final | T1, T2, T3, T4, T5 | 4 | 400 | Implementada localmente; aguardando integração |
-| T9 | Harness de carga 12 usuários | T6 | 5 | 220 | Implementada localmente; aguardando integração |
-| T10 | Documentação, ADRs e memória | todas | 6 | 0 | Implementada localmente; aguardando integração |
+| T4 | Pool de sessões + concorrência do `SessaoPortal` | T3 | 2 | 380 | Integrada e enviada em `kan-21`; merge em `main` pendente |
+| T8 | Front: controller assíncrono | T7 | 2 | 450 | Integrada e enviada em `kan-21`; merge em `main` pendente |
+| T5 | Agendador de lotes | T3, T4 | 3 | 300 | Integrada e enviada em `kan-21`; merge em `main` pendente |
+| T6 | Rotas e wiring final | T1, T2, T3, T4, T5 | 4 | 400 | Integrada e enviada em `kan-21`; merge em `main` pendente |
+| T9 | Harness de carga 12 usuários | T6 | 5 | 220 | Integrada e enviada em `kan-21`; merge em `main` pendente |
+| T10 | Documentação, ADRs e memória | todas | 6 | 0 | Integrada e enviada em `kan-21`; merge em `main` pendente |
 
 ### T1 — Núcleo HTTP (concluída)
 
@@ -720,6 +720,29 @@ Pop-Location
 - Testes existentes de parser, credenciais, TLS e falhas de sessão continuam
   valendo, ajustados apenas onde o contrato mudou.
 
+### Harness de carga
+
+Execute o harness compilado em AOT para aproximar a medição do modo de produção
+(`backend/Dockerfile`). `dart run` inclui o runtime JIT e não representa essa
+medição.
+
+```powershell
+Push-Location backend
+$simulador = Join-Path $env:TEMP 'simular_carga.exe'
+dart compile exe tool/simular_carga.dart -o $simulador
+if ($LASTEXITCODE -eq 0) { & $simulador }
+$codigo = $LASTEXITCODE
+if (Test-Path -LiteralPath $simulador) { Remove-Item -LiteralPath $simulador }
+Pop-Location
+if ($codigo -ne 0) { throw "A validação do harness AOT falhou." }
+```
+
+`ProcessInfo.currentRss` depende da plataforma. A validação AOT local mais
+recente em Windows concluiu 12 lotes sem 429 e mediu RSS de 61,6 MB e 67,7 MB;
+isso não certifica o RSS no Linux/Render. Durações p50/p95 locais foram
+3.249/3.263 ms para um identificador e 1.794/1.796 ms para identificadores
+divididos. Não há SLA de duração definido para o portal real.
+
 ### Front
 
 Na raiz do projeto:
@@ -771,14 +794,22 @@ Substitua o placeholder pela origem configurada antes do build final.
 
 ## 14. Definition of Done
 
-- Todas as tarefas T1–T10 mergeadas e com push.
-- T1, T2, T3 e T7 já estão concluídas em `main`; T4–T6 e T8–T10 estão
-  implementadas localmente e aguardam integração.
-- Nenhuma rota antiga permanece.
-- `dart analyze`, `dart test`, `flutter analyze`, `flutter test` verdes.
-- Harness de 12 usuários verde; RSS e duração p50/p95 reportados, sem SLA
-  numérico até existir baseline.
-- Budget de 500 linhas úteis respeitado em todas as worktrees.
-- README, GLOSSARY e ADRs atualizados.
+- T1, T2, T3 e T7 estão concluídas em `main`, conforme histórico acima.
+- T4–T6 e T8–T10 estão integradas e enviadas em `kan-21`; merge em `main`
+  permanece pendente.
+- Nenhuma rota antiga permanece no backend.
+- `dart analyze`, `dart test`, `flutter analyze`, `flutter test` e
+  `flutter build web --release --dart-define=API_URL=https://placeholder.invalid`
+  passaram localmente. O build web ainda informa incompatibilidade de
+  `dart:html` no dry run de Wasm; o build JavaScript concluiu.
+- Harness AOT local concluiu 12 lotes por cenário, sem 429; RSS medido em
+  Windows ficou entre 61,6 MB e 67,7 MB. A confirmação de RSS no Linux/Render
+  ainda está pendente. Durações p50/p95 locais foram 3.249/3.263 ms para um
+  identificador e 1.794/1.796 ms para identificadores divididos; não são SLA
+  do portal real.
+- O orçamento de 500 linhas úteis por tarefa precisa ser confirmado antes do
+  merge em `main`.
+- README, GLOSSARY e ADRs estão presentes na integração.
 - Nenhum arquivo temporário, identificador real, origem específica, credencial
-  ou artefato de build versionado.
+  ou artefato de build foi adicionado ao Git; o executável temporário do
+  harness foi removido após a medição.

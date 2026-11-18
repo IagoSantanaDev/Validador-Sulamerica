@@ -139,10 +139,20 @@ nova sessão.
 Push-Location backend
 dart analyze
 dart test
-dart run tool/simular_carga.dart
+$simulador = Join-Path $env:TEMP 'simular_carga.exe'
+dart compile exe tool/simular_carga.dart -o $simulador
+if ($LASTEXITCODE -eq 0) { & $simulador }
+$codigo = $LASTEXITCODE
+if (Test-Path -LiteralPath $simulador) { Remove-Item -LiteralPath $simulador }
 Pop-Location
+if ($codigo -ne 0) { throw "A validação do harness AOT falhou." }
 ```
 
 O harness de carga usa sessões falsas sem rede ou credenciais reais e emite
-relatório JSON com conclusão, rejeições, duração p50/p95 e RSS. Não há SLA
-numérico definido antes de medir o comportamento observado.
+relatório JSON com conclusão, rejeições, duração p50/p95 e RSS. Execute-o
+compilado em AOT para aproximar o modo do servidor de produção; `dart run`
+inclui o runtime JIT e não representa essa medição. Na validação local em
+Windows, os dois cenários concluíram 12 lotes sem 429 e mediram RSS de
+61,6–67,7 MB. `ProcessInfo.currentRss` depende da plataforma, portanto esse
+resultado não certifica o RSS no Linux/Render. Não há SLA numérico de duração
+antes de medir o comportamento observado no portal real.
