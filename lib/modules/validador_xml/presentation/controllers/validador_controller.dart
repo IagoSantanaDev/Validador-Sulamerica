@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
@@ -7,20 +9,22 @@ import 'package:get_it/get_it.dart';
 import '../../../../globals/constants/app_strings.dart';
 import '../../../../globals/network/app_exception.dart';
 import '../../../../globals/network/result.dart';
+import '../../../../globals/network/sse_client.dart';
+import '../../data/datasources/tuss_base_local_exceptions.dart';
 import '../../data/datasources/xml_lote_guias_datasource.dart';
 import '../../data/datasources/xml_lote_guias_exceptions.dart';
-import '../../data/datasources/tuss_base_local_exceptions.dart';
 import '../../data/models/consulta_guia.dart';
 import '../../data/models/consulta_lote.dart';
 import '../../data/models/guia_validada.dart';
 import '../../data/models/informacoes_lote.dart';
 import '../../data/models/lote_guias_extraido.dart';
+import '../../data/models/lote_remoto.dart';
 import '../../data/repositories/regras/regra_credenciais_portal.dart';
 import '../../data/repositories/regras/regra_senha_prefixo.dart';
 import '../../data/repositories/validador_guias_repository.dart';
 import '../../data/repositories/validador_guias_repository_impl.dart';
-import '../../data/services/sul_america_backend_service.dart';
 import '../../data/services/classificador_tuss_local.dart';
+import '../../data/services/sul_america_backend_service.dart';
 
 enum StatusValidador { semArquivo, arquivoPronto, validando, concluido, erro }
 
@@ -41,6 +45,12 @@ class ValidadorController extends ChangeNotifier {
     Duration(seconds: 4),
     Duration(seconds: 8),
   ];
+  static const List<Duration> _intervalosFilaCheia = [
+    Duration(seconds: 1),
+    Duration(seconds: 2),
+    Duration(seconds: 4),
+  ];
+  static const Duration _limiteRetryAfterLote = Duration(seconds: 30);
 
   ValidadorController({
     ValidadorGuiasRepository? repository,
@@ -63,9 +73,9 @@ class ValidadorController extends ChangeNotifier {
   final SulAmericaBackendService? _service;
   final RegraCredenciaisPortal _regraCredenciais;
   final Future<void> Function(Duration) _aguardarRetentativa;
+  final Random _aleatorio = Random.secure();
 
   String? _tokenSessao;
-
   String? _identificadorPrestadorDoToken;
   EtapaConsultaBackend _etapaConsultaBackend = EtapaConsultaBackend.naoIniciada;
   final Map<String, ConsultaLoteItem> _consultasPendentes = {};
@@ -74,11 +84,18 @@ class ValidadorController extends ChangeNotifier {
   bool _retentativaManualEmAndamento = false;
   String? _identificadorPrestadorDaConsulta;
   String? _mensagemAvisoConsultaBackend;
+  int _progressoConsultasConcluidas = 0;
+  int _totalConsultas = 0;
 
   EtapaConsultaBackend get etapaConsultaBackend => _etapaConsultaBackend;
   int get totalConsultasPendentes => _consultasPendentes.length;
   bool get temConsultasPendentes => _consultasPendentes.isNotEmpty;
   String? get mensagemAvisoConsultaBackend => _mensagemAvisoConsultaBackend;
+  int get progressoConsultasConcluidas => _progressoConsultasConcluidas;
+  int get totalConsultas => _totalConsultas;
+  double get fracaoProgressoConsultas => _totalConsultas == 0
+      ? 0
+      : _progressoConsultasConcluidas / _totalConsultas;
 
   EstadoConexao _estadoConexao = EstadoConexao.verificando;
 
@@ -114,15 +131,11 @@ class ValidadorController extends ChangeNotifier {
   String? get nomeArquivo => _nomeArquivo;
   String? get mensagemErro => _mensagemErro;
   int? get tamanhoArquivoBytes => _bytesArquivo?.length;
-
   List<GuiaValidada> get guiasComErro =>
       _resultado.where((g) => g.temErro || g.temFalhaConsulta).toList();
-
   List<GuiaValidada> get guias => _resultado;
-
   int get totalGuias => _resultado.length;
   int get totalGuiasComErro => _resultado.where((guia) => guia.temErro).length;
-
   InformacoesLote get informacoes => _informacoes;
   String? get hashMd5 => _hashMd5;
   Duration get tempoProcessamento => _tempoProcessamento;
@@ -168,12 +181,12 @@ class ValidadorController extends ChangeNotifier {
       final String? identificadorPrestador = _regraCredenciais.resolver(
         informacoes.prestadorCnpjCpf,
       );
-      final List<GuiaValidada> comConsultas = await _consultarGuias(
+      final List<GuiaValidada> resultado = await _consultarGuias(
         resultadoBruto,
         identificadorPrestador,
       );
 
-      _resultado = _ordenarPorNumeroGuia(comConsultas);
+      _resultado = _ordenarPorNumeroGuia(resultado);
       _informacoes = informacoes;
       _status = StatusValidador.concluido;
     } on XmlMalFormadoException catch (erro) {
@@ -218,7 +231,6 @@ class ValidadorController extends ChangeNotifier {
   ) async {
     final SulAmericaBackendService? service = _service;
     _limparEstadoConsultas();
-    _guiasBaseConsultas = List.of(guias);
     _identificadorPrestadorDaConsulta = identificadorPrestador;
     if (service == null || guias.isEmpty) {
       _etapaConsultaBackend = EtapaConsultaBackend.concluida;
@@ -230,8 +242,12 @@ class ValidadorController extends ChangeNotifier {
       final GuiaValidada guia = base[i];
       final String? senha = guia.senha;
       final String? carteira = guia.numeroCarteira;
+      final bool senhaInvalida =
+          senha != null && senha.isNotEmpty && !_senhaValida(senha);
+      final bool carteiraInvalida =
+          carteira != null && carteira.isNotEmpty && !_carteiraValida(carteira);
       final List<ConsultaGuia> errosLocais = [];
-      if (senha != null && senha.isNotEmpty && !_senhaValida(senha)) {
+      if (senhaInvalida) {
         errosLocais.add(
           ConsultaGuia(
             tipo: TipoConsultaGuia.senha,
@@ -240,9 +256,7 @@ class ValidadorController extends ChangeNotifier {
           ),
         );
       }
-      if (carteira != null &&
-          carteira.isNotEmpty &&
-          !_carteiraValida(carteira)) {
+      if (carteiraInvalida) {
         errosLocais.add(
           ConsultaGuia(
             tipo: TipoConsultaGuia.elegibilidade,
@@ -254,7 +268,7 @@ class ValidadorController extends ChangeNotifier {
       if (errosLocais.isNotEmpty) {
         base[i] = GuiaValidada(
           guia: guia.guia,
-          erros: senha != null && senha.isNotEmpty && !_senhaValida(senha)
+          erros: senhaInvalida
               ? guia.erros.where((e) => e.campo != 'senha').toList()
               : guia.erros,
           consultas: errosLocais,
@@ -266,239 +280,367 @@ class ValidadorController extends ChangeNotifier {
     final Set<String> chavesVistas = {};
     for (final GuiaValidada guia in base) {
       for (final ConsultaLoteItem item in _itensDeConsulta(guia)) {
-        final String chaveUnica = '${item.tipo.name}|${item.chave}';
-        if (chavesVistas.add(chaveUnica)) {
-          itens.add(item);
-        }
+        if (chavesVistas.add(_chaveConsulta(item))) itens.add(item);
       }
     }
     _guiasBaseConsultas = base;
+    _resultado = List.of(base);
+    _totalConsultas = itens.length;
     if (itens.isEmpty) {
       _etapaConsultaBackend = EtapaConsultaBackend.concluida;
       return base;
     }
-
-    String? token;
-    String? motivoErro;
-    AppException? falhaLogin;
-    for (
-      int tentativa = 0;
-      tentativa <= _intervalosRetentativa.length;
-      tentativa++
-    ) {
-      if (tentativa > 0) {
-        _etapaConsultaBackend = EtapaConsultaBackend.aguardandoRetentativa;
-        notifyListeners();
-        await _aguardarRetentativa(_intervalosRetentativa[tentativa - 1]);
-      }
-      _etapaConsultaBackend = EtapaConsultaBackend.consultando;
-      notifyListeners();
-      final respostaLogin = await _obterTokenSessao(
-        service,
-        identificadorPrestador,
-      );
-      token = respostaLogin.token;
-      motivoErro = respostaLogin.mensagemErro;
-      falhaLogin = respostaLogin.falha;
-      if (token != null ||
-          falhaLogin == null ||
-          !_falhaTransitoria(falhaLogin) ||
-          tentativa == _intervalosRetentativa.length) {
-        break;
-      }
-    }
-    if (token == null) {
-      if (falhaLogin != null && _falhaTransitoria(falhaLogin)) {
-        _registrarConsultasPendentes(itens);
-        _etapaConsultaBackend = EtapaConsultaBackend.pendente;
-        notifyListeners();
-        return _aplicarResultadosConsultas(base);
-      }
-      if (falhaLogin is NaoAutorizadoException) {
-        _avisarFalhaAutenticacao();
-        return base;
-      }
-      final ConsultaGuia erro = ConsultaGuia(
-        sucesso: false,
-        descricao: motivoErro ?? AppStrings.erroCredenciaisAusentes,
-      );
-      for (final ConsultaLoteItem item in itens) {
-        _resultadosConsultas[_chaveConsulta(item)] = ConsultaGuia(
-          tipo: item.tipo,
-          sucesso: false,
-          descricao: erro.descricao,
-        );
-      }
+    if (identificadorPrestador == null) {
       _etapaConsultaBackend = EtapaConsultaBackend.concluida;
-      return _aplicarResultadosConsultas(base);
+      return base;
     }
 
-    bool repetiuAposLogin = false;
-    String tokenAtual = token;
-    String? erroParada;
-
+    _etapaConsultaBackend = EtapaConsultaBackend.consultando;
     for (
       int inicio = 0;
       inicio < itens.length;
       inicio += _maxConsultasPorLote
     ) {
-      final int limite = inicio + _maxConsultasPorLote;
-      final int fim = limite < itens.length ? limite : itens.length;
-      final List<ConsultaLoteItem> lote = itens.sublist(inicio, fim);
-      if (erroParada != null) {
-        if (_mensagemAvisoConsultaBackend == null) {
-          _registrarFalhaDoLote(lote, erroParada);
-        }
-        continue;
-      }
-      List<ConsultaLoteItem> naoResolvidas = List.of(lote);
-      bool precisaNovoLogin = false;
-      for (
-        int tentativa = 0;
-        tentativa <= _intervalosRetentativa.length && naoResolvidas.isNotEmpty;
-        tentativa++
-      ) {
-        if (tentativa > 0) {
-          _etapaConsultaBackend = EtapaConsultaBackend.aguardandoRetentativa;
-          notifyListeners();
-          await _aguardarRetentativa(_intervalosRetentativa[tentativa - 1]);
-        }
-        _etapaConsultaBackend = EtapaConsultaBackend.consultando;
-        notifyListeners();
-        if (precisaNovoLogin) {
-          final login = await _obterTokenSessao(
-            service,
-            identificadorPrestador,
-          );
-          if (login.token == null) {
-            if (login.falha != null &&
-                _falhaTransitoria(login.falha!) &&
-                tentativa < _intervalosRetentativa.length) {
-              continue;
-            }
-            if (login.falha != null && _falhaTransitoria(login.falha!)) {
-              _registrarConsultasPendentes(naoResolvidas);
-            } else if (login.falha is NaoAutorizadoException) {
-              _avisarFalhaAutenticacao();
-              erroParada = login.mensagemErro ?? AppStrings.erroLoginFalhou;
-            } else {
-              final String mensagem =
-                  login.mensagemErro ?? AppStrings.erroLoginFalhou;
-              _registrarFalhaDoLote(naoResolvidas, mensagem);
-              erroParada = mensagem;
-            }
-            naoResolvidas = [];
-            break;
-          }
-          tokenAtual = login.token!;
-          repetiuAposLogin = true;
-          precisaNovoLogin = false;
-        }
-        final resposta = await _consultarLoteComAtualizacaoToken(
-          service,
-          tokenAtual,
-          naoResolvidas,
-          identificadorPrestador,
-          repetiuAposLogin,
-        );
-        tokenAtual = resposta.token;
-        repetiuAposLogin = resposta.repetiuAposLogin;
-
-        final String? erroLogin = resposta.erroLogin;
-        if (erroLogin != null) {
-          if (resposta.falhaLogin != null &&
-              _falhaTransitoria(resposta.falhaLogin!)) {
-            precisaNovoLogin = true;
-            if (tentativa == _intervalosRetentativa.length) {
-              _registrarConsultasPendentes(naoResolvidas);
-              naoResolvidas = [];
-            }
-          } else {
-            if (resposta.falhaLogin is NaoAutorizadoException) {
-              _avisarFalhaAutenticacao();
-              erroParada = erroLogin;
-            } else {
-              erroParada = erroLogin;
-              _registrarFalhaDoLote(naoResolvidas, erroLogin);
-            }
-            naoResolvidas = [];
-          }
-          continue;
-        }
-
-        final Result<List<ResultadoConsultaLote>> resultado =
-            resposta.resultado!;
-        final AppException? erroResultado = resultado.fold<AppException?>(
-          onSuccess: (_) => null,
-          onFailure: (erro) => erro,
-        );
-        if (erroResultado != null) {
-          if (_falhaTransitoria(erroResultado) &&
-              tentativa < _intervalosRetentativa.length) {
-            continue;
-          }
-          if (_falhaTransitoria(erroResultado)) {
-            _registrarConsultasPendentes(naoResolvidas);
-          } else if (erroResultado is NaoAutorizadoException) {
-            _tokenSessao = null;
-            _identificadorPrestadorDoToken = null;
-            _avisarFalhaAutenticacao();
-            erroParada = 'Consulta em lote falhou: $erroResultado';
-          } else {
-            final String mensagem = 'Consulta em lote falhou: $erroResultado';
-            _registrarFalhaDoLote(naoResolvidas, mensagem);
-          }
-          naoResolvidas = [];
-          continue;
-        }
-
-        final List<ResultadoConsultaLote> resultados = resultado
-            .fold<List<ResultadoConsultaLote>>(
-              onSuccess: (itensResultado) => itensResultado,
-              onFailure: (_) => const [],
-            );
-        final Set<String> resolvidas = {};
-        for (final ResultadoConsultaLote item in resultados) {
-          final String chave = '${item.tipo.name}|${item.chave}';
-          if (naoResolvidas.any(
-            (consulta) => _chaveConsulta(consulta) == chave,
-          )) {
-            if (_falhaTransitoriaNoResultado(item)) continue;
-            _resultadosConsultas[chave] = _consultaDesdeBatch(item);
-            resolvidas.add(chave);
-          }
-        }
-        naoResolvidas = naoResolvidas
-            .where((item) => !resolvidas.contains(_chaveConsulta(item)))
-            .toList();
-        if (tentativa == _intervalosRetentativa.length) {
-          _registrarConsultasPendentes(naoResolvidas);
-        }
-      }
+      final int fim = min(inicio + _maxConsultasPorLote, itens.length).toInt();
+      await _processarConsultas(
+        service,
+        itens.sublist(inicio, fim),
+        _progressoConsultasConcluidas,
+      );
     }
-
+    _atualizarResultado();
     _etapaConsultaBackend = _consultasPendentes.isEmpty
         ? EtapaConsultaBackend.concluida
         : EtapaConsultaBackend.pendente;
     notifyListeners();
-    return _aplicarResultadosConsultas(base);
+    return _resultado;
   }
 
-  void _registrarFalhaDoLote(List<ConsultaLoteItem> itens, String mensagem) {
-    for (final ConsultaLoteItem item in itens) {
-      _resultadosConsultas[_chaveConsulta(item)] = ConsultaGuia(
-        tipo: item.tipo,
-        sucesso: false,
-        descricao: mensagem,
+  Future<void> _processarConsultas(
+    SulAmericaBackendService service,
+    List<ConsultaLoteItem> consultas,
+    int progressoBase,
+  ) async {
+    final tokenInicial = await _obterTokenSessao(
+      service,
+      _identificadorPrestadorDaConsulta,
+    );
+    final String? tokenInicialValido = tokenInicial.token;
+    if (tokenInicialValido == null) {
+      final AppException? falha = tokenInicial.falha;
+      if (falha is NaoAutorizadoException) {
+        _avisarFalhaAutenticacao();
+      } else {
+        _registrarConsultasPendentes(consultas);
+        _mensagemAvisoConsultaBackend =
+            falha?.mensagem ?? tokenInicial.mensagemErro;
+      }
+      _atualizarResultado();
+      return;
+    }
+    String token = tokenInicialValido;
+
+    final String idempotencyKey = _novaChaveIdempotencia();
+    int tentativasFilaCheia = 0;
+    int tentativasTransporte = 0;
+    bool reautenticouSubmissao = false;
+    LoteRemoto? loteRemoto;
+
+    while (loteRemoto == null) {
+      final Result<LoteRemoto> resposta = await service.criarLote(
+        token: token,
+        idempotencyKey: idempotencyKey,
+        consultas: consultas,
       );
+      final AppException? falha = resposta.fold<AppException?>(
+        onSuccess: (_) => null,
+        onFailure: (erro) => erro,
+      );
+      if (falha == null) {
+        loteRemoto = resposta.fold<LoteRemoto>(
+          onSuccess: (lote) => lote,
+          onFailure: (_) => throw StateError('Resultado inconsistente.'),
+        );
+        break;
+      }
+
+      if (falha is NaoAutorizadoException && !reautenticouSubmissao) {
+        reautenticouSubmissao = true;
+        _invalidarTokenSessao();
+        final refresh = await _obterTokenSessao(
+          service,
+          _identificadorPrestadorDaConsulta,
+        );
+        final String? novoToken = refresh.token;
+        if (novoToken != null) {
+          token = novoToken;
+          continue;
+        }
+        _mensagemAvisoConsultaBackend =
+            refresh.falha?.mensagem ?? refresh.mensagemErro;
+        if (refresh.falha is NaoAutorizadoException) {
+          _avisarFalhaAutenticacao();
+        }
+        break;
+      }
+
+      if (falha is FilaCheiaException &&
+          tentativasFilaCheia < _intervalosFilaCheia.length) {
+        _etapaConsultaBackend = EtapaConsultaBackend.aguardandoRetentativa;
+        notifyListeners();
+        final Duration espera = falha.retryAfter == null
+            ? _intervalosFilaCheia[tentativasFilaCheia]
+            : _limitarRetryAfter(falha.retryAfter!);
+        tentativasFilaCheia++;
+        await _aguardarRetentativa(espera);
+        _etapaConsultaBackend = EtapaConsultaBackend.consultando;
+        continue;
+      }
+
+      if (_falhaTransporte(falha) &&
+          tentativasTransporte < _intervalosRetentativa.length) {
+        _etapaConsultaBackend = EtapaConsultaBackend.aguardandoRetentativa;
+        notifyListeners();
+        await _aguardarRetentativa(
+          _intervalosRetentativa[tentativasTransporte],
+        );
+        tentativasTransporte++;
+        _etapaConsultaBackend = EtapaConsultaBackend.consultando;
+        continue;
+      }
+
+      if (falha is NaoAutorizadoException) {
+        _avisarFalhaAutenticacao();
+      }
+      _mensagemAvisoConsultaBackend = falha.mensagem;
+      break;
+    }
+
+    final LoteRemoto? loteAceito = loteRemoto;
+    if (loteAceito == null || loteAceito.id.isEmpty) {
+      _mensagemAvisoConsultaBackend ??=
+          'O backend não retornou o identificador do lote.';
+      _registrarConsultasPendentes(consultas);
+      _atualizarResultado();
+      return;
+    }
+
+    await _acompanharLote(service, loteAceito, consultas, token, progressoBase);
+  }
+
+  Future<void> _acompanharLote(
+    SulAmericaBackendService service,
+    LoteRemoto lote,
+    List<ConsultaLoteItem> consultas,
+    String tokenInicial,
+    int progressoBase,
+  ) async {
+    String token = tokenInicial;
+    int? ultimoId;
+    int reconexoes = 0;
+    bool reautenticouSse = false;
+    int progressoLote = 0;
+
+    while (true) {
+      final ConexaoSse conexao = service.abrirEventos(
+        token: token,
+        idLote: lote.id,
+        desde: ultimoId,
+      );
+      final leitura = await _lerEventosLote(
+        conexao,
+        onEvento: (EventoSse evento) {
+          final int? id = int.tryParse(evento.id ?? '');
+          if (id != null && (ultimoId == null || id > ultimoId!)) {
+            ultimoId = id;
+          }
+          if (evento.evento == 'progresso') {
+            final Map<String, dynamic>? dados = _decodificarEvento(
+              evento.dados,
+            );
+            if (dados != null) {
+              final ProgressoLote progresso = ProgressoLote.fromJson(dados);
+              progressoLote = max(
+                progressoLote,
+                min(progresso.concluidas, consultas.length),
+              ).toInt();
+              _progressoConsultasConcluidas = max(
+                _progressoConsultasConcluidas,
+                progressoBase + progressoLote,
+              ).toInt();
+              notifyListeners();
+            }
+          }
+        },
+      );
+
+      if (leitura.resultado != null) {
+        _aplicarResultadoLote(consultas, leitura.resultado!);
+        _progressoConsultasConcluidas = max(
+          _progressoConsultasConcluidas,
+          progressoBase + consultas.length,
+        ).toInt();
+        _atualizarResultado();
+        return;
+      }
+
+      final AppException? erro = leitura.erro;
+      if (erro is NaoAutorizadoException && !reautenticouSse) {
+        reautenticouSse = true;
+        _invalidarTokenSessao();
+        final refresh = await _obterTokenSessao(
+          service,
+          _identificadorPrestadorDaConsulta,
+        );
+        if (refresh.token != null) {
+          token = refresh.token!;
+          continue;
+        }
+        _mensagemAvisoConsultaBackend =
+            refresh.falha?.mensagem ?? refresh.mensagemErro;
+        if (refresh.falha is NaoAutorizadoException) {
+          _avisarFalhaAutenticacao();
+        }
+        break;
+      }
+
+      final bool streamInterrompido =
+          leitura.streamFechou || (erro != null && _falhaTransporte(erro));
+      if (streamInterrompido && reconexoes < _intervalosRetentativa.length) {
+        _etapaConsultaBackend = EtapaConsultaBackend.aguardandoRetentativa;
+        notifyListeners();
+        await _aguardarRetentativa(_intervalosRetentativa[reconexoes]);
+        reconexoes++;
+        _etapaConsultaBackend = EtapaConsultaBackend.consultando;
+        continue;
+      }
+
+      if (erro != null) _mensagemAvisoConsultaBackend = erro.mensagem;
+      break;
+    }
+
+    _registrarConsultasPendentes(consultas);
+    _atualizarResultado();
+  }
+
+  Future<
+    ({ResultadoLoteEvento? resultado, AppException? erro, bool streamFechou})
+  >
+  _lerEventosLote(
+    ConexaoSse conexao, {
+    required void Function(EventoSse) onEvento,
+  }) async {
+    final completer =
+        Completer<
+          ({
+            ResultadoLoteEvento? resultado,
+            AppException? erro,
+            bool streamFechou,
+          })
+        >();
+    late final StreamSubscription<EventoSse> subscription;
+    subscription = conexao.eventos.listen(
+      (EventoSse evento) {
+        try {
+          onEvento(evento);
+          if (evento.evento == 'resultado') {
+            final Map<String, dynamic>? dados = _decodificarEvento(
+              evento.dados,
+            );
+            if (dados == null) {
+              completer.complete((
+                resultado: null,
+                erro: const ErroDesconhecidoException(
+                  'Evento de resultado SSE inválido.',
+                ),
+                streamFechou: false,
+              ));
+              return;
+            }
+            completer.complete((
+              resultado: ResultadoLoteEvento.fromJson(dados),
+              erro: null,
+              streamFechou: false,
+            ));
+          }
+        } on FormatException catch (erro) {
+          if (!completer.isCompleted) {
+            completer.complete((
+              resultado: null,
+              erro: ErroDesconhecidoException(erro.message),
+              streamFechou: false,
+            ));
+          }
+        } on TypeError catch (erro) {
+          if (!completer.isCompleted) {
+            completer.complete((
+              resultado: null,
+              erro: ErroDesconhecidoException(erro.toString()),
+              streamFechou: false,
+            ));
+          }
+        }
+      },
+      onError: (Object erro, StackTrace _) {
+        if (!completer.isCompleted) {
+          completer.complete((
+            resultado: null,
+            erro: erro is AppException
+                ? erro
+                : ErroDesconhecidoException(erro.toString()),
+            streamFechou: false,
+          ));
+        }
+      },
+      onDone: () {
+        if (!completer.isCompleted) {
+          completer.complete((resultado: null, erro: null, streamFechou: true));
+        }
+      },
+    );
+    final leitura = await completer.future;
+    await subscription.cancel();
+    conexao.cancelar();
+    return leitura;
+  }
+
+  Map<String, dynamic>? _decodificarEvento(String dados) {
+    final Object? valor = jsonDecode(dados);
+    return valor is Map<String, dynamic> ? valor : null;
+  }
+
+  void _aplicarResultadoLote(
+    List<ConsultaLoteItem> consultas,
+    ResultadoLoteEvento evento,
+  ) {
+    final Set<String> solicitadas = consultas.map(_chaveConsulta).toSet();
+    final Set<String> resolvidas = {};
+    for (final ResultadoConsultaLote resultado in evento.resultados) {
+      final String chave = '${resultado.tipo.name}|${resultado.chave}';
+      if (!solicitadas.contains(chave)) continue;
+      if (_falhaTransitoriaNoResultado(resultado)) continue;
+      _resultadosConsultas[chave] = _consultaDesdeBatch(resultado);
+      _consultasPendentes.remove(chave);
+      resolvidas.add(chave);
+    }
+    for (final ConsultaLoteItem item in consultas) {
+      if (!resolvidas.contains(_chaveConsulta(item))) {
+        _consultasPendentes[_chaveConsulta(item)] = item;
+      }
     }
   }
 
-  void _avisarFalhaAutenticacao() {
-    _mensagemAvisoConsultaBackend = AppStrings.erroLoginFalhou;
-    _consultasPendentes.clear();
-    _etapaConsultaBackend = EtapaConsultaBackend.concluida;
+  String _novaChaveIdempotencia() => base64Url
+      .encode(List<int>.generate(24, (_) => _aleatorio.nextInt(256)))
+      .replaceAll('=', '');
+
+  Duration _limitarRetryAfter(Duration duracao) {
+    if (duracao.isNegative) return Duration.zero;
+    return duracao > _limiteRetryAfterLote ? _limiteRetryAfterLote : duracao;
   }
+
+  bool _falhaTransporte(AppException erro) =>
+      erro is SemConexaoException || erro is RequisicaoExpiradaException;
 
   void _registrarConsultasPendentes(Iterable<ConsultaLoteItem> itens) {
     for (final ConsultaLoteItem item in itens) {
@@ -506,81 +648,14 @@ class ValidadorController extends ChangeNotifier {
     }
   }
 
-  Future<
-    ({
-      Result<List<ResultadoConsultaLote>>? resultado,
-      String token,
-      bool repetiuAposLogin,
-      String? erroLogin,
-      AppException? falhaLogin,
-    })
-  >
-  _consultarLoteComAtualizacaoToken(
-    SulAmericaBackendService service,
-    String token,
-    List<ConsultaLoteItem> consultas,
-    String? identificadorPrestador,
-    bool repetiuAposLogin,
-  ) async {
-    Result<List<ResultadoConsultaLote>> resultado = await service.consultarLote(
-      token: token,
-      consultas: consultas,
-    );
-    final AppException? erro = resultado.fold<AppException?>(
-      onSuccess: (_) => null,
-      onFailure: (falha) => falha,
-    );
-    if (erro is! NaoAutorizadoException || repetiuAposLogin) {
-      return (
-        resultado: resultado,
-        token: token,
-        repetiuAposLogin: repetiuAposLogin,
-        erroLogin: null,
-        falhaLogin: null,
-      );
-    }
-
+  void _invalidarTokenSessao() {
     _tokenSessao = null;
     _identificadorPrestadorDoToken = null;
-    final respostaLogin = await _obterTokenSessao(
-      service,
-      identificadorPrestador,
-    );
-    final String? novoToken = respostaLogin.token;
-    final String? erroLogin = respostaLogin.mensagemErro;
-    if (novoToken == null) {
-      return (
-        resultado: null,
-        token: token,
-        repetiuAposLogin: true,
-        erroLogin: erroLogin ?? AppStrings.erroLoginFalhou,
-        falhaLogin: respostaLogin.falha,
-      );
-    }
-    resultado = await service.consultarLote(
-      token: novoToken,
-      consultas: consultas,
-    );
-    return (
-      resultado: resultado,
-      token: novoToken,
-      repetiuAposLogin: true,
-      erroLogin: null,
-      falhaLogin: null,
-    );
   }
 
-  bool _falhaTransitoria(AppException erro) =>
-      erro is SemConexaoException ||
-      erro is RequisicaoExpiradaException ||
-      (erro is ErroServidorException &&
-          (erro.statusCode == 408 ||
-              erro.statusCode == 429 ||
-              (erro.statusCode ?? 0) >= 500));
-
-  bool _falhaTransitoriaNoResultado(ResultadoConsultaLote resultado) =>
-      !resultado.sucesso &&
-      resultado.erro?.trim() == 'Falha na consulta ao portal SulAmerica.';
+  void _avisarFalhaAutenticacao() {
+    _mensagemAvisoConsultaBackend = AppStrings.erroLoginFalhou;
+  }
 
   String _chaveConsulta(ConsultaLoteItem item) =>
       '${item.tipo.name}|${item.chave}';
@@ -601,7 +676,16 @@ class ValidadorController extends ChangeNotifier {
     return resultado;
   }
 
+  void _atualizarResultado() {
+    _resultado = _ordenarPorNumeroGuia(
+      _aplicarResultadosConsultas(_guiasBaseConsultas),
+    );
+    notifyListeners();
+  }
+
   void _limparEstadoConsultas() {
+    _tokenSessao = null;
+    _identificadorPrestadorDoToken = null;
     _consultasPendentes.clear();
     _resultadosConsultas.clear();
     _guiasBaseConsultas = const [];
@@ -609,6 +693,8 @@ class ValidadorController extends ChangeNotifier {
     _mensagemAvisoConsultaBackend = null;
     _etapaConsultaBackend = EtapaConsultaBackend.naoIniciada;
     _retentativaManualEmAndamento = false;
+    _progressoConsultasConcluidas = 0;
+    _totalConsultas = 0;
   }
 
   Future<void> retentarConsultasPendentes() async {
@@ -620,92 +706,27 @@ class ValidadorController extends ChangeNotifier {
     }
     _retentativaManualEmAndamento = true;
     _etapaConsultaBackend = EtapaConsultaBackend.consultando;
-    notifyListeners();
     final List<ConsultaLoteItem> consultas = _consultasPendentes.values
-        .take(_maxConsultasPorLote)
         .toList();
+    _totalConsultas = consultas.length;
+    _progressoConsultasConcluidas = 0;
+    notifyListeners();
     try {
-      final respostaLogin = await _obterTokenSessao(
-        service,
-        _identificadorPrestadorDaConsulta,
-      );
-      final String? token = respostaLogin.token;
-      final String? erroLogin = respostaLogin.mensagemErro;
-      if (token == null) {
-        if (respostaLogin.falha is NaoAutorizadoException) {
-          _avisarFalhaAutenticacao();
-        } else if (respostaLogin.falha == null ||
-            !_falhaTransitoria(respostaLogin.falha!)) {
-          _registrarFalhaDoLote(
-            consultas,
-            erroLogin ?? AppStrings.erroLoginFalhou,
-          );
-          for (final ConsultaLoteItem item in consultas) {
-            _consultasPendentes.remove(_chaveConsulta(item));
-          }
-        }
-      } else {
-        final resposta = await _consultarLoteComAtualizacaoToken(
+      for (
+        int inicio = 0;
+        inicio < consultas.length;
+        inicio += _maxConsultasPorLote
+      ) {
+        final int fim = min(
+          inicio + _maxConsultasPorLote,
+          consultas.length,
+        ).toInt();
+        await _processarConsultas(
           service,
-          token,
-          consultas,
-          _identificadorPrestadorDaConsulta,
-          false,
+          consultas.sublist(inicio, fim),
+          _progressoConsultasConcluidas,
         );
-        final String? erroLoginRetentativa = resposta.erroLogin;
-        if (erroLoginRetentativa != null) {
-          if (resposta.falhaLogin is NaoAutorizadoException) {
-            _avisarFalhaAutenticacao();
-          } else if (resposta.falhaLogin == null ||
-              !_falhaTransitoria(resposta.falhaLogin!)) {
-            _registrarFalhaDoLote(consultas, erroLoginRetentativa);
-            for (final ConsultaLoteItem item in consultas) {
-              _consultasPendentes.remove(_chaveConsulta(item));
-            }
-          }
-        } else {
-          final Result<List<ResultadoConsultaLote>> resultado =
-              resposta.resultado!;
-          final AppException? erro = resultado.fold<AppException?>(
-            onSuccess: (_) => null,
-            onFailure: (falha) => falha,
-          );
-          if (erro != null && !_falhaTransitoria(erro)) {
-            if (erro is NaoAutorizadoException) {
-              _tokenSessao = null;
-              _identificadorPrestadorDoToken = null;
-              _avisarFalhaAutenticacao();
-            } else {
-              _registrarFalhaDoLote(
-                consultas,
-                'Consulta em lote falhou: $erro',
-              );
-              for (final ConsultaLoteItem item in consultas) {
-                _consultasPendentes.remove(_chaveConsulta(item));
-              }
-            }
-          } else if (erro == null) {
-            final Set<String> resolvidas = {};
-            for (final ResultadoConsultaLote item in resultado.fold(
-              onSuccess: (itensResultado) => itensResultado,
-              onFailure: (_) => const [],
-            )) {
-              final String chave = '${item.tipo.name}|${item.chave}';
-              if (_consultasPendentes.containsKey(chave)) {
-                if (_falhaTransitoriaNoResultado(item)) continue;
-                _resultadosConsultas[chave] = _consultaDesdeBatch(item);
-                resolvidas.add(chave);
-              }
-            }
-            for (final String chave in resolvidas) {
-              _consultasPendentes.remove(chave);
-            }
-          }
-        }
       }
-      _resultado = _ordenarPorNumeroGuia(
-        _aplicarResultadosConsultas(_guiasBaseConsultas),
-      );
       _etapaConsultaBackend = _consultasPendentes.isEmpty
           ? EtapaConsultaBackend.concluida
           : EtapaConsultaBackend.pendente;
@@ -747,27 +768,19 @@ class ValidadorController extends ChangeNotifier {
       );
     }
     if (r.tipo == TipoConsultaGuia.elegibilidade) {
-      return _consultaElegibilidade(
-        r.elegivel,
-        carteira: r.chave,
-        sucessoConsulta: r.sucesso,
-      );
+      return _consultaElegibilidade(r.elegivel, carteira: r.chave);
     }
     return _consultaSenha(r.statusSenha, senha: r.chave);
   }
 
+  bool _falhaTransitoriaNoResultado(ResultadoConsultaLote resultado) =>
+      !resultado.sucesso &&
+      resultado.erro?.trim() == 'Falha na consulta ao portal SulAmerica.';
+
   ConsultaGuia _consultaElegibilidade(
     bool? elegivel, {
     required String carteira,
-    bool sucessoConsulta = true,
   }) {
-    if (!sucessoConsulta) {
-      return const ConsultaGuia(
-        tipo: TipoConsultaGuia.elegibilidade,
-        sucesso: false,
-        descricao: 'Consulta de elegibilidade falhou',
-      );
-    }
     return switch (elegivel) {
       true => const ConsultaGuia(
         tipo: TipoConsultaGuia.elegibilidade,
@@ -815,29 +828,42 @@ class ValidadorController extends ChangeNotifier {
         falha: null,
       );
     }
-
-    final String? tokenAtual = _tokenSessao;
-    if (tokenAtual != null &&
+    if (_tokenSessao != null &&
         _identificadorPrestadorDoToken == identificadorPrestador) {
-      return (token: tokenAtual, mensagemErro: null, falha: null);
+      return (token: _tokenSessao, mensagemErro: null, falha: null);
     }
 
-    final Result<String> resultado = await service.login(
+    Result<String> resultado = await service.criarSessao(
       identificadorPrestador: identificadorPrestador,
     );
-    return resultado
-        .fold<({String? token, String? mensagemErro, AppException? falha})>(
-          onSuccess: (token) {
-            _tokenSessao = token;
-            _identificadorPrestadorDoToken = identificadorPrestador;
-            return (token: token, mensagemErro: null, falha: null);
-          },
-          onFailure: (falha) => (
-            token: null,
-            mensagemErro: AppStrings.erroLoginFalhou,
-            falha: falha,
-          ),
-        );
+    AppException? falha = resultado.fold<AppException?>(
+      onSuccess: (_) => null,
+      onFailure: (erro) => erro,
+    );
+    if (falha is FilaCheiaException && falha.retryAfter != null) {
+      _etapaConsultaBackend = EtapaConsultaBackend.aguardandoRetentativa;
+      notifyListeners();
+      await _aguardarRetentativa(falha.retryAfter!);
+      _etapaConsultaBackend = EtapaConsultaBackend.consultando;
+      resultado = await service.criarSessao(
+        identificadorPrestador: identificadorPrestador,
+      );
+      falha = resultado.fold<AppException?>(
+        onSuccess: (_) => null,
+        onFailure: (erro) => erro,
+      );
+    }
+
+    if (falha != null) {
+      return (token: null, mensagemErro: falha.mensagem, falha: falha);
+    }
+    final String token = resultado.fold<String>(
+      onSuccess: (valor) => valor,
+      onFailure: (_) => throw StateError('Resultado inconsistente.'),
+    );
+    _tokenSessao = token;
+    _identificadorPrestadorDoToken = identificadorPrestador;
+    return (token: token, mensagemErro: null, falha: null);
   }
 
   GuiaValidada _anexarConsulta(GuiaValidada guia, ConsultaGuia consulta) =>

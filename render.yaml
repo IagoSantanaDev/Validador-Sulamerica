@@ -15,25 +15,12 @@ services:
     envVars:
       - key: HOST
         value: "0.0.0.0"
-      # Lista de origens permitidas, separadas por VÍRGULA (a barra final é
-      # opcional e ignorada). Este valor fica em "*" por padrão; quem opera
-      # precisa trocar por uma lista explícita no painel do Render
-      # (Dashboard → Environment), porque o domínio do front é definido fora
-      # do repositório. Exemplo do cenário real deste projeto:
-      #   https://validador-sulamerica.pages.dev, http://localhost:3000
-      # Nunca use barra entre as origens nem espaço antes da vírgula como
-      # separador. A resposta ecoa só a origem que casar; o resto é bloqueado
-      # pelo navegador. Ver backend/README.md.
       - key: CORS_ORIGIN
-        value: "*"
-      # Credenciais do portal, uma entrada por prestador aceito. `sync: false`
-      # impede o valor real de entrar no repositório: defina no painel do
-      # Render (Dashboard → Environment). Sem isso, o login responde 401
-      # para qualquer identificador.
-      #   PORTAL_PRESTADOR_ID_27372066000673_CODE
-      #   PORTAL_PRESTADOR_ID_27372066000673_USER
-      #   PORTAL_PRESTADOR_ID_27372066000673_SENHA
-      # O identificador vai em MAIÚSCULAS e é o CNPJ/codigoPrestadorNaOperadora.
+        value: "https://iagosantanadev.github.io, https://validador-sulamerica.pages.dev"
+      # CORS controla acesso pelo navegador; não autentica chamadas diretas
+      # à API. Origens adicionais devem ser separadas por vírgula.
+      # Cadastre as variáveis de credenciais no painel do Render. Não coloque
+      # identificadores ou valores de credenciais neste arquivo.
       #
       # TLS: não há nada a configurar. A conexão com o portal usa a validação
       # de CA pública padrão do dart:io, que também confere o hostname. O

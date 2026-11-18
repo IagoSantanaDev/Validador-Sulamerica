@@ -5,6 +5,8 @@ analyzer:
     # O backend e um package Dart separado (deps proprias, sem `pub get` na raiz):
     # analisado pela raiz, todos os imports dele ficam sem resolver.
     - backend/**
+    - build/**
+    - web/**
 
 linter:
   rules:

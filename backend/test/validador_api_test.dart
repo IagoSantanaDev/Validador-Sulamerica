@@ -1,14 +1,23 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
+import 'package:dio/dio.dart' show CancelToken;
 import 'package:logger/logger.dart';
 import 'package:shelf/shelf.dart';
 import 'package:test/test.dart';
+import 'package:validador_backend/modules/sulamerica/data/repositorio_sessoes.dart';
+import 'package:validador_backend/modules/sulamerica/data/resultado_consulta_portal.dart';
 import 'package:validador_backend/modules/sulamerica/data/sessao_portal.dart';
 import 'package:validador_backend/validador_api.dart';
 
-/// Saida de log descartada: os testes nao devem poluir o console.
+const Map<String, String> _ambiente = <String, String>{
+  'PORTAL_PRESTADOR_ID_TESTE_CODE': '000000000000',
+  'PORTAL_PRESTADOR_ID_TESTE_USER': 'usuario-teste',
+  'PORTAL_PRESTADOR_ID_TESTE_SENHA': 'senha-teste',
+  'CORS_ORIGIN':
+      'https://app.example,https://validador-sulamerica.pages.dev,https://iagosantanadev.github.io',
+};
+
 class _LogMudo implements LogOutput {
   const _LogMudo();
 
@@ -22,47 +31,19 @@ class _LogMudo implements LogOutput {
   Future<void> init() async {}
 }
 
-/// `LogOutput` que guarda as mensagens para permitir assercao sobre o que foi
-/// registrado no servidor.
-class _LogCapturado implements LogOutput {
-  _LogCapturado([List<String>? destino]) : mensagens = destino ?? <String>[];
+class _SessaoFake extends SessaoPortal {
+  _SessaoFake({this.gate, this.loginResult})
+      : super(logger: Logger(level: Level.off));
 
-  final List<String> mensagens;
-
-  @override
-  void output(OutputEvent event) => mensagens.addAll(event.lines);
-
-  @override
-  Future<void> destroy() async {}
+  final Completer<void>? gate;
+  final ResultadoLogin? loginResult;
+  bool _autenticada = false;
+  int logins = 0;
+  int consultas = 0;
+  final List<CancelToken?> tokensCancelamento = <CancelToken?>[];
 
   @override
-  Future<void> init() async {}
-}
-
-/// `SessaoPortal` sem rede: `login` devolve um resultado controlado e guarda
-/// as credenciais recebidas para permitir assercao sobre a resolucao feita
-/// pelo servidor.
-class _SessaoPortalFake extends SessaoPortal {
-  _SessaoPortalFake(this.resultado)
-      : super(
-          logger: Logger(output: const _LogMudo()),
-        );
-
-  final ResultadoLogin resultado;
-  final List<({String code, String user, String senha})> credenciaisRecebidas =
-      <({String code, String user, String senha})>[];
-
-  /// Quantas vezes `encerrar()` foi chamado: prova se a sessao foi descartada
-  /// pelo servidor.
-  int encerradas = 0;
-
-  /// Quando preenchido, `consultarBeneficiario` fica parado ate o
-  /// `Completer` completar, mantendo a sessao ocupada por um lote em voo.
-  Completer<void>? consultaEmAndamento;
-
-  /// Quantas vezes o lote chegou a usar esta sessao. E o sinal de que a
-  /// sessao esta realmente ocupada, sem depender de `delay`.
-  int consultasIniciadas = 0;
+  bool get autenticada => _autenticada;
 
   @override
   Future<ResultadoLogin> login({
@@ -70,1122 +51,592 @@ class _SessaoPortalFake extends SessaoPortal {
     required String user,
     required String senha,
   }) async {
-    credenciaisRecebidas.add((code: code, user: user, senha: senha));
+    logins++;
+    final ResultadoLogin resultado =
+        loginResult ?? const ResultadoLogin.autenticado();
+    _autenticada = resultado.autenticada;
     return resultado;
   }
 
   @override
-  Future<String?> consultarBeneficiario({
+  Future<ResultadoLogin> garantirAutenticada() async {
+    if (_autenticada) return const ResultadoLogin.autenticado();
+    return login(code: 'code', user: 'user', senha: 'senha');
+  }
+
+  @override
+  Future<ResultadoConsultaPortal<String>> consultarBeneficiario({
     required String carteirinhaCompleta,
+    CancelToken? cancelToken,
   }) async {
-    consultasIniciadas++;
-    await consultaEmAndamento?.future;
-    return '<html>elegivel=true</html>';
+    consultas++;
+    tokensCancelamento.add(cancelToken);
+    await gate?.future;
+    return const ResultadoConsultaPortal<String>.sucesso(
+      dados: '<html>elegivel</html>',
+      status: 200,
+    );
   }
 
   @override
-  Future<void> encerrar() async {
-    encerradas++;
+  Future<ResultadoConsultaPortal<Map<String, dynamic>>> consultarSenha({
+    required String senha,
+    CancelToken? cancelToken,
+  }) async {
+    consultas++;
+    tokensCancelamento.add(cancelToken);
+    await gate?.future;
+    return const ResultadoConsultaPortal<Map<String, dynamic>>.sucesso(
+      dados: <String, dynamic>{'registros': <dynamic>[]},
+      status: 200,
+    );
   }
+
+  @override
+  Future<void> encerrar() async {}
 }
 
-/// Falso `HttpConnectionInfo` para exercitar o rate limit por IP real.
-class _ConexaoFake implements HttpConnectionInfo {
-  _ConexaoFake(this.remoteAddress);
+class _ContextoApi {
+  _ContextoApi({required this.api, required this.sessoes, required this.gate});
 
-  @override
-  final InternetAddress remoteAddress;
-
-  @override
-  int get localPort => 8080;
-
-  @override
-  int get remotePort => 51234;
+  final ValidadorApi api;
+  final List<_SessaoFake> sessoes;
+  final Completer<void> gate;
 }
 
-const Map<String, String> _ambienteTeste = {
-  'PORTAL_PRESTADOR_ID_TESTE_CODE': '000000000000',
-  'PORTAL_PRESTADOR_ID_TESTE_USER': 'usuario-teste',
-  'PORTAL_PRESTADOR_ID_TESTE_SENHA': 'senha-teste',
-};
-
-/// Monta uma API cujas sessoes do portal sao [_SessaoPortalFake] e cuja sonda
-/// de alcance e contada, sem tocar a rede.
-ValidadorApi _apiDeTeste({
-  required List<_SessaoPortalFake> sessoes,
-  required List<String> log,
-  Future<int> Function()? sonda,
-  Duration janelaCacheAlcance = const Duration(seconds: 10),
-  int limiteSessoes = 10,
+_ContextoApi _criarApi({
+  int limitePorChave = 100,
+  int limiteGlobal = 500,
+  int limiteExecucoes = 24,
+  RepositorioSessoes? repositorio,
+  ResultadoLogin? loginResult,
 }) {
-  final List<_SessaoPortalFake> fila = List<_SessaoPortalFake>.of(sessoes);
-  return ValidadorApi(
-    logger: Logger(output: _LogCapturado(log)),
-    ambiente: _ambienteTeste,
-    fabricaSessao: (_) => fila.removeAt(0),
-    sondaPortal: sonda ?? () async => 200,
-    janelaCacheAlcance: janelaCacheAlcance,
-    limiteSessoes: limiteSessoes,
-  );
-}
-
-/// Monta uma API só para exercitar o CORS, com a sonda de alcance contada
-/// (nenhum teste toca a rede). [corsOrigin] ausente = `CORS_ORIGIN` não
-/// definida, que precisa continuar valendo `*`.
-ValidadorApi _apiDeCors(String? corsOrigin) {
-  return ValidadorApi(
-    logger: Logger(output: _LogCapturado(<String>[])),
-    ambiente: <String, String>{
-      ..._ambienteTeste,
-      if (corsOrigin != null) 'CORS_ORIGIN': corsOrigin,
+  final Completer<void> gate = Completer<void>();
+  final List<_SessaoFake> sessoes = <_SessaoFake>[];
+  final ValidadorApi api = ValidadorApi(
+    logger: Logger(output: const _LogMudo(), level: Level.off),
+    ambiente: _ambiente,
+    fabricaSessao: (_) {
+      final _SessaoFake sessao = _SessaoFake(
+        gate: gate,
+        loginResult: loginResult,
+      );
+      sessoes.add(sessao);
+      return sessao;
     },
-    fabricaSessao: (_) => _SessaoPortalFake(const ResultadoLogin.autenticado()),
     sondaPortal: () async => 200,
+    repositorio: repositorio,
+    limiteRequisicoesPorChave: limitePorChave,
+    limiteRequisicoesGlobal: limiteGlobal,
+    limiteExecucoes: limiteExecucoes,
   );
+  return _ContextoApi(api: api, sessoes: sessoes, gate: gate);
 }
 
-/// Dispara a rota que só exercita o middleware de CORS: 404 sem tocar o
-/// portal e sem rede.
-Future<Response> _requisicaoDeCors(
-  ValidadorApi api,
-  String metodo,
-  String? origin,
-) async {
-  return api.handler(
+Request _request(
+  String method,
+  String path, {
+  Object? body,
+  String? token,
+  String? idempotencyKey,
+  Map<String, String>? headers,
+}) =>
     Request(
-      metodo,
-      Uri.parse('http://localhost/api/login'),
-      headers: origin == null ? null : <String, String>{'origin': origin},
+      method,
+      Uri.parse('http://localhost$path'),
+      body: body == null ? null : jsonEncode(body),
+      headers: <String, String>{
+        if (token != null) 'authorization': 'Bearer $token',
+        if (idempotencyKey != null) 'idempotency-key': idempotencyKey,
+        ...?headers,
+      },
+    );
+
+Future<String> _criarSessao(ValidadorApi api) async {
+  final Response resposta = await api.handler(
+    _request(
+      'POST',
+      '/api/sessoes',
+      body: const <String, String>{'identificadorPrestador': 'teste'},
     ),
   );
+  expect(resposta.statusCode, 201);
+  return (jsonDecode(await resposta.readAsString()) as Map)['token'] as String;
 }
 
-/// Aguarda o lote chegar de fato na consulta ao portal, sem depender de
-/// `delay` fixo (a leitura do corpo e um await, nao e sincrona).
-Future<void> _aguardaConsulta(_SessaoPortalFake sessao) async {
-  for (int i = 0; i < 100 && sessao.consultasIniciadas == 0; i++) {
-    await Future<void>.delayed(const Duration(milliseconds: 1));
-  }
-  expect(
-    sessao.consultasIniciadas,
-    greaterThan(0),
-    reason: 'o lote deveria ter alcancado o portal',
-  );
-}
-
-/// Dispara um lote de uma elegibilidade e devolve a resposta sem aguardar,
-/// para que o teste observe a sessao enquanto ela esta ocupada.
-Future<Response> _loteDe(String token, ValidadorApi api) {
-  final Request request = _requestConsultas({
-    'token': token,
-    'consultas': <dynamic>[
-      {'tipo': 'elegibilidade', 'chave': '12345678901234567890'},
-    ],
-  });
-  return Future<Response>.value(api.handler(request));
-}
-
-Future<String> _tokenDoLogin(ValidadorApi api) async {
-  final response = await api.handler(
-    _requestLogin(const {'identificadorPrestador': 'teste'}),
-  );
-  expect(response.statusCode, 200, reason: 'login deveria autenticar');
-  final corpo = jsonDecode(await response.readAsString()) as Map;
-  return corpo['token'] as String;
-}
-
-Request _requestLogin(
-  Object corpo, {
-  HttpConnectionInfo? conexao,
-  Map<String, String>? headers,
-}) {
-  return Request(
-    'POST',
-    Uri.parse('http://localhost/api/login'),
-    body: corpo is String ? corpo : jsonEncode(corpo),
-    headers: headers,
-    context: conexao == null
-        ? const <String, Object>{}
-        : <String, Object>{'shelf.io.connection_info': conexao},
-  );
-}
-
-Request _requestConsultas(
-  Object corpo, {
-  HttpConnectionInfo? conexao,
-  Map<String, String>? headers,
-}) {
-  return Request(
-    'POST',
-    Uri.parse('http://localhost/api/consultas'),
-    body: corpo is String ? corpo : jsonEncode(corpo),
-    headers: headers,
-    context: conexao == null
-        ? const <String, Object>{}
-        : <String, Object>{'shelf.io.connection_info': conexao},
-  );
-}
-
-void main() {
-  group('ValidadorApi - login', () {
-    late ValidadorApi api;
-
-    setUp(() {
-      api = ValidadorApi();
-    });
-
-    test('rejeita corpo JSON invalido com 400', () async {
-      final request = Request(
-        'POST',
-        Uri.parse('http://localhost/api/login'),
-        body: 'nao e json',
-      );
-      final response = await api.handler(request);
-      expect(response.statusCode, 400);
-    });
-
-    test('rejeita identificadorPrestador ausente com 400', () async {
-      final request = Request(
-        'POST',
-        Uri.parse('http://localhost/api/login'),
-        body: jsonEncode({'outro': 'campo'}),
-      );
-      final response = await api.handler(request);
-      expect(response.statusCode, 400);
-    });
-
-    test('rejeita identificadorPrestador vazio com 400', () async {
-      final request = Request(
-        'POST',
-        Uri.parse('http://localhost/api/login'),
-        body: jsonEncode({'identificadorPrestador': '  '}),
-      );
-      final response = await api.handler(request);
-      expect(response.statusCode, 400);
-    });
-
-    test('rejeita identificador desconhecido com 401', () async {
-      final request = Request(
-        'POST',
-        Uri.parse('http://localhost/api/login'),
-        body: jsonEncode({'identificadorPrestador': 'desconhecido'}),
-      );
-      final response = await api.handler(request);
-      expect(response.statusCode, 401);
-    });
-
-    test('aceita apenas identificadorPrestador (sem code/user/senha)',
-        () async {
-      // Mesmo com code/user/senha no corpo, o backend deve ignorá-los
-      // e resolver as credenciais no servidor. Como o identificador não
-      // está configurado, deve retornar 401 (desconhecido).
-      final request = Request(
-        'POST',
-        Uri.parse('http://localhost/api/login'),
-        body: jsonEncode({
-          'identificadorPrestador': 'nao-configurado',
-          'code': '123',
-          'user': 'user',
-          'senha': 'senha',
-        }),
-      );
-      final response = await api.handler(request);
-      expect(response.statusCode, 401);
-    });
-  });
-
-  group('ValidadorApi - consultas', () {
-    late ValidadorApi api;
-
-    setUp(() {
-      api = ValidadorApi();
-    });
-
-    test('rejeita token ausente com 401', () async {
-      final request = Request(
-        'POST',
-        Uri.parse('http://localhost/api/consultas'),
-        body: jsonEncode({
-          'consultas': [
-            {'tipo': 'elegibilidade', 'chave': '12345678901234567890'},
-          ],
-        }),
-      );
-      final response = await api.handler(request);
-      expect(response.statusCode, 401);
-    });
-
-    test('rejeita consultas ausentes com 400', () async {
-      final request = Request(
-        'POST',
-        Uri.parse('http://localhost/api/consultas'),
-        body: jsonEncode({'token': 'abc'}),
-      );
-      final response = await api.handler(request);
-      expect(response.statusCode, 400);
-    });
-
-    test('rejeita consultas vazias com 400', () async {
-      final request = Request(
-        'POST',
-        Uri.parse('http://localhost/api/consultas'),
-        body: jsonEncode({
-          'token': 'abc',
-          'consultas': <dynamic>[],
-        }),
-      );
-      final response = await api.handler(request);
-      expect(response.statusCode, 400);
-    });
-
-    test('rejeita item nao-objeto com 400', () async {
-      final request = Request(
-        'POST',
-        Uri.parse('http://localhost/api/consultas'),
-        body: jsonEncode({
-          'token': 'abc',
-          'consultas': ['invalido'],
-        }),
-      );
-      final response = await api.handler(request);
-      expect(response.statusCode, 400);
-    });
-
-    test('rejeita item sem tipo com 400', () async {
-      final request = Request(
-        'POST',
-        Uri.parse('http://localhost/api/consultas'),
-        body: jsonEncode({
-          'token': 'abc',
-          'consultas': [
-            {'chave': '12345678901234567890'},
-          ],
-        }),
-      );
-      final response = await api.handler(request);
-      expect(response.statusCode, 400);
-    });
-
-    test('rejeita item sem chave com 400', () async {
-      final request = Request(
-        'POST',
-        Uri.parse('http://localhost/api/consultas'),
-        body: jsonEncode({
-          'token': 'abc',
-          'consultas': [
-            {'tipo': 'elegibilidade'},
-          ],
-        }),
-      );
-      final response = await api.handler(request);
-      expect(response.statusCode, 400);
-    });
-
-    test('rejeita item com tipo vazio com 400', () async {
-      final request = Request(
-        'POST',
-        Uri.parse('http://localhost/api/consultas'),
-        body: jsonEncode({
-          'token': 'abc',
-          'consultas': [
-            {'tipo': '', 'chave': '12345678901234567890'},
-          ],
-        }),
-      );
-      final response = await api.handler(request);
-      expect(response.statusCode, 400);
-    });
-
-    test('rejeita item com chave vazia com 400', () async {
-      final request = Request(
-        'POST',
-        Uri.parse('http://localhost/api/consultas'),
-        body: jsonEncode({
-          'token': 'abc',
-          'consultas': [
-            {'tipo': 'elegibilidade', 'chave': ''},
-          ],
-        }),
-      );
-      final response = await api.handler(request);
-      expect(response.statusCode, 400);
-    });
-
-    test(
-        'valida payload antes do token: payload invalido + token valido '
-        'devolve 400', () async {
-      // Ordem importa: com token legitimo e payload invalido, o erro
-      // precisa ser de validacao (400), e nao de sessao (401).
-      final sessao = _SessaoPortalFake(const ResultadoLogin.autenticado());
-      final api = ValidadorApi(
-        ambiente: const {
-          'PORTAL_PRESTADOR_ID_TESTE_CODE': '000000000000',
-          'PORTAL_PRESTADOR_ID_TESTE_USER': 'usuario-teste',
-          'PORTAL_PRESTADOR_ID_TESTE_SENHA': 'senha-teste',
-        },
-        fabricaSessao: (_) => sessao,
-      );
-      final login = await api.handler(
-        _requestLogin(const {'identificadorPrestador': 'teste'}),
-      );
-      expect(login.statusCode, 200);
-      final loginCorpo = jsonDecode(await login.readAsString()) as Map;
-      final token = loginCorpo['token'] as String;
-      final response = await api.handler(
-        _requestConsultas({'token': token, 'consultas': 'nao-e-lista'}),
-      );
-      expect(response.statusCode, 400);
-      final corpo = jsonDecode(await response.readAsString()) as Map;
-      expect(corpo['mensagem'], 'Campo consultas e obrigatorio.');
-    });
-
-    test(
-        'valida payload antes do token: payload valido + token invalido '
-        'devolve 401', () async {
-      final sessao = _SessaoPortalFake(const ResultadoLogin.autenticado());
-      final api = ValidadorApi(fabricaSessao: (_) => sessao);
-      final response = await api.handler(
-        _requestConsultas({
-          'token': 'token-que-nao-existe',
-          'consultas': [
-            {'tipo': 'elegibilidade', 'chave': '12345678901234567890'},
-          ],
-        }),
-      );
-      expect(response.statusCode, 401);
-      final corpo = jsonDecode(await response.readAsString()) as Map;
-      expect(corpo['mensagem'], 'Token de sessao invalido ou ausente.');
-    });
-
-    test('rejeita lote acima de 300 itens com 413', () async {
-      final consultas = List.generate(
-        301,
-        (i) => {'tipo': 'elegibilidade', 'chave': '12345678901234567890'},
-      );
-      final request = Request(
-        'POST',
-        Uri.parse('http://localhost/api/consultas'),
-        body: jsonEncode({'token': 'abc', 'consultas': consultas}),
-      );
-      final response = await api.handler(request);
-      expect(response.statusCode, 413);
-    });
-
-    test('rejeita corpo acima de 1 MB com 413', () async {
-      // O limite precisa ser provado no handler: um corpo grande mas
-      // sintaticamente invalido ("xxx...") so pode responder 413 se a
-      // checagem de tamanho existir; sem o limite cairia em 400.
-      final corpoGrande = 'x' * ((1 << 20) + 1);
-      final request = _requestConsultas(corpoGrande);
-      final response = await api.handler(request);
-      expect(response.statusCode, 413);
-      final corpo = jsonDecode(await response.readAsString()) as Map;
-      expect(corpo['mensagem'], contains('1 MB'));
-    });
-
-    test('aceita corpo dentro do limite e segue para a validacao normal',
-        () async {
-      // Corpo com o mesmo tamanho-limite, porem JSON valido: nao pode ser
-      // barrado por tamanho, e sim reprovado pela regra de negocio
-      // (identificador desconhecido => 401).
-      final enchimento = 'x' * ((1 << 20) - 128);
-      final corpo = jsonEncode(
-        {'identificadorPrestador': 'inexistente', 'lixo': enchimento},
-      );
-      expect(corpo.length, lessThanOrEqualTo(1 << 20));
-
-      final api = ValidadorApi();
-      final response = await api.handler(_requestLogin(corpo));
-      expect(response.statusCode, 401);
-      final mapa = jsonDecode(await response.readAsString()) as Map;
-      expect(mapa['mensagem'], isNot(contains('1 MB')));
-    });
-  });
-
-  group('ValidadorApi - rate limit', () {
-    test('retorna 429 apos exceder limite de requisicoes', () async {
-      final api = ValidadorApi();
-      const int limite = 40;
-
-      // Identificador desconhecido responde 401 sem tocar a rede, o que
-      // permite exercitar apenas o rate limit.
-      for (int i = 0; i < limite; i++) {
-        final request = Request(
-          'POST',
-          Uri.parse('http://localhost/api/login'),
-          body: jsonEncode({'identificadorPrestador': 'inexistente'}),
-        );
-        final response = await api.handler(request);
-        expect(response.statusCode, 401, reason: 'Falha na req $i');
-      }
-
-      // A próxima requisição deve ser bloqueada.
-      final request = Request(
-        'POST',
-        Uri.parse('http://localhost/api/login'),
-        body: jsonEncode({'identificadorPrestador': 'inexistente'}),
-      );
-      final response = await api.handler(request);
-      expect(response.statusCode, 429);
-    });
-
-    test('nao confia em X-Forwarded-For arbitrario', () async {
-      final api = ValidadorApi();
-      const int limite = 40;
-
-      // X-Forwarded-For variando deve continuar contando como o mesmo IP,
-      // pois o backend usa apenas o endereco real de conexao.
-      for (int i = 0; i < limite; i++) {
-        final request = Request(
-          'POST',
-          Uri.parse('http://localhost/api/login'),
-          body: jsonEncode({'identificadorPrestador': 'inexistente'}),
-          headers: {'x-forwarded-for': '10.0.0.$i'},
-        );
-        final response = await api.handler(request);
-        expect(response.statusCode, 401, reason: 'Falha na req $i');
-      }
-
-      // A próxima requisição deve ser bloqueada, mesmo com XFF diferente.
-      final request = Request(
-        'POST',
-        Uri.parse('http://localhost/api/login'),
-        body: jsonEncode({'identificadorPrestador': 'inexistente'}),
-        headers: {'x-forwarded-for': '10.0.0.999'},
-      );
-      final response = await api.handler(request);
-      expect(response.statusCode, 429);
-    });
-
-    test('separa buckets de rate limit por IP de conexao real', () async {
-      // Prova que o rate limit usa o IP real: um cliente exhausting o proprio
-      // limite nao pode bloquear outro IP. Passaria com uma chave constante.
-      final api = ValidadorApi();
-      const int limite = 40;
-      final conexaoA = _ConexaoFake(InternetAddress('203.0.113.10'));
-      final conexaoB = _ConexaoFake(InternetAddress('203.0.113.11'));
-
-      for (int i = 0; i < limite; i++) {
-        final response = await api.handler(
-          _requestLogin(
-            const {'identificadorPrestador': 'inexistente'},
-            conexao: conexaoA,
-          ),
-        );
-        expect(response.statusCode, 401, reason: 'Falha na req $i do IP A');
-      }
-
-      // IP A esgotou: precisa estar bloqueado.
-      final bloqueadoA = await api.handler(
-        _requestLogin(
-          const {'identificadorPrestador': 'inexistente'},
-          conexao: conexaoA,
-        ),
-      );
-      expect(bloqueadoA.statusCode, 429);
-
-      // IP B tem o proprio bucket e nao pode ser afetado pelo IP A.
-      final respostaB = await api.handler(
-        _requestLogin(
-          const {'identificadorPrestador': 'inexistente'},
-          conexao: conexaoB,
-        ),
-      );
-      expect(respostaB.statusCode, 401);
-    });
-
-    test('nao aplica rate limit em rotas fora do portal', () async {
-      final api = ValidadorApi();
-      for (int i = 0; i < 45; i++) {
-        final request = Request(
-          'POST',
-          Uri.parse('http://localhost/api/rota-inexistente'),
-          body: '{}',
-        );
-        final response = await api.handler(request);
-        expect(response.statusCode, 404, reason: 'Falha na req $i');
-      }
-    });
-  });
-
-  group('ValidadorApi - ambiente injetado', () {
-    test('identificador desconhecido no ambiente injetado retorna 401',
-        () async {
-      final api = ValidadorApi(ambiente: const {});
-      final request = Request(
-        'POST',
-        Uri.parse('http://localhost/api/login'),
-        body: jsonEncode({'identificadorPrestador': 'teste'}),
-      );
-      final response = await api.handler(request);
-      expect(response.statusCode, 401);
-      final corpo = jsonDecode(await response.readAsString()) as Map;
-      expect(corpo['mensagem'], contains('nao autorizado'));
-    });
-
-    const Map<String, String> ambienteTeste = {
-      'PORTAL_PRESTADOR_ID_TESTE_CODE': '000000000000',
-      'PORTAL_PRESTADOR_ID_TESTE_USER': 'usuario-teste',
-      'PORTAL_PRESTADOR_ID_TESTE_SENHA': 'senha-teste',
+Map<String, dynamic> _consulta({String tipo = 'elegibilidade'}) =>
+    <String, dynamic>{
+      'tipo': tipo,
+      'chave': tipo == 'senha' ? '5000000000' : '12345678901234567890',
     };
 
-    test('identificador conhecido avanca para autenticacao no portal',
-        () async {
-      // O `SessaoPortal` e falso: nenhum acesso a rede. O que se prova e que
-      // o identificador foi resolvido no servidor (as credenciais injetadas no
-      // ambiente chegam intactas a sessao) e que a requisicao NAO foi recusada
-      // na etapa de autorizacao.
-      final sessao = _SessaoPortalFake(const ResultadoLogin.autenticado());
-      final api = ValidadorApi(
-        ambiente: ambienteTeste,
-        fabricaSessao: (_) => sessao,
+Future<Response> _criarLote(
+  ValidadorApi api,
+  String token,
+  String key, {
+  List<Map<String, dynamic>>? consultas,
+}) async =>
+    await api.handler(
+      _request(
+        'POST',
+        '/api/lotes',
+        token: token,
+        idempotencyKey: key,
+        body: <String, Object>{
+          'consultas': consultas ?? <Map<String, dynamic>>[_consulta()],
+        },
+      ),
+    );
+
+void main() {
+  group('POST /api/sessoes', () {
+    test(
+      'cria token lógico opaco e autentica o pool sem autenticação pessoal',
+      () async {
+        final _ContextoApi contexto = _criarApi();
+        final String token = await _criarSessao(contexto.api);
+        expect(token, matches(RegExp(r'^[a-f0-9]{32}$')));
+        expect(contexto.sessoes, hasLength(1));
+        expect(contexto.sessoes.single.logins, 1);
+      },
+    );
+
+    test(
+      'valida identificador e responde 401 quando não há credenciais',
+      () async {
+        final _ContextoApi contexto = _criarApi();
+        final Response invalida = await contexto.api.handler(
+          _request('POST', '/api/sessoes', body: <String, String>{}),
+        );
+        final Response desconhecida = await contexto.api.handler(
+          _request(
+            'POST',
+            '/api/sessoes',
+            body: const <String, String>{
+              'identificadorPrestador': 'nao-configurado',
+            },
+          ),
+        );
+
+        expect(invalida.statusCode, 400);
+        expect(desconhecida.statusCode, 401);
+        expect(contexto.sessoes, isEmpty);
+      },
+    );
+
+    test('limite de capacidade retorna 429 sem Retry-After', () async {
+      final _ContextoApi contexto = _criarApi(
+        repositorio: RepositorioSessoes(limite: 1),
+      );
+      await _criarSessao(contexto.api);
+      final Response cheia = await contexto.api.handler(
+        _request(
+          'POST',
+          '/api/sessoes',
+          body: const <String, String>{'identificadorPrestador': 'teste'},
+        ),
       );
 
-      final response = await api.handler(
-        _requestLogin(const {'identificadorPrestador': 'teste'}),
+      expect(cheia.statusCode, 429);
+      expect(cheia.headers.containsKey('retry-after'), isFalse);
+    });
+
+    test('falha de taxa expõe Retry-After para o cliente web', () async {
+      final _ContextoApi contexto = _criarApi(limitePorChave: 1);
+      await _criarSessao(contexto.api);
+      final Response limitada = await contexto.api.handler(
+        _request(
+          'POST',
+          '/api/sessoes',
+          body: const <String, String>{'identificadorPrestador': 'teste'},
+        ),
       );
-      final corpo = jsonDecode(await response.readAsString()) as Map;
 
-      expect(corpo['status'], isNull);
-      expect(corpo['autenticada'], isTrue);
-      expect(corpo['token'], isA<String>());
-      expect(corpo['mensagem'], isNull);
-
-      // Prova de que a resolucao veio do ambiente, e nao do corpo.
-      expect(sessao.credenciaisRecebidas, hasLength(1));
-      expect(sessao.credenciaisRecebidas.single.code, '000000000000');
-      expect(sessao.credenciaisRecebidas.single.user, 'usuario-teste');
-      expect(sessao.credenciaisRecebidas.single.senha, 'senha-teste');
+      expect(limitada.statusCode, 429);
+      expect(int.tryParse(limitada.headers['retry-after'] ?? ''), isNotNull);
+      expect(
+        limitada.headers['access-control-expose-headers'],
+        contains('Retry-After'),
+      );
     });
 
     test(
-        'identificador conhecido com credencial recusada pelo portal '
-        'retorna 401 do portal, nao de autorizacao', () async {
-      final sessao = _SessaoPortalFake(
-        const ResultadoLogin.falha(MotivoFalhaLogin.credenciaisInvalidas),
-      );
-      final api = ValidadorApi(
-        ambiente: ambienteTeste,
-        fabricaSessao: (_) => sessao,
-      );
+      'traduz falhas do login inicial sem expor detalhes internos',
+      () async {
+        final List<(MotivoFalhaLogin, int)> falhas = <(MotivoFalhaLogin, int)>[
+          (MotivoFalhaLogin.credenciaisInvalidas, 401),
+          (MotivoFalhaLogin.falhaInterna, 500),
+          (MotivoFalhaLogin.respostaInesperada, 502),
+          (MotivoFalhaLogin.falhaRede, 503),
+        ];
+        for (final (MotivoFalhaLogin motivo, int status) in falhas) {
+          final _ContextoApi contexto = _criarApi(
+            loginResult: ResultadoLogin.falha(
+              motivo,
+              detalhe: 'detalhe que nao pode vazar',
+            ),
+          );
+          final Response resposta = await contexto.api.handler(
+            _request(
+              'POST',
+              '/api/sessoes',
+              body: const <String, String>{'identificadorPrestador': 'teste'},
+            ),
+          );
 
-      final response = await api.handler(
-        _requestLogin(const {'identificadorPrestador': 'teste'}),
-      );
-      final corpo = jsonDecode(await response.readAsString()) as Map;
-      expect(response.statusCode, 401);
-      expect(
-        corpo['mensagem'],
-        'Credenciais invalidas para o portal SulAmerica.',
-      );
-      expect(corpo['mensagem'], isNot(contains('nao autorizado')));
-      expect(sessao.credenciaisRecebidas, hasLength(1));
-    });
+          expect(resposta.statusCode, status);
+          expect(await resposta.readAsString(), isNot(contains('detalhe que')));
+        }
+      },
+    );
 
-    test('identificador desconhecido nao chega a instanciar sessao do portal',
-        () async {
-      // Par do teste acima: sem configuracao no ambiente, a recusa acontece
-      // antes de qualquer tentativa de portal.
-      final sessao = _SessaoPortalFake(const ResultadoLogin.autenticado());
-      final api = ValidadorApi(
-        ambiente: ambienteTeste,
-        fabricaSessao: (_) => sessao,
-      );
+    test(
+      'responde 500 genérico para exceção interna ao criar sessão',
+      () async {
+        final ValidadorApi api = ValidadorApi(
+          logger: Logger(output: const _LogMudo(), level: Level.off),
+          ambiente: _ambiente,
+          fabricaSessao: (_) => throw Exception('detalhe interno'),
+        );
+        final Response resposta = await api.handler(
+          _request(
+            'POST',
+            '/api/sessoes',
+            body: const <String, String>{'identificadorPrestador': 'teste'},
+          ),
+        );
 
-      final response = await api.handler(
-        _requestLogin(const {'identificadorPrestador': 'nao-configurado'}),
-      );
-      final corpo = jsonDecode(await response.readAsString()) as Map;
-      expect(response.statusCode, 401);
-      expect(corpo['mensagem'], contains('nao autorizado'));
-      expect(sessao.credenciaisRecebidas, isEmpty);
-    });
-
-    test('credenciais do cliente no corpo sao ignoradas', () async {
-      // Mesmo com ambiente injetado para 'teste', o body traz outros
-      // identificadores: apenas o identificadorPrestador decide.
-      final api = ValidadorApi(ambiente: const {});
-      final request = Request(
-        'POST',
-        Uri.parse('http://localhost/api/login'),
-        body: jsonEncode({
-          'identificadorPrestador': 'outro',
-          'code': '1',
-          'user': 'u',
-          'senha': 's',
-        }),
-      );
-      final response = await api.handler(request);
-      expect(response.statusCode, 401);
-    });
+        expect(resposta.statusCode, 500);
+        expect(
+          await resposta.readAsString(),
+          isNot(contains('detalhe interno')),
+        );
+      },
+    );
   });
 
-  group('ValidadorApi - rota nao encontrada', () {
-    test('retorna 404 para rota desconhecida', () async {
-      final api = ValidadorApi();
-      final request = Request(
-        'GET',
-        Uri.parse('http://localhost/rota-desconhecida'),
-      );
-      final response = await api.handler(request);
-      expect(response.statusCode, 404);
-    });
-  });
-
-  group('ValidadorApi - status', () {
-    test('retorna 200 para /api/status', () async {
-      final api = _apiDeTeste(
-        sessoes: <_SessaoPortalFake>[
-          _SessaoPortalFake(const ResultadoLogin.autenticado()),
-        ],
-        log: <String>[],
-      );
-      final request = Request(
-        'GET',
-        Uri.parse('http://localhost/api/status'),
-      );
-      final response = await api.handler(request);
-      expect(response.statusCode, 200);
-    });
-  });
-
-  group('ValidadorApi - CORS', () {
-    // Cenario do bug: CORS_ORIGIN com lista separada por virgula. Ecoar a
-    // string inteira produz `Access-Control-Allow-Origin` com varias origens,
-    // o que a spec rejeita e o navegador reporta como "contains multiple
-    // values". O header precisa valer exatamente a origem que casou.
-    const String producao = 'https://validador-sulamerica.pages.dev';
-    const String local = 'http://localhost:3000';
-
-    test('devolve so a origem que casa quando CORS_ORIGIN tem varias',
-        () async {
-      final api = _apiDeCors('$producao, $local');
-      final response = await _requisicaoDeCors(api, 'GET', producao);
-      expect(response.headers['access-control-allow-origin'], producao);
-      expect(
-        response.headers['access-control-allow-origin'],
-        isNot(contains(',')),
-      );
-    });
-
-    test('a segunda origem da lista tambem casa', () async {
-      final api = _apiDeCors('$producao, $local');
-      final response = await _requisicaoDeCors(api, 'GET', local);
-      expect(response.headers['access-control-allow-origin'], local);
-    });
-
-    test('nao devolve Access-Control-Allow-Origin para origem fora da lista',
-        () async {
-      final api = _apiDeCors('$producao, $local');
-      final response =
-          await _requisicaoDeCors(api, 'GET', 'https://ataque.example');
-      // Sem o header o navegador bloqueia: e o comportamento seguro.
-      expect(
-        response.headers.containsKey('access-control-allow-origin'),
-        isFalse,
-      );
-    });
-
-    test('aceita origem configurada com barra final', () async {
-      // O header Origin do navegador nunca tem barra final; a configuracao
-      // ingênua do operador tem. Os dois precisam casar.
-      final api = _apiDeCors('$producao/, $local/');
-      expect(
-        (await _requisicaoDeCors(api, 'GET', producao))
-            .headers['access-control-allow-origin'],
-        producao,
-      );
-      expect(
-        (await _requisicaoDeCors(api, 'GET', local))
-            .headers['access-control-allow-origin'],
-        local,
-      );
-    });
-
-    test('ignora espacos em volta dos itens da lista', () async {
-      final api = _apiDeCors('  $producao ,   $local  ');
-      expect(
-        (await _requisicaoDeCors(api, 'GET', producao))
-            .headers['access-control-allow-origin'],
-        producao,
-      );
-    });
-
-    test('ignora item vazio de virgula dupla ou virgula no fim', () async {
-      final api = _apiDeCors('$producao,, $local,');
-      expect(
-        (await _requisicaoDeCors(api, 'GET', local))
-            .headers['access-control-allow-origin'],
-        local,
-      );
-      // O item vazio nao pode virar uma origem extra aceita.
-      expect(
-        (await _requisicaoDeCors(api, 'GET', ''))
-            .headers
-            .containsKey('access-control-allow-origin'),
-        isFalse,
-      );
-    });
-
-    test('CORS_ORIGIN ausente mantem o wildcard', () async {
-      final api = _apiDeCors(null);
-      final response = await _requisicaoDeCors(api, 'GET', producao);
-      expect(response.headers['access-control-allow-origin'], '*');
-    });
-
-    test('asterisco na lista devolve wildcard', () async {
-      final api = _apiDeCors('$producao, *');
-      expect(
-        (await _requisicaoDeCors(api, 'GET', 'https://qualquer.example'))
-            .headers['access-control-allow-origin'],
-        '*',
-      );
-    });
-
-    test('preflight OPTIONS segue a mesma logica de lista', () async {
-      final api = _apiDeCors('$producao, $local');
-      final permitido = await _requisicaoDeCors(api, 'OPTIONS', producao);
-      expect(permitido.statusCode, 200);
-      expect(
-        permitido.headers['access-control-allow-origin'],
-        producao,
-      );
-      expect(
-        permitido.headers['access-control-allow-methods'],
-        contains('POST'),
-      );
-
-      final bloqueado = await _requisicaoDeCors(
-        api,
-        'OPTIONS',
-        'https://ataque.example',
-      );
-      expect(
-        bloqueado.headers.containsKey('access-control-allow-origin'),
-        isFalse,
-        reason: 'preflight de origem nao permitida tambem nao pode echoar',
-      );
-    });
-
-    test('a resposta real carrega o header, nao so o preflight', () async {
-      // A resposta de login (nao preflight) tambem precisa do header, senao o
-      // navegador bloqueia a leitura do corpo.
-      final api = _apiDeCors('$producao, $local');
-      final response = await api.handler(
-        _requestLogin(
-          const {'identificadorPrestador': 'desconhecido'},
-          headers: <String, String>{'origin': producao},
+  group('POST /api/lotes', () {
+    test('valida o payload antes de exigir Bearer', () async {
+      final _ContextoApi contexto = _criarApi();
+      final Response resposta = await contexto.api.handler(
+        _request(
+          'POST',
+          '/api/lotes',
+          body: const <String, Object>{'consultas': <Object>[]},
         ),
       );
-      expect(response.statusCode, 401);
-      expect(response.headers['access-control-allow-origin'], producao);
+      expect(resposta.statusCode, 400);
     });
 
-    test('marca Vary: Origin quando a resposta depende da origem', () async {
-      // Sem Vary, um cache compartilhado (CDN/proxy do Render) pode servir a
-      // resposta montada para uma origem para outra.
-      final api = _apiDeCors('$producao, $local');
-      expect(
-        (await _requisicaoDeCors(api, 'GET', producao)).headers['vary'],
-        'origin',
+    test('exige Bearer e Idempotency-Key', () async {
+      final _ContextoApi contexto = _criarApi();
+      final String token = await _criarSessao(contexto.api);
+      final Response semToken = await contexto.api.handler(
+        _request(
+          'POST',
+          '/api/lotes',
+          body: {
+            'consultas': <Map<String, dynamic>>[_consulta()],
+          },
+        ),
       );
-      // Com wildcard a resposta nao varia por origem: nada a diferenciar.
+      final Response semChave = await contexto.api.handler(
+        _request(
+          'POST',
+          '/api/lotes',
+          token: token,
+          body: <String, Object>{
+            'consultas': <Map<String, dynamic>>[_consulta()],
+          },
+        ),
+      );
+
+      expect(semToken.statusCode, 401);
+      expect(semChave.statusCode, 400);
+    });
+
+    test('aceita lote e repete a mesma execução por idempotência', () async {
+      final _ContextoApi contexto = _criarApi();
+      final String token = await _criarSessao(contexto.api);
+      final Response primeira = await _criarLote(contexto.api, token, 'key-1');
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+      final int consultasAntes = contexto.sessoes.fold<int>(
+        0,
+        (int total, _SessaoFake sessao) => total + sessao.consultas,
+      );
+      final Response repetida = await _criarLote(contexto.api, token, 'key-1');
+      final Map primeiraJson = jsonDecode(await primeira.readAsString()) as Map;
+      final Map repetidaJson = jsonDecode(await repetida.readAsString()) as Map;
+
+      expect(primeira.statusCode, 202);
       expect(
-        (await _requisicaoDeCors(_apiDeCors(null), 'GET', producao))
-            .headers
-            .containsKey('vary'),
+        primeira.headers['location'],
+        '/api/lotes/${primeiraJson['id']}/eventos',
+      );
+      expect(repetida.statusCode, 202);
+      expect(repetidaJson['id'], primeiraJson['id']);
+      expect(
+        contexto.sessoes.fold<int>(
+          0,
+          (int total, _SessaoFake sessao) => total + sessao.consultas,
+        ),
+        consultasAntes,
+      );
+
+      contexto.gate.complete();
+      await _aguardar(() async => await _ativos(contexto.api) == 0);
+    });
+
+    test('payload diferente com a mesma chave devolve 409', () async {
+      final _ContextoApi contexto = _criarApi();
+      final String token = await _criarSessao(contexto.api);
+      final Response primeira = await _criarLote(contexto.api, token, 'same');
+      final Response diferente = await _criarLote(
+        contexto.api,
+        token,
+        'same',
+        consultas: <Map<String, dynamic>>[_consulta(tipo: 'senha')],
+      );
+
+      expect(primeira.statusCode, 202);
+      expect(diferente.statusCode, 409);
+      contexto.gate.complete();
+      await _aguardar(() async => await _ativos(contexto.api) == 0);
+    });
+
+    test('itens inválidos não adquirem sessão nem consultam o portal',
+        () async {
+      final _ContextoApi contexto = _criarApi();
+      final String token = await _criarSessao(contexto.api);
+      final Response resposta = await _criarLote(
+        contexto.api,
+        token,
+        'invalid-items',
+        consultas: <Map<String, dynamic>>[
+          <String, dynamic>{'tipo': 'desconhecido', 'chave': 'x'},
+          <String, dynamic>{'tipo': 'elegibilidade', 'chave': 'invalida'},
+        ],
+      );
+
+      expect(resposta.statusCode, 202);
+      await _aguardar(() async => await _ativos(contexto.api) == 0);
+      expect(contexto.sessoes, hasLength(1));
+      expect(contexto.sessoes.single.logins, 1);
+      expect(contexto.sessoes.single.consultas, 0);
+    });
+
+    test('mais de 300 itens e corpo acima de 1 MB retornam 413', () async {
+      final _ContextoApi contexto = _criarApi();
+      final String token = await _criarSessao(contexto.api);
+      final Response excessivo = await contexto.api.handler(
+        _request(
+          'POST',
+          '/api/lotes',
+          token: token,
+          idempotencyKey: 'over-limit',
+          body: <String, Object>{
+            'consultas': List<Map<String, dynamic>>.generate(
+              301,
+              (_) => _consulta(),
+            ),
+          },
+        ),
+      );
+      final Request grande = Request(
+        'POST',
+        Uri.parse('http://localhost/api/lotes'),
+        body: Stream<List<int>>.value(
+          utf8.encode(jsonEncode({'consultas': 'x' * (1 << 20)})),
+        ),
+        headers: <String, String>{
+          'authorization': 'Bearer $token',
+          'idempotency-key': 'large-body',
+        },
+      );
+      final Response corpoGrande = await contexto.api.handler(grande);
+
+      expect(excessivo.statusCode, 413);
+      expect(corpoGrande.statusCode, 413);
+    });
+  });
+
+  group('SSE e ownership', () {
+    test('outro token não pode abrir eventos do lote', () async {
+      final _ContextoApi contexto = _criarApi();
+      final String dono = await _criarSessao(contexto.api);
+      final String outro = await _criarSessao(contexto.api);
+      final Response lote = await _criarLote(contexto.api, dono, 'owner');
+      final String id =
+          (jsonDecode(await lote.readAsString()) as Map)['id'] as String;
+
+      final Response semDono = await contexto.api.handler(
+        _request('GET', '/api/lotes/$id/eventos', token: outro),
+      );
+      final Response semAuth = await contexto.api.handler(
+        _request('GET', '/api/lotes/$id/eventos'),
+      );
+
+      expect(semDono.statusCode, 404);
+      expect(semAuth.statusCode, 401);
+      contexto.gate.complete();
+      await _aguardar(() async => await _ativos(contexto.api) == 0);
+    });
+
+    test('stream usa replay SSE e substitui assinante anterior', () async {
+      final _ContextoApi contexto = _criarApi();
+      final String token = await _criarSessao(contexto.api);
+      final Response lote = await _criarLote(contexto.api, token, 'stream');
+      final String id =
+          (jsonDecode(await lote.readAsString()) as Map)['id'] as String;
+      final Completer<void> primeiraFechada = Completer<void>();
+      final Response primeira = await contexto.api.handler(
+        _request('GET', '/api/lotes/$id/eventos', token: token),
+      );
+      primeira.read().listen(
+        (_) {},
+        onDone: () {
+          if (!primeiraFechada.isCompleted) primeiraFechada.complete();
+        },
+      );
+      final Response segunda = await contexto.api.handler(
+        _request('GET', '/api/lotes/$id/eventos?desde=0', token: token),
+      );
+      final StringBuffer dados = StringBuffer();
+      final Completer<void> segundaFechada = Completer<void>();
+      segunda.read().transform(utf8.decoder).listen(
+        dados.write,
+        onDone: () {
+          if (!segundaFechada.isCompleted) segundaFechada.complete();
+        },
+      );
+      await primeiraFechada.future.timeout(const Duration(seconds: 1));
+      expect(segunda.statusCode, 200);
+      expect(segunda.headers['content-type'], contains('text/event-stream'));
+      expect(segunda.context['shelf.io.buffer_output'], isFalse);
+
+      contexto.gate.complete();
+      await segundaFechada.future.timeout(const Duration(seconds: 2));
+      expect(dados.toString(), contains('event: resultado'));
+      expect(dados.toString(), contains('retry: 3000'));
+      await _aguardar(() async => await _ativos(contexto.api) == 0);
+    });
+  });
+
+  group('rotas desconhecidas e status', () {
+    test('rota desconhecida retorna 404', () async {
+      final ValidadorApi api = _criarApi().api;
+      final Response resposta = await api.handler(
+        Request('POST', Uri.parse('http://localhost/rota-desconhecida')),
+      );
+
+      expect(resposta.statusCode, 404);
+    });
+
+    test(
+      'status informa contadores sem expor token ou identificador',
+      () async {
+        final _ContextoApi contexto = _criarApi();
+        await _criarSessao(contexto.api);
+        final Response resposta = await contexto.api.handler(
+          Request('GET', Uri.parse('http://localhost/api/status')),
+        );
+        final String texto = await resposta.readAsString();
+        final Map dados = jsonDecode(texto) as Map;
+
+        expect(resposta.statusCode, 200);
+        expect(dados['sessoesAtivas'], 1);
+        expect(dados['lotes'], containsPair('ativos', 0));
+        expect(dados['memoriaRssMb'], isA<int>());
+        expect(dados['rateLimit'], containsPair('rejeicoes429', 0));
+        expect(dados['falhasPortal'], containsPair('502', 0));
+        expect(dados['falhasPortal'], containsPair('503', 0));
+        expect(texto, isNot(contains('usuario-teste')));
+        expect(texto, isNot(contains('PORTAL_PRESTADOR')));
+      },
+    );
+  });
+
+  group('limites e CORS', () {
+    test('fila cheia responde 429 com Retry-After de 10 segundos', () async {
+      final _ContextoApi contexto = _criarApi();
+      final String token = await _criarSessao(contexto.api);
+      for (int i = 0; i < 24; i++) {
+        expect(
+          (await _criarLote(contexto.api, token, 'batch-$i')).statusCode,
+          202,
+        );
+      }
+      final Response cheia = await _criarLote(contexto.api, token, 'batch-25');
+
+      expect(cheia.statusCode, 429);
+      expect(cheia.headers['retry-after'], '10');
+      expect(
+        cheia.headers['access-control-allow-headers'],
+        contains('Idempotency-Key'),
+      );
+
+      contexto.gate.complete();
+      await _aguardar(() async => await _ativos(contexto.api) == 0);
+    });
+
+    test('CORS respeita allowlist e expõe Location', () async {
+      final _ContextoApi contexto = _criarApi();
+      final Response permitida = await contexto.api.handler(
+        Request(
+          'GET',
+          Uri.parse('http://localhost/api/status'),
+          headers: const <String, String>{'origin': 'https://app.example'},
+        ),
+      );
+      final Response bloqueada = await contexto.api.handler(
+        Request(
+          'GET',
+          Uri.parse('http://localhost/api/status'),
+          headers: const <String, String>{'origin': 'https://other.example'},
+        ),
+      );
+      final Response githubPages = await contexto.api.handler(
+        Request(
+          'GET',
+          Uri.parse('http://localhost/api/status'),
+          headers: const <String, String>{
+            'origin': 'https://iagosantanadev.github.io',
+          },
+        ),
+      );
+
+      expect(
+        permitida.headers['access-control-allow-origin'],
+        'https://app.example',
+      );
+      expect(
+        githubPages.headers['access-control-allow-origin'],
+        'https://iagosantanadev.github.io',
+      );
+      expect(
+        permitida.headers['access-control-expose-headers'],
+        'Location, Retry-After',
+      );
+      expect(
+        bloqueada.headers.containsKey('access-control-allow-origin'),
         isFalse,
       );
-    });
-  });
-
-  group('ValidadorApi - cache do teste de alcance', () {
-    test('duas chamadas dentro da janela sondam o portal uma vez', () async {
-      // Sem cache, cada GET /api/status abriria um handshake TLS de saida.
-      // O contador da sonda e o termometro: precisa crescer uma unica vez.
-      int sondagens = 0;
-      final api = _apiDeTeste(
-        sessoes: <_SessaoPortalFake>[
-          _SessaoPortalFake(const ResultadoLogin.autenticado()),
-        ],
-        log: <String>[],
-        sonda: () async {
-          sondagens++;
-          return 200;
-        },
-      );
-
-      for (int i = 0; i < 5; i++) {
-        final response = await api.handler(
-          Request('GET', Uri.parse('http://localhost/api/status')),
-        );
-        expect(response.statusCode, 200, reason: 'Falha na req $i');
-      }
-      expect(sondagens, 1);
-    });
-
-    test('apos a janela expirar volta a sondar o portal', () async {
-      // Par do teste acima: o cache precisa expirar, senao o health check
-      // passaria a mentir sobre o estado do portal para sempre.
-      int sondagens = 0;
-      final api = _apiDeTeste(
-        sessoes: <_SessaoPortalFake>[
-          _SessaoPortalFake(const ResultadoLogin.autenticado()),
-        ],
-        log: <String>[],
-        janelaCacheAlcance: Duration.zero,
-        sonda: () async {
-          sondagens++;
-          return 200;
-        },
-      );
-
-      for (int i = 0; i < 3; i++) {
-        await api.handler(
-          Request('GET', Uri.parse('http://localhost/api/status')),
-        );
-      }
-      expect(sondagens, 3);
-    });
-
-    test('/api/status nao responde 429 sob flood (health check do Render)',
-        () async {
-      // 429 conta como falha de saude para o Render, que para de rotear
-      // trafego e reinicia a instancia. Entao /api/status fica de fora do
-      // rate limit: a protecao e o cache da sonda, nao o 429.
-      final api = _apiDeTeste(
-        sessoes: <_SessaoPortalFake>[
-          _SessaoPortalFake(const ResultadoLogin.autenticado()),
-        ],
-        log: <String>[],
-      );
-      for (int i = 0; i < 60; i++) {
-        final response = await api.handler(
-          Request('GET', Uri.parse('http://localhost/api/status')),
-        );
-        expect(response.statusCode, 200, reason: 'Falha na req $i');
-      }
-    });
-  });
-
-  group('ValidadorApi - detalhes internos nao vazam', () {
-    test('falha de rede no login nao expoe o detalhe na resposta', () async {
-      // O detalhe vem de `_detalheDioException` e carrega URL/fragmento de
-      // requisicao. A resposta e entregue antes de qualquer autenticacao.
-      final List<String> log = <String>[];
-      final api = _apiDeTeste(
-        sessoes: <_SessaoPortalFake>[
-          _SessaoPortalFake(
-            const ResultadoLogin.falha(
-              MotivoFalhaLogin.falhaRede,
-              detalhe: 'connectionError: https://saude.sulamericaseguros.com'
-                  '.br/prestador/?token=SEGREDO',
-            ),
-          ),
-        ],
-        log: log,
-      );
-
-      final response = await api.handler(
-        _requestLogin(const {'identificadorPrestador': 'teste'}),
-      );
-      final corpo = jsonDecode(await response.readAsString()) as Map;
-
-      expect(response.statusCode, 401);
-      expect(corpo['mensagem'], isNot(contains('SEGREDO')));
-      expect(corpo['mensagem'], isNot(contains('saude.sulamericaseguros')));
-      expect(corpo['mensagem'], isNot(contains('Detalhe')));
-      // O cliente ainda precisa saber que foi falha de rede.
-      expect(corpo['mensagem'], contains('Falha de rede'));
-
-      // O detalhe vai para o log do servidor.
-      expect(log.join('\n'), contains('SEGREDO'));
-    });
-
-    test('falha interna no login nao se apresenta como falha de rede',
-        () async {
-      // Erro de codigo ou header inesperado nao e problema de rede. Antes de
-      // separar os motivos, tudo caia em `falhaRede` e o cliente era
-      // mandado investigar a rede quando o defeito estava no backend.
-      final List<String> log = <String>[];
-      final api = _apiDeTeste(
-        sessoes: <_SessaoPortalFake>[
-          _SessaoPortalFake(
-            const ResultadoLogin.falha(
-              MotivoFalhaLogin.falhaInterna,
-              detalhe: 'location header has more than one value',
-            ),
-          ),
-        ],
-        log: log,
-      );
-
-      final response = await api.handler(
-        _requestLogin(const {'identificadorPrestador': 'teste'}),
-      );
-      final corpo = jsonDecode(await response.readAsString()) as Map;
-
-      expect(response.statusCode, 401);
-      expect(corpo['mensagem'], contains('Falha interna'));
-      expect(corpo['mensagem'], isNot(contains('rede')));
-      expect(corpo['mensagem'], isNot(contains('more than one value')));
-
-      // O detalhe continua restrito ao log do servidor.
-      expect(log.join('\n'), contains('more than one value'));
-    });
-
-    test('/api/status nao devolve detalhe bruto da falha de sonda', () async {
-      final List<String> log = <String>[];
-      final api = _apiDeTeste(
-        sessoes: <_SessaoPortalFake>[
-          _SessaoPortalFake(const ResultadoLogin.autenticado()),
-        ],
-        log: log,
-        sonda: () async {
-          throw const _ErroDeSondaSensivel();
-        },
-      );
-
-      final response = await api.handler(
-        Request('GET', Uri.parse('http://localhost/api/status')),
-      );
-      final String bruto = await response.readAsString();
-      final Map<String, dynamic> corpo =
-          jsonDecode(bruto) as Map<String, dynamic>;
-      final Map<String, dynamic> portal =
-          corpo['portalSulAmerica'] as Map<String, dynamic>;
-
-      // O sinal util continua: o cliente sabe que o portal esta fora.
-      expect(corpo['status'], 'ok');
-      expect(portal['alcançavel'], isFalse);
-
-      // O subject/issuer do certificado nao pode vazar para chamador anonimo.
-      expect(bruto, isNot(contains('subject=')));
-      expect(bruto, isNot(contains('issuer=')));
-      expect(portal.containsKey('detalhe'), isFalse);
-      expect(portal.containsKey('erro'), isFalse);
-
-      // E o operador ainda consegue diagnosticar pelo log.
-      expect(log.join('\n'), contains('subject=CN=interno.sulamerica'));
-    });
-  });
-
-  group('ValidadorApi - ciclo de vida da sessao', () {
-    test('nao encerra a sessao usada por um lote em andamento', () async {
-      // Cenario: login atinge o limite enquanto um lote consulta. A eviccao
-      // ingenua (`_sessoes.keys.first`) fecharia o Dio do lote em voo.
-      final _SessaoPortalFake emUso = _SessaoPortalFake(
-        const ResultadoLogin.autenticado(),
-      );
-      final _SessaoPortalFake antiga = _SessaoPortalFake(
-        const ResultadoLogin.autenticado(),
-      );
-      final _SessaoPortalFake nova = _SessaoPortalFake(
-        const ResultadoLogin.autenticado(),
-      );
-
-      final api = _apiDeTeste(
-        // A ordem importa: a sessao que entrara em uso precisa ser a mais
-        // antiga do mapa, senao a eviccao ingenua (`_sessoes.keys.first`)
-        // ja pegaria outra e o teste nao provaria nada.
-        sessoes: <_SessaoPortalFake>[emUso, antiga, nova],
-        log: <String>[],
-        limiteSessoes: 2,
-      );
-
-      final String tokenEmUso =
-          await _tokenDoLogin(api); // `emUso` (mais antiga)
-      await _tokenDoLogin(api); // `antiga` (segunda, ociosa)
-
-      final Completer<void> liberado = Completer<void>();
-      emUso.consultaEmAndamento = liberado;
-      final Future<Response> lote = _loteDe(tokenEmUso, api);
-      await _aguardaConsulta(emUso);
-
-      // Login com o limite atingido: precisa evictar alguem, mas nao a em uso.
-      final login = await api.handler(
-        _requestLogin(const {'identificadorPrestador': 'teste'}),
-      );
-      expect(login.statusCode, 200, reason: 'login deveria criar sessao nova');
-      expect(emUso.encerradas, 0, reason: 'em uso nao pode ser encerrada');
-      expect(antiga.encerradas, 1, reason: 'a ociosa deve ser encerrada');
-
-      liberado.complete();
-      final respostaLote = await lote;
-      expect(respostaLote.statusCode, 200);
-    });
-
-    test('recusa o login com 503 quando todas as sessoes estao em uso',
-        () async {
-      // Com uma unica sessao, ocupada por um lote, nao ha o que evictar. O
-      // login precisa falhar com erro claro, nunca matar a sessao ativa.
-      final _SessaoPortalFake emUso = _SessaoPortalFake(
-        const ResultadoLogin.autenticado(),
-      );
-      final _SessaoPortalFake nova = _SessaoPortalFake(
-        const ResultadoLogin.autenticado(),
-      );
-      final api = _apiDeTeste(
-        sessoes: <_SessaoPortalFake>[emUso, nova],
-        log: <String>[],
-        limiteSessoes: 1,
-      );
-
-      final String token = await _tokenDoLogin(api);
-      final Completer<void> liberado = Completer<void>();
-      emUso.consultaEmAndamento = liberado;
-      final Future<Response> lote = _loteDe(token, api);
-      await _aguardaConsulta(emUso);
-
-      final login = await api.handler(
-        _requestLogin(const {'identificadorPrestador': 'teste'}),
-      );
-      final corpo = jsonDecode(await login.readAsString()) as Map;
-      expect(login.statusCode, 503);
-      expect(corpo['mensagem'], contains('Limite de sessoes ativas'));
-      expect(emUso.encerradas, 0, reason: 'ativa nao pode ser encerrada');
-      // A sessao do login recusado nao pode ficar vazando.
-      expect(nova.encerradas, 1);
-
-      liberado.complete();
-      expect((await lote).statusCode, 200);
-    });
-
-    test('apos o lote terminar a sessao volta a ser elegivel para eviccao',
-        () async {
-      final _SessaoPortalFake emUso = _SessaoPortalFake(
-        const ResultadoLogin.autenticado(),
-      );
-      final _SessaoPortalFake nova = _SessaoPortalFake(
-        const ResultadoLogin.autenticado(),
-      );
-      final api = _apiDeTeste(
-        sessoes: <_SessaoPortalFake>[emUso, nova, nova],
-        log: <String>[],
-        limiteSessoes: 1,
-      );
-
-      final String token = await _tokenDoLogin(api);
-      final Future<Response> lote = _loteDe(token, api);
-      expect((await lote).statusCode, 200);
-
-      // Sem lote em voo, a protecao nao pode vazar para sempre: a sessao
-      // volta a ser candidata normal a eviccao.
-      final login = await api.handler(
-        _requestLogin(const {'identificadorPrestador': 'teste'}),
-      );
-      expect(login.statusCode, 200);
-      expect(emUso.encerradas, 1);
     });
   });
 }
 
-/// Erro de rede sintetico com conteudo sensivel, para provar que o detalhe
-/// nao sai do servidor.
-class _ErroDeSondaSensivel implements Exception {
-  const _ErroDeSondaSensivel();
+Future<int> _ativos(ValidadorApi api) async {
+  final Response resposta = await api.handler(
+    Request('GET', Uri.parse('http://localhost/api/status')),
+  );
+  final Map dados = jsonDecode(await resposta.readAsString()) as Map;
+  return (dados['lotes'] as Map)['ativos'] as int;
+}
 
-  @override
-  String toString() => 'HandshakeException: subject=CN=interno.sulamerica, '
-      'issuer=CN=CA Interna SA, address=10.4.2.9:443';
+Future<void> _aguardar(Future<bool> Function() condicao) async {
+  for (int tentativa = 0; tentativa < 200; tentativa++) {
+    if (await condicao()) return;
+    await Future<void>.delayed(const Duration(milliseconds: 5));
+  }
+  fail('execuções assíncronas não finalizaram');
 }
