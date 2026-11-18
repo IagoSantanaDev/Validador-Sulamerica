@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:validador_xml_sulamerica/globals/constants/app_strings.dart';
 import 'package:validador_xml_sulamerica/globals/network/app_exception.dart';
 import 'package:validador_xml_sulamerica/globals/network/dio_client.dart';
 import 'package:validador_xml_sulamerica/globals/network/result.dart';
@@ -435,6 +436,55 @@ void main() {
       },
     );
 
+    test('SSE não exibe TypeError: Failed to fetch ao usuário', () async {
+      final _FakeAsyncBackend service = _FakeAsyncBackend()
+        ..streams.add(
+          Stream<EventoSse>.error(
+            const ErroDesconhecidoException('TypeError: Failed to fetch'),
+          ),
+        );
+      final ValidadorController controller = await _validar(
+        _novoController(
+          service: service,
+          retorno: const [GuiaValidada(guia: _guiaSemSenha, erros: [])],
+        ),
+      );
+
+      expect(
+        controller.mensagemAvisoConsultaBackend,
+        AppStrings.erroConsultaBackendGenerico,
+      );
+      expect(
+        controller.mensagemAvisoConsultaBackend,
+        isNot(contains('Failed to fetch')),
+      );
+    });
+
+    test('SSE não exibe resposta técnica de token inválido', () async {
+      final _FakeAsyncBackend service = _FakeAsyncBackend()
+        ..respostasSessao.addAll([
+          Result.success('token-1'),
+          Result.failure(const NaoAutorizadoException()),
+        ])
+        ..streams.add(Stream<EventoSse>.error(const NaoAutorizadoException()));
+      final ValidadorController controller = await _validar(
+        _novoController(
+          service: service,
+          retorno: const [GuiaValidada(guia: _guiaSemSenha, erros: [])],
+        ),
+      );
+
+      expect(
+        controller.mensagemAvisoConsultaBackend,
+        AppStrings.erroLoginFalhou,
+      );
+      expect(controller.mensagemAvisoConsultaBackend, isNot(contains('401')));
+      expect(
+        controller.mensagemAvisoConsultaBackend,
+        isNot(contains('Token de sessao invalido')),
+      );
+    });
+
     test('rejeição HTTP diferente de 429 não repete submissão', () async {
       final List<Duration> esperas = [];
       final _FakeAsyncBackend service = _FakeAsyncBackend()
@@ -454,41 +504,38 @@ void main() {
       expect(controller.temConsultasPendentes, isTrue);
     });
 
-    test(
-      'falha de transporte permite retry automático, rejeição de portal fica manual',
-      () async {
-        final List<Duration> esperas = [];
-        final _FakeAsyncBackend service = _FakeAsyncBackend()
-          ..respostasLote.add(Result.failure(const SemConexaoException()))
-          ..streams.add(
-            _resultadoStream([
-              _resultado(
-                chave: _carteira,
-                sucesso: false,
-                erro: 'Falha na consulta ao portal SulAmerica.',
-              ),
-            ]),
-          );
-        final ValidadorController controller = await _validar(
-          _novoController(
-            service: service,
-            retorno: const [GuiaValidada(guia: _guiaSemSenha, erros: [])],
-            esperas: esperas,
-          ),
+    test('falha de transporte permite retry automático, rejeição de portal fica manual', () async {
+      final List<Duration> esperas = [];
+      final _FakeAsyncBackend service = _FakeAsyncBackend()
+        ..respostasLote.add(Result.failure(const SemConexaoException()))
+        ..streams.add(
+          _resultadoStream([
+            _resultado(
+              chave: _carteira,
+              sucesso: false,
+              erro: 'Falha na consulta ao portal SulAmerica.',
+            ),
+          ]),
         );
+      final ValidadorController controller = await _validar(
+        _novoController(
+          service: service,
+          retorno: const [GuiaValidada(guia: _guiaSemSenha, erros: [])],
+          esperas: esperas,
+        ),
+      );
 
-        expect(service.lotes, hasLength(2));
-        expect(esperas, [const Duration(seconds: 2)]);
-        expect(controller.temConsultasPendentes, isTrue);
-        expect(controller.guias.single.consultas, isEmpty);
+      expect(service.lotes, hasLength(2));
+      expect(esperas, [const Duration(seconds: 2)]);
+      expect(controller.temConsultasPendentes, isTrue);
+      expect(controller.guias.single.consultas, isEmpty);
 
-        await controller.retentarConsultasPendentes();
+      await controller.retentarConsultasPendentes();
 
-        expect(service.lotes, hasLength(3));
-        expect(controller.temConsultasPendentes, isFalse);
-        expect(controller.guias.single.consulta?.descricao, 'Elegível: SIM');
-      },
-    );
+      expect(service.lotes, hasLength(3));
+      expect(controller.temConsultasPendentes, isFalse);
+      expect(controller.guias.single.consulta?.descricao, 'Elegível: SIM');
+    });
 
     test(
       'mantém limites locais de carteira e senha antes de chamar backend',

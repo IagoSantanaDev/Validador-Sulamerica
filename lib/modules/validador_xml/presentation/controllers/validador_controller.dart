@@ -332,8 +332,9 @@ class ValidadorController extends ChangeNotifier {
         _avisarFalhaAutenticacao();
       } else {
         _registrarConsultasPendentes(consultas);
-        _mensagemAvisoConsultaBackend =
-            falha?.mensagem ?? tokenInicial.mensagemErro;
+        _mensagemAvisoConsultaBackend = falha == null
+            ? tokenInicial.mensagemErro
+            : _mensagemAmigavelConsulta(falha);
       }
       _atualizarResultado();
       return;
@@ -376,8 +377,9 @@ class ValidadorController extends ChangeNotifier {
           token = novoToken;
           continue;
         }
-        _mensagemAvisoConsultaBackend =
-            refresh.falha?.mensagem ?? refresh.mensagemErro;
+        _mensagemAvisoConsultaBackend = refresh.falha == null
+            ? refresh.mensagemErro
+            : _mensagemAmigavelConsulta(refresh.falha!);
         if (refresh.falha is NaoAutorizadoException) {
           _avisarFalhaAutenticacao();
         }
@@ -412,7 +414,7 @@ class ValidadorController extends ChangeNotifier {
       if (falha is NaoAutorizadoException) {
         _avisarFalhaAutenticacao();
       }
-      _mensagemAvisoConsultaBackend = falha.mensagem;
+      _mensagemAvisoConsultaBackend = _mensagemAmigavelConsulta(falha);
       break;
     }
 
@@ -496,8 +498,9 @@ class ValidadorController extends ChangeNotifier {
           token = refresh.token!;
           continue;
         }
-        _mensagemAvisoConsultaBackend =
-            refresh.falha?.mensagem ?? refresh.mensagemErro;
+        _mensagemAvisoConsultaBackend = refresh.falha == null
+            ? refresh.mensagemErro
+            : _mensagemAmigavelConsulta(refresh.falha!);
         if (refresh.falha is NaoAutorizadoException) {
           _avisarFalhaAutenticacao();
         }
@@ -515,7 +518,9 @@ class ValidadorController extends ChangeNotifier {
         continue;
       }
 
-      if (erro != null) _mensagemAvisoConsultaBackend = erro.mensagem;
+      if (erro != null) {
+        _mensagemAvisoConsultaBackend = _mensagemAmigavelConsulta(erro);
+      }
       break;
     }
 
@@ -563,19 +568,23 @@ class ValidadorController extends ChangeNotifier {
               streamFechou: false,
             ));
           }
-        } on FormatException catch (erro) {
+        } on FormatException {
           if (!completer.isCompleted) {
             completer.complete((
               resultado: null,
-              erro: ErroDesconhecidoException(erro.message),
+              erro: const ErroDesconhecidoException(
+                AppStrings.erroConsultaBackendGenerico,
+              ),
               streamFechou: false,
             ));
           }
-        } on TypeError catch (erro) {
+        } on TypeError {
           if (!completer.isCompleted) {
             completer.complete((
               resultado: null,
-              erro: ErroDesconhecidoException(erro.toString()),
+              erro: const ErroDesconhecidoException(
+                AppStrings.erroConsultaBackendGenerico,
+              ),
               streamFechou: false,
             ));
           }
@@ -587,7 +596,9 @@ class ValidadorController extends ChangeNotifier {
             resultado: null,
             erro: erro is AppException
                 ? erro
-                : ErroDesconhecidoException(erro.toString()),
+                : const ErroDesconhecidoException(
+                    AppStrings.erroConsultaBackendGenerico,
+                  ),
             streamFechou: false,
           ));
         }
@@ -655,6 +666,22 @@ class ValidadorController extends ChangeNotifier {
 
   void _avisarFalhaAutenticacao() {
     _mensagemAvisoConsultaBackend = AppStrings.erroLoginFalhou;
+  }
+
+  String _mensagemAmigavelConsulta(AppException erro) {
+    if (erro is FilaCheiaException) {
+      return AppStrings.filaConsultaBackendCheia;
+    }
+    if (erro is SemConexaoException) {
+      return AppStrings.erroConexaoConsultaBackend;
+    }
+    if (erro is RequisicaoExpiradaException) {
+      return AppStrings.erroConsultaBackendExpirada;
+    }
+    if (erro is NaoAutorizadoException) {
+      return AppStrings.erroSessaoConsultaBackend;
+    }
+    return AppStrings.erroConsultaBackendGenerico;
   }
 
   String _chaveConsulta(ConsultaLoteItem item) =>

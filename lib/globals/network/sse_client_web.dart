@@ -54,7 +54,6 @@ ConexaoSse abrirEventosSse({
       final Map<String, String> cabecalhos = <String, String>{
         'Authorization': 'Bearer $token',
         'Accept': 'text/event-stream',
-        'Cache-Control': 'no-cache',
         if (ultimoId != null) 'Last-Event-ID': ultimoId,
       };
       final web.Response resposta = await web.window

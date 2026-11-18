@@ -33,6 +33,16 @@ class AppStrings {
       'Tentando consultar os itens pendentes...';
   static const String consultasAguardandoRetentativa =
       'Aguardando nova tentativa automática para consultas sem resposta...';
+  static const String filaConsultaBackendCheia =
+      'A fila de consultas está ocupada. Aguarde um momento e tente novamente.';
+  static const String erroConexaoConsultaBackend =
+      'Não foi possível conectar ao serviço de consultas. Verifique sua conexão e tente novamente.';
+  static const String erroConsultaBackendExpirada =
+      'A consulta ao portal está demorando mais que o esperado. Tente novamente.';
+  static const String erroSessaoConsultaBackend =
+      'Não foi possível validar a sessão de consulta. Tente novamente.';
+  static const String erroConsultaBackendGenerico =
+      'Não foi possível concluir as consultas ao portal agora. Tente novamente mais tarde.';
 
   static const String metadadoNome = 'Nome';
   static const String metadadoTamanho = 'Tamanho';
@@ -77,9 +87,9 @@ class AppStrings {
   static const String erroSenhaInvalida = 'Senha inválida';
   static const String erroSenhaNaoEncontrada = 'Senha não encontrada no portal';
   static const String erroLoginFalhou =
-      'Falha ao autenticar no portal (credenciais rejeitadas).';
+      'Não foi possível iniciar a consulta ao portal. Verifique os dados do prestador e tente novamente.';
   static const String erroCredenciaisAusentes =
-      'Prestador não cadastrado (ver RegraCredenciaisPortal).';
+      'Não foi possível identificar o prestador para consultar o portal.';
 
   static const String filtroTodos = 'Todas';
   static const String filtroSenha = 'Senha';

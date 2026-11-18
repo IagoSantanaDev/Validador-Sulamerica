@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:validador_xml_sulamerica/globals/constants/app_strings.dart';
 import 'package:validador_xml_sulamerica/globals/network/app_exception.dart';
 import 'package:validador_xml_sulamerica/globals/network/dio_client.dart';
 import 'package:validador_xml_sulamerica/modules/validador_xml/data/models/consulta_guia.dart';
@@ -14,11 +15,13 @@ class _AdapterFake implements HttpClientAdapter {
     this.statusCode = 202,
     this.corpo = const <String, dynamic>{},
     this.cabecalhos = const <String, List<String>>{},
+    this.erro,
   });
 
   final int statusCode;
   final Map<String, dynamic> corpo;
   final Map<String, List<String>> cabecalhos;
+  final Object? erro;
   final List<RequestOptions> requisicoes = [];
 
   @override
@@ -31,6 +34,7 @@ class _AdapterFake implements HttpClientAdapter {
     Future<void>? cancelFuture,
   ) async {
     requisicoes.add(options);
+    if (erro != null) throw erro!;
     return ResponseBody.fromBytes(
       utf8.encode(jsonEncode(corpo)),
       statusCode,
@@ -92,6 +96,21 @@ void main() {
       resultado.fold(
         onSuccess: (_) => fail('Esperava falha'),
         onFailure: (erro) => expect(erro, isA<NaoAutorizadoException>()),
+      );
+    });
+
+    test('falha inesperada não expõe detalhe técnico', () async {
+      final resultado = await _servico(
+        _AdapterFake(erro: StateError('TypeError: Failed to fetch')),
+      ).criarSessao(identificadorPrestador: 'TESTE');
+
+      resultado.fold(
+        onSuccess: (_) => fail('Esperava falha'),
+        onFailure: (erro) {
+          expect(erro.mensagem, AppStrings.erroConsultaBackendGenerico);
+          expect(erro.mensagem, isNot(contains('TypeError')));
+          expect(erro.mensagem, isNot(contains('Failed to fetch')));
+        },
       );
     });
 

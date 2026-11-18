@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:dio/dio.dart';
 
+import '../../../../globals/constants/app_strings.dart';
 import '../../../../globals/network/app_exception.dart';
 import '../../../../globals/network/dio_client.dart';
 import '../../../../globals/network/result.dart';
@@ -132,8 +133,10 @@ class SulAmericaBackendService {
       return Result.success(parser(resposta.data, resposta));
     } on DioException catch (erro) {
       return Result.failure(_mapearErro(erro));
-    } catch (erro) {
-      return Result.failure(ErroDesconhecidoException(erro.toString()));
+    } on Object {
+      return Result.failure<T>(
+        const ErroDesconhecidoException(AppStrings.erroConsultaBackendGenerico),
+      );
     }
   }
 
@@ -147,7 +150,7 @@ class SulAmericaBackendService {
       DioExceptionType.cancel => const RequisicaoCanceladaException(),
       DioExceptionType.badResponse => _mapearResposta(erro.response),
       DioExceptionType.badCertificate || DioExceptionType.unknown =>
-        ErroDesconhecidoException(erro.message ?? 'Erro desconhecido'),
+        const ErroDesconhecidoException(AppStrings.erroConsultaBackendGenerico),
     };
   }
 
@@ -198,6 +201,6 @@ class SulAmericaBackendService {
       return const RequisicaoExpiradaException();
     }
     if (erro is AppException) return erro;
-    return ErroDesconhecidoException(erro.toString());
+    return const SemConexaoException();
   }
 }
