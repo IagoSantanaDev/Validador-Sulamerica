@@ -48,7 +48,8 @@ ResponseBody _resposta(
   String corpo,
   int status, {
   Map<String, List<String>>? headers,
-}) => ResponseBody.fromString(corpo, status, headers: headers);
+}) =>
+    ResponseBody.fromString(corpo, status, headers: headers);
 
 void main() {
   test('HTTP 429 é devolvido sem retry de consulta', () async {
@@ -132,6 +133,8 @@ void main() {
     expect(sessao.diagnosticoSessao['ajaxHttp200'], 1);
     expect(sessao.diagnosticoSessao['ajaxContentTypeHtml'], 1);
     expect(sessao.diagnosticoSessao['ajaxJsonInvalido'], 1);
+    expect(sessao.diagnosticoSessao['assinaturaResposta'], 1);
+    expect(sessao.diagnosticoSessao['assinaturaF5Rejected'], isNull);
     expect(
       jsonEncode(sessao.diagnosticoSessao),
       isNot(contains('block page')),
@@ -223,8 +226,8 @@ void main() {
     );
     await _login(sessao);
 
-    final List<ResultadoConsultaPortal<String>>
-    resultados = await Future.wait(<Future<ResultadoConsultaPortal<String>>>[
+    final List<ResultadoConsultaPortal<String>> resultados =
+        await Future.wait(<Future<ResultadoConsultaPortal<String>>>[
       sessao.consultarBeneficiario(carteirinhaCompleta: '12345678901234567890'),
       sessao.consultarBeneficiario(carteirinhaCompleta: '98765432109876543210'),
     ]);
@@ -309,7 +312,9 @@ void main() {
     },
   );
 
-  test('renovação falha uma vez para chamadas concorrentes e consulta futura tenta de novo', () async {
+  test(
+      'renovação falha uma vez para chamadas concorrentes e consulta futura tenta de novo',
+      () async {
     int logins = 0;
     int consultas = 0;
     final Completer<void> duasConsultas = Completer<void>();
@@ -347,8 +352,8 @@ void main() {
     );
     await _login(sessao);
 
-    final List<ResultadoConsultaPortal<String>>
-    concorrentes = await Future.wait(<Future<ResultadoConsultaPortal<String>>>[
+    final List<ResultadoConsultaPortal<String>> concorrentes =
+        await Future.wait(<Future<ResultadoConsultaPortal<String>>>[
       sessao.consultarBeneficiario(carteirinhaCompleta: '12345678901234567890'),
       sessao.consultarBeneficiario(carteirinhaCompleta: '98765432109876543210'),
     ]);

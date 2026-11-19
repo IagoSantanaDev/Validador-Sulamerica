@@ -31,15 +31,19 @@ class _LogMudo implements LogOutput {
 }
 
 class _SessaoFake extends SessaoPortal {
-  _SessaoFake({this.gate, this.loginResult})
+  _SessaoFake({this.gate, this.loginResult, this.supportIds = const []})
     : super(logger: Logger(level: Level.off));
 
   final Completer<void>? gate;
   final ResultadoLogin? loginResult;
+  final List<Map<String, dynamic>> supportIds;
   bool _autenticada = false;
   int logins = 0;
   int consultas = 0;
   final List<CancelToken?> tokensCancelamento = <CancelToken?>[];
+
+  @override
+  List<Map<String, dynamic>> get supportIdsRespostaPortal => supportIds;
 
   @override
   bool get autenticada => _autenticada;
@@ -109,16 +113,19 @@ _ContextoApi _criarApi({
   int limiteExecucoes = 24,
   RepositorioSessoes? repositorio,
   ResultadoLogin? loginResult,
+  Map<String, String> ambiente = _ambiente,
+  List<Map<String, dynamic>> supportIds = const <Map<String, dynamic>>[],
 }) {
   final Completer<void> gate = Completer<void>();
   final List<_SessaoFake> sessoes = <_SessaoFake>[];
   final ValidadorApi api = ValidadorApi(
     logger: Logger(output: const _LogMudo(), level: Level.off),
-    ambiente: _ambiente,
+    ambiente: ambiente,
     fabricaSessao: (_) {
       final _SessaoFake sessao = _SessaoFake(
         gate: gate,
         loginResult: loginResult,
+        supportIds: supportIds,
       );
       sessoes.add(sessao);
       return sessao;
@@ -282,6 +289,10 @@ void main() {
           );
 
           expect(resposta.statusCode, status);
+          expect(
+            resposta.headers['x-validador-api-error-origin'],
+            status == 502 ? 'api' : isNull,
+          );
           expect(await resposta.readAsString(), isNot(contains('detalhe que')));
         }
       },
@@ -565,10 +576,38 @@ void main() {
           dados['concorrenciaPortal'],
           containsPair('limiteSessoesPorIdentificador', 4),
         );
+        expect(dados.containsKey('supportIdsRespostaPortal'), isFalse);
         expect(texto, isNot(contains('usuario-teste')));
         expect(texto, isNot(contains('PORTAL_PRESTADOR')));
       },
     );
+
+    test('status expõe Support IDs somente quando a flag está ativa', () async {
+      final _ContextoApi contexto = _criarApi(
+        ambiente: <String, String>{
+          ..._ambiente,
+          'PORTAL_ASSINATURAS_SUPPORT_IDS_ATIVAS': 'true',
+        },
+        supportIds: <Map<String, dynamic>>[
+          <String, dynamic>{
+            'supportId': 'ABC12345',
+            'status': 403,
+            'timestamp': '2026-11-19T00:00:00.000Z',
+          },
+        ],
+      );
+      await _criarSessao(contexto.api);
+      final Response resposta = await contexto.api.handler(
+        Request('GET', Uri.parse('http://localhost/api/status')),
+      );
+      final Map dados = jsonDecode(await resposta.readAsString()) as Map;
+
+      expect(resposta.statusCode, 200);
+      expect(
+        (dados['supportIdsRespostaPortal'] as List).single['supportId'],
+        'ABC12345',
+      );
+    });
   });
 
   group('limites e CORS', () {

@@ -43,6 +43,16 @@ class _SessaoFalhaFake extends SessaoPortal {
   };
 
   @override
+  List<Map<String, dynamic>> get supportIdsRespostaPortal =>
+      const <Map<String, dynamic>>[
+        <String, dynamic>{
+          'supportId': 'ABC12345',
+          'status': 403,
+          'timestamp': '2026-11-19T00:00:00.000Z',
+        },
+      ];
+
+  @override
   Future<ResultadoLogin> login({
     required String code,
     required String user,
@@ -76,6 +86,7 @@ void main() {
 
     expect(pool.sessoesAtivas, 0);
     expect(pool.diagnosticoSessaoPortal['loginGetHttp403'], 1);
+    expect(pool.supportIdsRespostaPortal.single['supportId'], 'ABC12345');
   });
 
   test('logins concorrentes coalescem em uma sessão', () async {
