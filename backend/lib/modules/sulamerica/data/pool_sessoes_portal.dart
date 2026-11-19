@@ -23,8 +23,8 @@ class PoolSessoesPortal {
     Logger? logger,
     SessaoPortal Function(Logger logger)? fabricaSessao,
     this.limitePorIdentificador = 4,
-  })  : _logger = logger ?? Logger(),
-        _fabricaSessao = fabricaSessao ?? _fabricaPadrao;
+  }) : _logger = logger ?? Logger(),
+       _fabricaSessao = fabricaSessao ?? _fabricaPadrao;
 
   static SessaoPortal _fabricaPadrao(Logger logger) =>
       SessaoPortal(logger: logger);
@@ -35,16 +35,35 @@ class PoolSessoesPortal {
   final Map<String, _PoolPrestador> _porIdentificador = {};
 
   int get sessoesAtivas => _porIdentificador.values.fold<int>(
-        0,
-        (int total, _PoolPrestador pool) => total + pool.sessoes.length,
-      );
+    0,
+    (int total, _PoolPrestador pool) => total + pool.sessoes.length,
+  );
+
+  Map<String, int> get diagnosticoSessaoPortal {
+    final Map<String, int> total = <String, int>{};
+    for (final _PoolPrestador pool in _porIdentificador.values) {
+      for (final _SessaoGerenciada sessao in pool.sessoes) {
+        for (final MapEntry<String, int> contador
+            in sessao.sessao.diagnosticoSessao.entries) {
+          total.update(
+            contador.key,
+            (int valor) => valor + contador.value,
+            ifAbsent: () => contador.value,
+          );
+        }
+      }
+    }
+    return total;
+  }
 
   Future<SessaoPortal> garantirAutenticada(
     String identificador,
     CredenciaisPortal credenciais,
   ) async {
-    final _PoolPrestador pool =
-        _porIdentificador.putIfAbsent(identificador, _PoolPrestador.new);
+    final _PoolPrestador pool = _porIdentificador.putIfAbsent(
+      identificador,
+      _PoolPrestador.new,
+    );
     if (pool.sessoes.isEmpty) {
       await _adicionarSessao(identificador, credenciais, pool);
     }
@@ -60,8 +79,10 @@ class PoolSessoesPortal {
     required TipoConsultaPortal tipo,
     CancelToken? cancelToken,
   }) async {
-    final _PoolPrestador pool =
-        _porIdentificador.putIfAbsent(identificador, _PoolPrestador.new);
+    final _PoolPrestador pool = _porIdentificador.putIfAbsent(
+      identificador,
+      _PoolPrestador.new,
+    );
 
     while (true) {
       if (cancelToken?.isCancelled ?? false) {
@@ -183,9 +204,9 @@ class _SessaoGerenciada {
   int get ativas => elegibilidadesAtivas + senhasAtivas;
 
   bool disponivel(TipoConsultaPortal tipo) => switch (tipo) {
-        TipoConsultaPortal.elegibilidade => elegibilidadesAtivas == 0,
-        TipoConsultaPortal.senha => senhasAtivas < 3,
-      };
+    TipoConsultaPortal.elegibilidade => elegibilidadesAtivas == 0,
+    TipoConsultaPortal.senha => senhasAtivas < 3,
+  };
 
   void reservar(TipoConsultaPortal tipo) {
     switch (tipo) {

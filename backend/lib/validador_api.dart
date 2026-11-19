@@ -36,17 +36,18 @@ class ValidadorApi {
     int limiteRequisicoesPorChave = 20,
     int limiteRequisicoesGlobal = 120,
     int limiteExecucoes = 24,
-  })  : _logger = logger ?? Logger(),
-        _ambiente = ambiente,
-        _janelaCacheAlcance = janelaCacheAlcance,
-        _sondaPortal = sondaPortal ?? _sondarPortalPadrao,
-        _repositorio =
-            repositorio ?? RepositorioSessoes(limite: limiteSessoesLogicas),
-        _rateLimit = rateLimit ??
-            RateLimit(
-              limitePorChave: limiteRequisicoesPorChave,
-              limiteGlobal: limiteRequisicoesGlobal,
-            ) {
+  }) : _logger = logger ?? Logger(),
+       _ambiente = ambiente,
+       _janelaCacheAlcance = janelaCacheAlcance,
+       _sondaPortal = sondaPortal ?? _sondarPortalPadrao,
+       _repositorio =
+           repositorio ?? RepositorioSessoes(limite: limiteSessoesLogicas),
+       _rateLimit =
+           rateLimit ??
+           RateLimit(
+             limitePorChave: limiteRequisicoesPorChave,
+             limiteGlobal: limiteRequisicoesGlobal,
+           ) {
     _pool = PoolSessoesPortal(logger: _logger, fabricaSessao: fabricaSessao);
     _agendador = AgendadorLotes(
       pool: _pool,
@@ -90,7 +91,7 @@ class ValidadorApi {
         cors(
           origens:
               (_ambiente ?? Platform.environment)['CORS_ORIGIN']?.split(',') ??
-                  const <String>[],
+              const <String>[],
         ),
       )
       .addHandler(_rotas.call);
@@ -288,7 +289,8 @@ class ValidadorApi {
     final ExecucaoLote? execucao = _agendador.obterExecucao(id, token);
     if (execucao == null) return respostaErro('Lote nao encontrado.', 404);
 
-    final String? desdeTexto = request.url.queryParameters['desde'] ??
+    final String? desdeTexto =
+        request.url.queryParameters['desde'] ??
         request.headers['last-event-id'];
     final int? desde = desdeTexto == null ? null : int.tryParse(desdeTexto);
     if (desdeTexto != null && (desde == null || desde < 0)) {
@@ -330,11 +332,11 @@ class ValidadorApi {
           'Carteira deve conter exatamente 20 digitos.',
         );
       }
-      final ResultadoConsultaPortal<String> resposta =
-          await sessao.consultarBeneficiario(
-        carteirinhaCompleta: chave,
-        cancelToken: cancelToken,
-      );
+      final ResultadoConsultaPortal<String> resposta = await sessao
+          .consultarBeneficiario(
+            carteirinhaCompleta: chave,
+            cancelToken: cancelToken,
+          );
       if (!resposta.sucesso) {
         _contarFalhaConsulta(resposta);
         return _falhaItem(consulta, _mensagemFalhaConsulta(resposta.categoria));
@@ -375,9 +377,7 @@ class ValidadorApi {
     return _falhaItem(consulta, 'Tipo de consulta desconhecido.');
   }
 
-  Map<String, dynamic>? _validarFormatoConsulta(
-    Map<String, dynamic> consulta,
-  ) {
+  Map<String, dynamic>? _validarFormatoConsulta(Map<String, dynamic> consulta) {
     final String tipo = consulta['tipo'] as String;
     final String chave = consulta['chave'] as String;
     if (tipo == 'elegibilidade') {
@@ -404,8 +404,7 @@ class ValidadorApi {
   Map<String, dynamic> _falhaItem(
     Map<String, dynamic> consulta,
     String mensagem,
-  ) =>
-      <String, dynamic>{...consulta, 'sucesso': false, 'erro': mensagem};
+  ) => <String, dynamic>{...consulta, 'sucesso': false, 'erro': mensagem};
 
   String _mensagemFalhaConsulta(CategoriaFalhaConsultaPortal? categoria) =>
       switch (categoria) {
@@ -416,16 +415,16 @@ class ValidadorApi {
         CategoriaFalhaConsultaPortal.http =>
           'Falha na consulta ao portal SulAmerica.',
         CategoriaFalhaConsultaPortal.respostaInesperada ||
-        null =>
-          'Resposta inesperada do portal SulAmerica.',
+        null => 'Resposta inesperada do portal SulAmerica.',
       };
 
   String? _extrairStatusSenha(Map<String, dynamic> dados) {
     final dynamic registros = dados['registros'];
     if (registros is! List || registros.isEmpty) return null;
     for (final dynamic registro in registros) {
-      final dynamic status =
-          registro is Map ? registro['status_solicitacao'] : null;
+      final dynamic status = registro is Map
+          ? registro['status_solicitacao']
+          : null;
       final dynamic descricao = status is Map ? status['descricao'] : null;
       if (descricao is String && descricao.isNotEmpty) return descricao;
     }
@@ -445,6 +444,7 @@ class ValidadorApi {
       'memoriaRssMb': (ProcessInfo.currentRss / (1024 * 1024)).round(),
       'rateLimit': <String, int>{'rejeicoes429': _rejeicoes429},
       'falhasPortal': <String, int>{'502': _falhas502, '503': _falhas503},
+      'diagnosticoSessaoPortal': _pool.diagnosticoSessaoPortal,
       'portalSulAmerica': alcancePortal,
       'timestamp': DateTime.now().toIso8601String(),
     });
@@ -496,8 +496,8 @@ class ValidadorApi {
           .getUrl(Uri.parse('https://saude.sulamericaseguros.com.br/'))
           .timeout(const Duration(seconds: 10));
       final HttpClientResponse resposta = await requisicao.close().timeout(
-            const Duration(seconds: 10),
-          );
+        const Duration(seconds: 10),
+      );
       return resposta.statusCode;
     } finally {
       http.close(force: true);
@@ -505,9 +505,9 @@ class ValidadorApi {
   }
 
   Response _erroCorpoGrande() => respostaErro(
-        'Corpo excede o limite de ${_maxBytesCorpo ~/ (1 << 20)} MB.',
-        413,
-      );
+    'Corpo excede o limite de ${_maxBytesCorpo ~/ (1 << 20)} MB.',
+    413,
+  );
 
   List<Map<String, dynamic>>? _validarConsultas(Object? valor) {
     if (valor is! List || valor.isEmpty) return null;
@@ -533,18 +533,18 @@ class ValidadorApi {
       respostaErro('Rota nao encontrada.', 404);
 
   int _statusFalhaLogin(ResultadoLogin resultado) => switch (resultado.motivo) {
-        MotivoFalhaLogin.credenciaisInvalidas => 401,
-        MotivoFalhaLogin.falhaRede => 503,
-        MotivoFalhaLogin.respostaInesperada => 502,
-        MotivoFalhaLogin.falhaInterna || null => 500,
-      };
+    MotivoFalhaLogin.credenciaisInvalidas => 401,
+    MotivoFalhaLogin.falhaRede => 503,
+    MotivoFalhaLogin.respostaInesperada => 502,
+    MotivoFalhaLogin.falhaInterna || null => 500,
+  };
 
   String _mensagemFalhaLogin(int status) => switch (status) {
-        401 => 'Credenciais invalidas para o portal SulAmerica.',
-        502 => 'O portal SulAmerica respondeu de forma inesperada.',
-        503 => 'Falha de rede ao acessar o portal SulAmerica.',
-        _ => 'Falha interna do backend.',
-      };
+    401 => 'Credenciais invalidas para o portal SulAmerica.',
+    502 => 'O portal SulAmerica respondeu de forma inesperada.',
+    503 => 'Falha de rede ao acessar o portal SulAmerica.',
+    _ => 'Falha interna do backend.',
+  };
 
   void _contarFalhaUpstream(int? status) {
     if (status == 502) _falhas502++;
@@ -566,15 +566,15 @@ class ValidadorApi {
       senha.length == 10 && senha.startsWith('5');
 
   Middleware _exporRetryAfterCors() => (Handler inner) {
-        return (Request request) async {
-          final Response resposta = await inner(request);
-          return resposta.change(
-            headers: const <String, String>{
-              'access-control-expose-headers': 'Location, Retry-After',
-            },
-          );
-        };
-      };
+    return (Request request) async {
+      final Response resposta = await inner(request);
+      return resposta.change(
+        headers: const <String, String>{
+          'access-control-expose-headers': 'Location, Retry-After',
+        },
+      );
+    };
+  };
 }
 
 class _StreamAtivo {

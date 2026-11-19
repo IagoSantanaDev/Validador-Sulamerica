@@ -129,13 +129,39 @@ class SessaoPortal {
   bool _loginEmAndamentoRepeteFalhaRede = false;
   final Map<int, Future<ResultadoLogin>> _renovacoesPorGeracao = {};
   int _geracao = 0;
+  int _rejeicoes401 = 0;
+  int _rejeicoes403 = 0;
+  int _rejeicoes401AposRenovacao = 0;
+  int _rejeicoes403AposRenovacao = 0;
+  int _renovacoesIniciadas = 0;
+  int _renovacoesSucesso = 0;
+  int _renovacoesFalhaCredenciaisInvalidas = 0;
+  int _renovacoesFalhaRespostaInesperada = 0;
+  int _renovacoesFalhaRede = 0;
+  int _renovacoesFalhaInterna = 0;
+  int _renovacoesFalhaSemMotivo = 0;
+  int _renovacoesExcecaoInterna = 0;
 
   bool get autenticada => _autenticada;
 
+  Map<String, int> get diagnosticoSessao => <String, int>{
+    'rejeicoes401': _rejeicoes401,
+    'rejeicoes403': _rejeicoes403,
+    'rejeicoes401AposRenovacao': _rejeicoes401AposRenovacao,
+    'rejeicoes403AposRenovacao': _rejeicoes403AposRenovacao,
+    'renovacoesIniciadas': _renovacoesIniciadas,
+    'renovacoesSucesso': _renovacoesSucesso,
+    'renovacoesFalhaCredenciaisInvalidas': _renovacoesFalhaCredenciaisInvalidas,
+    'renovacoesFalhaRespostaInesperada': _renovacoesFalhaRespostaInesperada,
+    'renovacoesFalhaRede': _renovacoesFalhaRede,
+    'renovacoesFalhaInterna': _renovacoesFalhaInterna,
+    'renovacoesFalhaSemMotivo': _renovacoesFalhaSemMotivo,
+    'renovacoesExcecaoInterna': _renovacoesExcecaoInterna,
+  };
+
   Map<String, String> get _headersNavegador => {
     'User-Agent': _userAgent,
-    'Accept':
-        'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
     'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8',
     'Upgrade-Insecure-Requests': '1',
   };
@@ -226,8 +252,9 @@ class SessaoPortal {
     required bool repetirFalhaRede,
     Future<ResultadoLogin>? tentativaInicial,
   }) async {
-    final ResultadoLogin primeiro = await (tentativaInicial ??
-        _executarLogin(code: code, user: user, senha: senha));
+    final ResultadoLogin primeiro =
+        await (tentativaInicial ??
+            _executarLogin(code: code, user: user, senha: senha));
     if (primeiro.autenticada ||
         !repetirFalhaRede ||
         primeiro.motivo != MotivoFalhaLogin.falhaRede) {
@@ -591,6 +618,12 @@ class SessaoPortal {
             resultado.categoria == CategoriaFalhaConsultaPortal.cancelada) {
           return resultado;
         }
+        if (resultado.categoria == CategoriaFalhaConsultaPortal.sessao) {
+          _registrarRejeicaoSessao(
+            resultado.status,
+            aposRenovacao: repetiuSessao,
+          );
+        }
         if (resultado.categoria == CategoriaFalhaConsultaPortal.sessao &&
             !repetiuSessao) {
           repetiuSessao = true;
@@ -641,20 +674,68 @@ class SessaoPortal {
       return Future<ResultadoLogin>.value(const ResultadoLogin.autenticado());
     }
     return _renovacoesPorGeracao.putIfAbsent(geracaoObservada, () {
+      _renovacoesIniciadas++;
       final ({String code, String user, String senha})? credenciais =
           _credenciais;
+      final Future<ResultadoLogin> renovacao;
       if (credenciais == null) {
-        return Future<ResultadoLogin>.value(
+        renovacao = Future<ResultadoLogin>.value(
           const ResultadoLogin.falha(MotivoFalhaLogin.credenciaisInvalidas),
         );
+      } else {
+        renovacao = _loginCompartilhado(
+          code: credenciais.code,
+          user: credenciais.user,
+          senha: credenciais.senha,
+          repetirFalhaRede: true,
+        );
       }
-      return _loginCompartilhado(
-        code: credenciais.code,
-        user: credenciais.user,
-        senha: credenciais.senha,
-        repetirFalhaRede: true,
-      );
+      return _contabilizarRenovacao(renovacao);
     });
+  }
+
+  Future<ResultadoLogin> _contabilizarRenovacao(
+    Future<ResultadoLogin> renovacao,
+  ) async {
+    try {
+      final ResultadoLogin resultado = await renovacao;
+      if (resultado.autenticada) {
+        _renovacoesSucesso++;
+      } else {
+        switch (resultado.motivo) {
+          case MotivoFalhaLogin.credenciaisInvalidas:
+            _renovacoesFalhaCredenciaisInvalidas++;
+          case MotivoFalhaLogin.respostaInesperada:
+            _renovacoesFalhaRespostaInesperada++;
+          case MotivoFalhaLogin.falhaRede:
+            _renovacoesFalhaRede++;
+          case MotivoFalhaLogin.falhaInterna:
+            _renovacoesFalhaInterna++;
+          case null:
+            _renovacoesFalhaSemMotivo++;
+        }
+      }
+      return resultado;
+    } on Object {
+      _renovacoesExcecaoInterna++;
+      rethrow;
+    }
+  }
+
+  void _registrarRejeicaoSessao(int? status, {required bool aposRenovacao}) {
+    if (status == 401) {
+      if (aposRenovacao) {
+        _rejeicoes401AposRenovacao++;
+      } else {
+        _rejeicoes401++;
+      }
+    } else if (status == 403) {
+      if (aposRenovacao) {
+        _rejeicoes403AposRenovacao++;
+      } else {
+        _rejeicoes403++;
+      }
+    }
   }
 
   ResultadoConsultaPortal<T> _falhaHttp<T>(int? status) {

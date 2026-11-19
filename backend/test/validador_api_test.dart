@@ -14,8 +14,7 @@ const Map<String, String> _ambiente = <String, String>{
   'PORTAL_PRESTADOR_ID_TESTE_CODE': '000000000000',
   'PORTAL_PRESTADOR_ID_TESTE_USER': 'usuario-teste',
   'PORTAL_PRESTADOR_ID_TESTE_SENHA': 'senha-teste',
-  'CORS_ORIGIN':
-      'https://app.example,https://validador-sulamerica.pages.dev,https://iagosantanadev.github.io',
+  'CORS_ORIGIN': 'https://app.example,https://validador-sulamerica.pages.dev,https://iagosantanadev.github.io',
 };
 
 class _LogMudo implements LogOutput {
@@ -33,7 +32,7 @@ class _LogMudo implements LogOutput {
 
 class _SessaoFake extends SessaoPortal {
   _SessaoFake({this.gate, this.loginResult})
-      : super(logger: Logger(level: Level.off));
+    : super(logger: Logger(level: Level.off));
 
   final Completer<void>? gate;
   final ResultadoLogin? loginResult;
@@ -140,17 +139,16 @@ Request _request(
   String? token,
   String? idempotencyKey,
   Map<String, String>? headers,
-}) =>
-    Request(
-      method,
-      Uri.parse('http://localhost$path'),
-      body: body == null ? null : jsonEncode(body),
-      headers: <String, String>{
-        if (token != null) 'authorization': 'Bearer $token',
-        if (idempotencyKey != null) 'idempotency-key': idempotencyKey,
-        ...?headers,
-      },
-    );
+}) => Request(
+  method,
+  Uri.parse('http://localhost$path'),
+  body: body == null ? null : jsonEncode(body),
+  headers: <String, String>{
+    if (token != null) 'authorization': 'Bearer $token',
+    if (idempotencyKey != null) 'idempotency-key': idempotencyKey,
+    ...?headers,
+  },
+);
 
 Future<String> _criarSessao(ValidadorApi api) async {
   final Response resposta = await api.handler(
@@ -175,18 +173,17 @@ Future<Response> _criarLote(
   String token,
   String key, {
   List<Map<String, dynamic>>? consultas,
-}) async =>
-    await api.handler(
-      _request(
-        'POST',
-        '/api/lotes',
-        token: token,
-        idempotencyKey: key,
-        body: <String, Object>{
-          'consultas': consultas ?? <Map<String, dynamic>>[_consulta()],
-        },
-      ),
-    );
+}) async => await api.handler(
+  _request(
+    'POST',
+    '/api/lotes',
+    token: token,
+    idempotencyKey: key,
+    body: <String, Object>{
+      'consultas': consultas ?? <Map<String, dynamic>>[_consulta()],
+    },
+  ),
+);
 
 void main() {
   group('POST /api/sessoes', () {
@@ -404,26 +401,28 @@ void main() {
       await _aguardar(() async => await _ativos(contexto.api) == 0);
     });
 
-    test('itens inválidos não adquirem sessão nem consultam o portal',
-        () async {
-      final _ContextoApi contexto = _criarApi();
-      final String token = await _criarSessao(contexto.api);
-      final Response resposta = await _criarLote(
-        contexto.api,
-        token,
-        'invalid-items',
-        consultas: <Map<String, dynamic>>[
-          <String, dynamic>{'tipo': 'desconhecido', 'chave': 'x'},
-          <String, dynamic>{'tipo': 'elegibilidade', 'chave': 'invalida'},
-        ],
-      );
+    test(
+      'itens inválidos não adquirem sessão nem consultam o portal',
+      () async {
+        final _ContextoApi contexto = _criarApi();
+        final String token = await _criarSessao(contexto.api);
+        final Response resposta = await _criarLote(
+          contexto.api,
+          token,
+          'invalid-items',
+          consultas: <Map<String, dynamic>>[
+            <String, dynamic>{'tipo': 'desconhecido', 'chave': 'x'},
+            <String, dynamic>{'tipo': 'elegibilidade', 'chave': 'invalida'},
+          ],
+        );
 
-      expect(resposta.statusCode, 202);
-      await _aguardar(() async => await _ativos(contexto.api) == 0);
-      expect(contexto.sessoes, hasLength(1));
-      expect(contexto.sessoes.single.logins, 1);
-      expect(contexto.sessoes.single.consultas, 0);
-    });
+        expect(resposta.statusCode, 202);
+        await _aguardar(() async => await _ativos(contexto.api) == 0);
+        expect(contexto.sessoes, hasLength(1));
+        expect(contexto.sessoes.single.logins, 1);
+        expect(contexto.sessoes.single.consultas, 0);
+      },
+    );
 
     test('mais de 300 itens e corpo acima de 1 MB retornam 413', () async {
       final _ContextoApi contexto = _criarApi();
@@ -503,12 +502,15 @@ void main() {
       );
       final StringBuffer dados = StringBuffer();
       final Completer<void> segundaFechada = Completer<void>();
-      segunda.read().transform(utf8.decoder).listen(
-        dados.write,
-        onDone: () {
-          if (!segundaFechada.isCompleted) segundaFechada.complete();
-        },
-      );
+      segunda
+          .read()
+          .transform(utf8.decoder)
+          .listen(
+            dados.write,
+            onDone: () {
+              if (!segundaFechada.isCompleted) segundaFechada.complete();
+            },
+          );
       await primeiraFechada.future.timeout(const Duration(seconds: 1));
       expect(segunda.statusCode, 200);
       expect(segunda.headers['content-type'], contains('text/event-stream'));
@@ -550,6 +552,14 @@ void main() {
         expect(dados['rateLimit'], containsPair('rejeicoes429', 0));
         expect(dados['falhasPortal'], containsPair('502', 0));
         expect(dados['falhasPortal'], containsPair('503', 0));
+        expect(
+          dados['diagnosticoSessaoPortal'],
+          containsPair('rejeicoes401', 0),
+        );
+        expect(
+          dados['diagnosticoSessaoPortal'],
+          containsPair('renovacoesFalhaCredenciaisInvalidas', 0),
+        );
         expect(texto, isNot(contains('usuario-teste')));
         expect(texto, isNot(contains('PORTAL_PRESTADOR')));
       },

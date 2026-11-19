@@ -84,8 +84,11 @@ requisição local não garante que o portal interrompa uma operação já receb
 
 `GET /api/status` não exige token e fica fora dos limites de requisições ao
 portal. Devolve contadores agregados de sessões, lotes, memória RSS, rejeições
-429 e falhas upstream, além do resultado da sonda do portal. Não inclui tokens,
-identificadores nem dados de consulta.
+429 e falhas upstream, além do resultado da sonda do portal. `diagnosticoSessaoPortal`
+conta rejeições 401/403 antes e depois da renovação, renovações bem-sucedidas,
+falhas por motivo e exceções internas. Os contadores agregam sessões em memória
+e zeram quando o processo reinicia. Não inclui tokens, identificadores nem dados
+de consulta.
 
 ## Capacidade e execução
 

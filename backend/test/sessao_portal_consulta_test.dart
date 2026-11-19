@@ -182,6 +182,10 @@ void main() {
     expect(logins, 2);
     expect(consultas, 4);
     expect(resultados.every((resultado) => resultado.sucesso), isTrue);
+    expect(sessao.diagnosticoSessao['rejeicoes401'], 2);
+    expect(sessao.diagnosticoSessao['renovacoesIniciadas'], 1);
+    expect(sessao.diagnosticoSessao['renovacoesSucesso'], 1);
+    expect(sessao.diagnosticoSessao['rejeicoes401AposRenovacao'], 0);
     await sessao.encerrar();
   });
 
@@ -255,68 +259,65 @@ void main() {
     },
   );
 
-  test(
-    'renovação falha uma vez para chamadas concorrentes e consulta futura tenta de novo',
-    () async {
-      int logins = 0;
-      int consultas = 0;
-      final Completer<void> duasConsultas = Completer<void>();
-      final _AdapterTeste adapter = _AdapterTeste((
-        RequestOptions request,
-      ) async {
-        if (request.method == 'POST' &&
-            request.uri.queryParameters['lumPageId'] == _idLogin) {
-          logins++;
-          if (logins == 2) return _resposta('<html>sem login</html>', 200);
-          return _resposta(
-            '',
-            302,
-            headers: <String, List<String>>{
-              'location': <String>['/prestador/'],
-            },
-          );
+  test('renovação falha uma vez para chamadas concorrentes e consulta futura tenta de novo', () async {
+    int logins = 0;
+    int consultas = 0;
+    final Completer<void> duasConsultas = Completer<void>();
+    final _AdapterTeste adapter = _AdapterTeste((RequestOptions request) async {
+      if (request.method == 'POST' &&
+          request.uri.queryParameters['lumPageId'] == _idLogin) {
+        logins++;
+        if (logins == 2) return _resposta('<html>sem login</html>', 200);
+        return _resposta(
+          '',
+          302,
+          headers: <String, List<String>>{
+            'location': <String>['/prestador/'],
+          },
+        );
+      }
+      if (request.uri.path == '/prestador/') {
+        return _resposta('<html>logout</html>', 200);
+      }
+      if (request.method == 'POST' &&
+          request.uri.queryParameters['lumPageId'] == _idConsulta) {
+        consultas++;
+        if (consultas <= 2) {
+          if (consultas == 2) duasConsultas.complete();
+          await duasConsultas.future;
+          return _resposta('sessao expirada', 403);
         }
-        if (request.uri.path == '/prestador/') {
-          return _resposta('<html>logout</html>', 200);
-        }
-        if (request.method == 'POST' &&
-            request.uri.queryParameters['lumPageId'] == _idConsulta) {
-          consultas++;
-          if (consultas <= 2) {
-            if (consultas == 2) duasConsultas.complete();
-            await duasConsultas.future;
-            return _resposta('sessao expirada', 403);
-          }
-          return _resposta('<html>elegivel</html>', 200);
-        }
-        return _resposta('<html>formulario</html>', 200);
-      });
-      final SessaoPortal sessao = SessaoPortal(
-        dio: Dio()..httpClientAdapter = adapter,
-        logger: Logger(output: const _LogMudo(), level: Level.off),
-      );
-      await _login(sessao);
+        return _resposta('<html>elegivel</html>', 200);
+      }
+      return _resposta('<html>formulario</html>', 200);
+    });
+    final SessaoPortal sessao = SessaoPortal(
+      dio: Dio()..httpClientAdapter = adapter,
+      logger: Logger(output: const _LogMudo(), level: Level.off),
+    );
+    await _login(sessao);
 
-      final List<ResultadoConsultaPortal<String>> concorrentes =
-          await Future.wait(<Future<ResultadoConsultaPortal<String>>>[
-            sessao.consultarBeneficiario(
-              carteirinhaCompleta: '12345678901234567890',
-            ),
-            sessao.consultarBeneficiario(
-              carteirinhaCompleta: '98765432109876543210',
-            ),
-          ]);
-      expect(concorrentes.every((resultado) => !resultado.sucesso), isTrue);
-      expect(logins, 2);
+    final List<ResultadoConsultaPortal<String>>
+    concorrentes = await Future.wait(<Future<ResultadoConsultaPortal<String>>>[
+      sessao.consultarBeneficiario(carteirinhaCompleta: '12345678901234567890'),
+      sessao.consultarBeneficiario(carteirinhaCompleta: '98765432109876543210'),
+    ]);
+    expect(concorrentes.every((resultado) => !resultado.sucesso), isTrue);
+    expect(logins, 2);
+    expect(sessao.diagnosticoSessao['rejeicoes403'], 2);
+    expect(sessao.diagnosticoSessao['renovacoesIniciadas'], 1);
+    expect(sessao.diagnosticoSessao['renovacoesSucesso'], 0);
+    expect(sessao.diagnosticoSessao['renovacoesFalhaCredenciaisInvalidas'], 1);
 
-      final ResultadoConsultaPortal<String> posterior = await sessao
-          .consultarBeneficiario(carteirinhaCompleta: '12345678901234567890');
-      expect(posterior.sucesso, isTrue);
-      expect(logins, 3);
-      expect(consultas, 3);
-      await sessao.encerrar();
-    },
-  );
+    final ResultadoConsultaPortal<String> posterior = await sessao
+        .consultarBeneficiario(carteirinhaCompleta: '12345678901234567890');
+    expect(posterior.sucesso, isTrue);
+    expect(logins, 3);
+    expect(consultas, 3);
+    expect(sessao.diagnosticoSessao['renovacoesIniciadas'], 2);
+    expect(sessao.diagnosticoSessao['renovacoesSucesso'], 1);
+    await sessao.encerrar();
+  });
 }
 
 Future<void> _login(SessaoPortal sessao) async {
