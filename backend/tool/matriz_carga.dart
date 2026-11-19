@@ -593,6 +593,13 @@ List<ResultadoMatriz> filtrarMetricasResumo(
         )
         .toList();
 
+String nomeCampoLatenciaResumo(String cenario, String modo) =>
+    switch (cenario) {
+      'e2' => 'latenciaConsultaMs',
+      'e3' => 'latenciaSessaoMs',
+      _ => modo == 'item' ? 'latenciaConsultaMs' : 'latenciaLoteMs',
+    };
+
 void _imprimirResumo(
   _ConfigMatriz config,
   List<ConsultaMatriz> consultas,
@@ -633,14 +640,13 @@ void _imprimirResumo(
           .where((ResultadoMatriz item) => item.statusHttp == 502)
           .length,
       'duracaoMs': duracao.inMilliseconds,
-      (config.modo == 'item' ? 'latenciaConsultaMs' : 'latenciaLoteMs'):
-          latencias.isEmpty
-              ? null
-              : <String, int>{
-                  'min': latencias.first,
-                  'p50': latencias[latencias.length ~/ 2],
-                  'max': latencias.last,
-                },
+      nomeCampoLatenciaResumo(config.cenario, config.modo): latencias.isEmpty
+          ? null
+          : <String, int>{
+              'min': latencias.first,
+              'p50': latencias[latencias.length ~/ 2],
+              'max': latencias.last,
+            },
       'csv': csvPath,
       if (config.cenario == 'e2')
         'limitacao':

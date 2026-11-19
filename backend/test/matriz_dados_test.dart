@@ -1,5 +1,6 @@
 import 'package:test/test.dart';
-import '../tool/matriz_carga.dart' show filtrarMetricasResumo;
+import '../tool/matriz_carga.dart'
+    show filtrarMetricasResumo, nomeCampoLatenciaResumo;
 import '../tool/matriz_dados.dart';
 
 void main() {
@@ -101,5 +102,12 @@ void main() {
       filtrarMetricasResumo('e2', resultados).single.tipo,
       'e2_antes_2_sessoes',
     );
+  });
+
+  test('resumo nomeia a latência conforme o cenário medido', () {
+    expect(nomeCampoLatenciaResumo('e2', 'lote'), 'latenciaConsultaMs');
+    expect(nomeCampoLatenciaResumo('e3', 'lote'), 'latenciaSessaoMs');
+    expect(nomeCampoLatenciaResumo('matriz', 'item'), 'latenciaConsultaMs');
+    expect(nomeCampoLatenciaResumo('matriz', 'lote'), 'latenciaLoteMs');
   });
 }
