@@ -110,10 +110,17 @@ void main() {
       final Response resposta = respostaErro('Payload invalido.', 400);
       expect(resposta.statusCode, 400);
       expect(resposta.headers['content-type'], tipoConteudoJson);
+      expect(resposta.headers.containsKey(cabecalhoOrigemErroApi), isFalse);
       expect(jsonDecode(await resposta.readAsString()), {
         'status': 'erro',
         'mensagem': 'Payload invalido.',
       });
+    });
+
+    test('marca como API a origem de respostas 502', () {
+      final Response resposta = respostaErro('Falha upstream.', 502);
+
+      expect(resposta.headers[cabecalhoOrigemErroApi], 'api');
     });
   });
 

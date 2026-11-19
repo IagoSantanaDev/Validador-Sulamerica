@@ -289,6 +289,10 @@ void main() {
           );
 
           expect(resposta.statusCode, status);
+          expect(
+            resposta.headers['x-validador-api-error-origin'],
+            status == 502 ? 'api' : isNull,
+          );
           expect(await resposta.readAsString(), isNot(contains('detalhe que')));
         }
       },

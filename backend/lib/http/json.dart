@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:shelf/shelf.dart';
 
 const String tipoConteudoJson = 'application/json; charset=utf-8';
+const String cabecalhoOrigemErroApi = 'x-validador-api-error-origin';
 
 const int limiteCorpoJsonBytes = 1 << 20;
 
@@ -65,10 +66,14 @@ Response respostaErro(
   int status, {
   Map<String, String>? headers,
 }) {
+  final Map<String, String> cabecalhos = <String, String>{
+    ...?headers,
+    if (status == 502) cabecalhoOrigemErroApi: 'api',
+  };
   return respostaJson(
     <String, dynamic>{'status': 'erro', 'mensagem': mensagem},
     status: status,
-    headers: headers,
+    headers: cabecalhos,
   );
 }
 
