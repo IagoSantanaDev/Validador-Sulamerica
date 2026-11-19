@@ -86,9 +86,13 @@ requisição local não garante que o portal interrompa uma operação já receb
 portal. Devolve contadores agregados de sessões, lotes, memória RSS, rejeições
 429 e falhas upstream, além do resultado da sonda do portal. `diagnosticoSessaoPortal`
 conta rejeições 401/403 antes e depois da renovação, renovações bem-sucedidas,
-falhas por motivo e exceções internas. Os contadores agregam sessões em memória
-e zeram quando o processo reinicia. Não inclui tokens, identificadores nem dados
-de consulta.
+falhas por motivo e exceções internas. Também registra status HTTP por etapa do
+login, redirect sem `Location`, login sem indicador de sessão, status da chamada
+AJAX, classe do `Content-Type` e resultado do parse JSON. `concorrenciaPortal`
+mostra limites e picos do semáforo global e do pool. Contadores de sessões
+descartadas após falha inicial de login são preservados. Métricas agregam em
+memória e zeram quando o processo reinicia. Não inclui corpo de resposta,
+cookies, tokens, identificadores nem dados de consulta.
 
 ## Capacidade e execução
 

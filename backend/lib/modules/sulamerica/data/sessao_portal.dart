@@ -141,10 +141,15 @@ class SessaoPortal {
   int _renovacoesFalhaInterna = 0;
   int _renovacoesFalhaSemMotivo = 0;
   int _renovacoesExcecaoInterna = 0;
+  final Map<String, int> _diagnosticoEtapas = <String, int>{};
 
   bool get autenticada => _autenticada;
 
+  static Map<String, int> get diagnosticoConcorrencia =>
+      _semaforoGlobal.diagnostico;
+
   Map<String, int> get diagnosticoSessao => <String, int>{
+    ..._diagnosticoEtapas,
     'rejeicoes401': _rejeicoes401,
     'rejeicoes403': _rejeicoes403,
     'rejeicoes401AposRenovacao': _rejeicoes401AposRenovacao,
@@ -282,12 +287,15 @@ class SessaoPortal {
         ),
       );
       if (pagina.statusCode != 200) {
+        _registrarStatus('loginGetHttp', pagina.statusCode);
+        _incrementarDiagnostico('loginGetRespostaInesperada');
         _logger.e(
           'GET inicial do login retornou HTTP ${pagina.statusCode} '
           '(possivel bloqueio do F5 ASM).',
         );
         return const ResultadoLogin.falha(MotivoFalhaLogin.respostaInesperada);
       }
+      _registrarStatus('loginGetHttp', pagina.statusCode);
 
       final Map<String, String> campos = {
         ..._camposLogin,
@@ -306,10 +314,12 @@ class SessaoPortal {
           ),
         ),
       );
+      _registrarStatus('loginPostHttp', resposta.statusCode);
 
       if (resposta.statusCode == 302) {
         final String? urlFinal = _urlDeRedirect(resposta);
         if (urlFinal == null) {
+          _incrementarDiagnostico('loginRedirectSemLocation');
           _logger.e('Login Lumis: 302 sem Location.');
           return const ResultadoLogin.falha(
             MotivoFalhaLogin.respostaInesperada,
@@ -324,7 +334,9 @@ class SessaoPortal {
             ),
           ),
         );
+        _registrarStatus('loginRedirectHttp', pos.statusCode);
         if (pos.statusCode != 200) {
+          _incrementarDiagnostico('loginRedirectRespostaInesperada');
           _logger.e('Login Lumis: redirect final HTTP ${pos.statusCode}.');
           return const ResultadoLogin.falha(
             MotivoFalhaLogin.respostaInesperada,
@@ -345,14 +357,17 @@ class SessaoPortal {
           'sessao: $quantidadeCookies cookies.',
         );
         if (!paginaAutenticada) {
+          _incrementarDiagnostico('loginRedirectSemLogout');
           return const ResultadoLogin.falha(
             MotivoFalhaLogin.credenciaisInvalidas,
           );
         }
+        _incrementarDiagnostico('loginAutenticado');
         return const ResultadoLogin.autenticado();
       }
 
       if (resposta.statusCode != 200) {
+        _incrementarDiagnostico('loginPostRespostaInesperada');
         _logger.e('Login Lumis retornou HTTP ${resposta.statusCode}.');
         return const ResultadoLogin.falha(MotivoFalhaLogin.respostaInesperada);
       }
@@ -372,15 +387,25 @@ class SessaoPortal {
         'sessao: $quantidadeCookies cookies.',
       );
       if (!_autenticada) {
+        _incrementarDiagnostico('loginPostSemLogout');
         _logger.w('Login Lumis: resposta sem sessao autenticada.');
         return const ResultadoLogin.falha(
           MotivoFalhaLogin.credenciaisInvalidas,
         );
       }
+      _incrementarDiagnostico('loginAutenticado');
       return const ResultadoLogin.autenticado();
     } on FormatException {
+      _incrementarDiagnostico('loginFormatException');
       return const ResultadoLogin.falha(MotivoFalhaLogin.respostaInesperada);
     } on DioException catch (erro) {
+      final int? status = erro.response?.statusCode;
+      if (status != null) _registrarStatus('loginDioHttp', status);
+      _incrementarDiagnostico(
+        _ehFalhaTransporte(erro)
+            ? 'loginDioFalhaTransporte'
+            : 'loginDioRespostaInesperada',
+      );
       _logger.e('Falha de rede no login: ${erro.type.name}.');
       return ResultadoLogin.falha(
         _ehFalhaTransporte(erro)
@@ -565,19 +590,29 @@ class SessaoPortal {
         ),
         cancelToken: cancelToken,
       );
+      _registrarStatus('ajaxHttp', resposta.statusCode);
+      _registrarContentTypeAjax(resposta.headers['content-type']);
 
       if (resposta.statusCode != 200) {
         return _falhaHttp<Map<String, dynamic>>(resposta.statusCode);
       }
 
       final String corpo = _decodificarCorpo(resposta.data ?? []);
-      final dynamic json = jsonDecode(corpo);
+      final dynamic json;
+      try {
+        json = jsonDecode(corpo);
+      } on FormatException {
+        _incrementarDiagnostico('ajaxJsonInvalido');
+        rethrow;
+      }
       if (json is! Map<String, dynamic>) {
+        _incrementarDiagnostico('ajaxJsonRaizInvalida');
         return ResultadoConsultaPortal<Map<String, dynamic>>.falha(
           categoria: CategoriaFalhaConsultaPortal.respostaInesperada,
           status: resposta.statusCode,
         );
       }
+      _incrementarDiagnostico('ajaxJsonValido');
       return ResultadoConsultaPortal<Map<String, dynamic>>.sucesso(
         dados: json,
         status: resposta.statusCode,
@@ -738,6 +773,37 @@ class SessaoPortal {
     }
   }
 
+  void _incrementarDiagnostico(String chave) {
+    _diagnosticoEtapas.update(
+      chave,
+      (int valor) => valor + 1,
+      ifAbsent: () => 1,
+    );
+  }
+
+  void _registrarStatus(String etapa, int? status) {
+    if (status == null) {
+      _incrementarDiagnostico('${etapa}SemStatus');
+      return;
+    }
+    _incrementarDiagnostico('$etapa$status');
+  }
+
+  void _registrarContentTypeAjax(List<String>? valores) {
+    if (valores == null || valores.isEmpty) {
+      _incrementarDiagnostico('ajaxContentTypeAusente');
+      return;
+    }
+    final String mime = valores.first.split(';').first.trim().toLowerCase();
+    if (mime == 'application/json' || mime.endsWith('+json')) {
+      _incrementarDiagnostico('ajaxContentTypeJson');
+    } else if (mime.startsWith('text/html')) {
+      _incrementarDiagnostico('ajaxContentTypeHtml');
+    } else {
+      _incrementarDiagnostico('ajaxContentTypeOutro');
+    }
+  }
+
   ResultadoConsultaPortal<T> _falhaHttp<T>(int? status) {
     return ResultadoConsultaPortal<T>.falha(
       categoria: ehFalhaDeSessaoPortal(status)
@@ -813,7 +879,19 @@ class _SemaforoRequisicoes {
 
   final int limite;
   int _ativas = 0;
+  int _picoAtivas = 0;
+  int _picoEspera = 0;
+  int _totalEspera = 0;
   final List<Completer<void>> _espera = <Completer<void>>[];
+
+  Map<String, int> get diagnostico => <String, int>{
+    'limite': limite,
+    'ativasAgora': _ativas,
+    'picoAtivas': _picoAtivas,
+    'aguardandoAgora': _espera.length,
+    'picoAguardando': _picoEspera,
+    'totalAguardas': _totalEspera,
+  };
 
   Future<T> executar<T>(
     Future<T> Function() operacao, {
@@ -826,10 +904,13 @@ class _SemaforoRequisicoes {
     bool possuiVaga = false;
     if (_ativas < limite && _espera.isEmpty) {
       _ativas++;
+      if (_ativas > _picoAtivas) _picoAtivas = _ativas;
       possuiVaga = true;
     } else {
       final Completer<void> livre = Completer<void>();
       _espera.add(livre);
+      _totalEspera++;
+      if (_espera.length > _picoEspera) _picoEspera = _espera.length;
       try {
         if (cancelToken == null) {
           await livre.future;

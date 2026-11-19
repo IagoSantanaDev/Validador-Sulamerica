@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
@@ -86,6 +87,55 @@ void main() {
     expect(resultado.sucesso, isFalse);
     expect(resultado.status, 429);
     expect(resultado.categoria, CategoriaFalhaConsultaPortal.http);
+    await sessao.encerrar();
+  });
+
+  test('diagnostica AJAX HTML sem guardar o corpo', () async {
+    final _AdapterTeste adapter = _AdapterTeste((RequestOptions request) async {
+      if (request.method == 'POST' &&
+          request.uri.queryParameters['lumPageId'] == _idLogin) {
+        return _resposta(
+          '',
+          302,
+          headers: <String, List<String>>{
+            'location': <String>['/prestador/'],
+          },
+        );
+      }
+      if (request.uri.path == '/prestador/') {
+        return _resposta('<html>logout</html>', 200);
+      }
+      if (request.uri.path == '/ajax-controller.jsp') {
+        return ResponseBody.fromString(
+          '<html>block page</html>',
+          200,
+          headers: <String, List<String>>{
+            'content-type': <String>['text/html'],
+          },
+        );
+      }
+      return _resposta('<html>formulario</html>', 200);
+    });
+    final SessaoPortal sessao = SessaoPortal(
+      dio: Dio()..httpClientAdapter = adapter,
+      logger: Logger(output: const _LogMudo(), level: Level.off),
+    );
+    await _login(sessao);
+
+    final ResultadoConsultaPortal<Map<String, dynamic>> resultado =
+        await sessao.consultarSenha(senha: '5000000000');
+
+    expect(
+      resultado.categoria,
+      CategoriaFalhaConsultaPortal.respostaInesperada,
+    );
+    expect(sessao.diagnosticoSessao['ajaxHttp200'], 1);
+    expect(sessao.diagnosticoSessao['ajaxContentTypeHtml'], 1);
+    expect(sessao.diagnosticoSessao['ajaxJsonInvalido'], 1);
+    expect(
+      jsonEncode(sessao.diagnosticoSessao),
+      isNot(contains('block page')),
+    );
     await sessao.encerrar();
   });
 

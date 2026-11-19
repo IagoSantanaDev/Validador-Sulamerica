@@ -560,6 +560,11 @@ void main() {
           dados['diagnosticoSessaoPortal'],
           containsPair('renovacoesFalhaCredenciaisInvalidas', 0),
         );
+        expect(dados['concorrenciaPortal'], containsPair('limite', 16));
+        expect(
+          dados['concorrenciaPortal'],
+          containsPair('limiteSessoesPorIdentificador', 4),
+        );
         expect(texto, isNot(contains('usuario-teste')));
         expect(texto, isNot(contains('PORTAL_PRESTADOR')));
       },

@@ -445,6 +445,10 @@ class ValidadorApi {
       'rateLimit': <String, int>{'rejeicoes429': _rejeicoes429},
       'falhasPortal': <String, int>{'502': _falhas502, '503': _falhas503},
       'diagnosticoSessaoPortal': _pool.diagnosticoSessaoPortal,
+      'concorrenciaPortal': <String, int>{
+        ...SessaoPortal.diagnosticoConcorrencia,
+        ..._pool.diagnosticoConcorrenciaPortal,
+      },
       'portalSulAmerica': alcancePortal,
       'timestamp': DateTime.now().toIso8601String(),
     });

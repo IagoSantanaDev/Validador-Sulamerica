@@ -34,6 +34,26 @@ class _SessaoFake extends SessaoPortal {
   Future<void> encerrar() async {}
 }
 
+class _SessaoFalhaFake extends SessaoPortal {
+  _SessaoFalhaFake() : super(logger: Logger(level: Level.off));
+
+  @override
+  Map<String, int> get diagnosticoSessao => const <String, int>{
+    'loginGetHttp403': 1,
+  };
+
+  @override
+  Future<ResultadoLogin> login({
+    required String code,
+    required String user,
+    required String senha,
+  }) async =>
+      const ResultadoLogin.falha(MotivoFalhaLogin.respostaInesperada);
+
+  @override
+  Future<void> encerrar() async {}
+}
+
 CredenciaisPortal _credenciais() => CredenciaisPortal.resolver(
       'teste',
       ambiente: const <String, String>{
@@ -44,6 +64,20 @@ CredenciaisPortal _credenciais() => CredenciaisPortal.resolver(
     )!;
 
 void main() {
+  test('preserva diagnóstico de sessão descartada após login inicial', () async {
+    final PoolSessoesPortal pool = PoolSessoesPortal(
+      fabricaSessao: (_) => _SessaoFalhaFake(),
+    );
+
+    await expectLater(
+      pool.garantirAutenticada('teste', _credenciais()),
+      throwsA(isA<FalhaPoolSessoesException>()),
+    );
+
+    expect(pool.sessoesAtivas, 0);
+    expect(pool.diagnosticoSessaoPortal['loginGetHttp403'], 1);
+  });
+
   test('logins concorrentes coalescem em uma sessão', () async {
     final List<_SessaoFake> criadas = <_SessaoFake>[];
     final PoolSessoesPortal pool = PoolSessoesPortal(

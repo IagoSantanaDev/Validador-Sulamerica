@@ -33,6 +33,8 @@ class PoolSessoesPortal {
   final SessaoPortal Function(Logger logger) _fabricaSessao;
   final int limitePorIdentificador;
   final Map<String, _PoolPrestador> _porIdentificador = {};
+  final Map<String, int> _diagnosticoSessoesDescartadas = <String, int>{};
+  int _picoRequisicoesAtivas = 0;
 
   int get sessoesAtivas => _porIdentificador.values.fold<int>(
     0,
@@ -40,7 +42,9 @@ class PoolSessoesPortal {
   );
 
   Map<String, int> get diagnosticoSessaoPortal {
-    final Map<String, int> total = <String, int>{};
+    final Map<String, int> total = Map<String, int>.of(
+      _diagnosticoSessoesDescartadas,
+    );
     for (final _PoolPrestador pool in _porIdentificador.values) {
       for (final _SessaoGerenciada sessao in pool.sessoes) {
         for (final MapEntry<String, int> contador
@@ -55,6 +59,11 @@ class PoolSessoesPortal {
     }
     return total;
   }
+
+  Map<String, int> get diagnosticoConcorrenciaPortal => <String, int>{
+    'picoRequisicoesEmprestadas': _picoRequisicoesAtivas,
+    'limiteSessoesPorIdentificador': limitePorIdentificador,
+  };
 
   Future<SessaoPortal> garantirAutenticada(
     String identificador,
@@ -98,6 +107,16 @@ class PoolSessoesPortal {
 
       if (escolhida != null) {
         escolhida.reservar(tipo);
+        final int ativas = _porIdentificador.values.fold<int>(
+          0,
+          (int total, _PoolPrestador pool) =>
+              total + pool.sessoes.fold<int>(
+                0,
+                (int subtotal, _SessaoGerenciada sessao) =>
+                    subtotal + sessao.ativas,
+              ),
+        );
+        if (ativas > _picoRequisicoesAtivas) _picoRequisicoesAtivas = ativas;
         return EmprestimoSessaoPortal._(escolhida, tipo, pool);
       }
 
@@ -147,6 +166,14 @@ class PoolSessoesPortal {
         autenticada = true;
       } finally {
         if (!autenticada) {
+          for (final MapEntry<String, int> contador
+              in sessao.diagnosticoSessao.entries) {
+            _diagnosticoSessoesDescartadas.update(
+              contador.key,
+              (int valor) => valor + contador.value,
+              ifAbsent: () => contador.value,
+            );
+          }
           pool.sessoes.remove(gerenciada);
           await sessao.encerrar();
         }

@@ -56,6 +56,10 @@ void main() {
 
       expect(resultado.motivo, isNull);
       expect(resultado.autenticada, isTrue);
+      expect(sessao.diagnosticoSessao['loginGetHttp200'], 1);
+      expect(sessao.diagnosticoSessao['loginPostHttp302'], 1);
+      expect(sessao.diagnosticoSessao['loginRedirectHttp200'], 1);
+      expect(sessao.diagnosticoSessao['loginAutenticado'], 1);
       await sessao.encerrar();
     });
 
@@ -77,6 +81,28 @@ void main() {
 
       expect(resultado.motivo, MotivoFalhaLogin.respostaInesperada);
       expect(resultado.motivo, isNot(MotivoFalhaLogin.falhaRede));
+      expect(sessao.diagnosticoSessao['loginPostHttp302'], 1);
+      expect(sessao.diagnosticoSessao['loginRedirectSemLocation'], 1);
+      await sessao.encerrar();
+    });
+
+    test('registra status inesperado do GET sem guardar resposta', () async {
+      final SessaoPortal sessao = SessaoPortal(
+        dio: Dio()
+          ..httpClientAdapter = _AdapterFake(<String, ResponseBody>{
+            'GET /main.jsp': ResponseBody.fromString('resposta ignorada', 403),
+          }),
+      );
+
+      final ResultadoLogin resultado = await sessao.login(
+        code: 'codigo',
+        user: 'usuario',
+        senha: 'senha',
+      );
+
+      expect(resultado.motivo, MotivoFalhaLogin.respostaInesperada);
+      expect(sessao.diagnosticoSessao['loginGetHttp403'], 1);
+      expect(sessao.diagnosticoSessao['loginGetRespostaInesperada'], 1);
       await sessao.encerrar();
     });
   });
