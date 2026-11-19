@@ -1,4 +1,5 @@
 import 'package:test/test.dart';
+import '../tool/matriz_carga.dart' show filtrarMetricasResumo;
 import '../tool/matriz_dados.dart';
 
 void main() {
@@ -58,5 +59,47 @@ void main() {
     expect(csv, contains('usuario,indice,tipo'));
     expect(csv, contains('"bad ""gateway"""'));
     expect(csv, isNot(contains('token')));
+  });
+
+  test('resumo E3 inclui sessões e E2 exclui sessões das métricas', () {
+    const List<ResultadoMatriz> resultados = <ResultadoMatriz>[
+      ResultadoMatriz(
+        usuario: 1,
+        indice: 1,
+        tipo: 'sessao_e3_rajada',
+        sucesso: true,
+        latenciaMs: 40,
+        statusHttp: 201,
+        erro: null,
+        origem502: null,
+      ),
+      ResultadoMatriz(
+        usuario: 1,
+        indice: 1,
+        tipo: 'e2_antes_2_sessoes',
+        sucesso: true,
+        latenciaMs: 50,
+        statusHttp: 202,
+        erro: null,
+        origem502: null,
+      ),
+      ResultadoMatriz(
+        usuario: 0,
+        indice: 0,
+        tipo: 'lote_resumo',
+        sucesso: true,
+        latenciaMs: 90,
+        statusHttp: 202,
+        erro: null,
+        origem502: null,
+      ),
+    ];
+
+    expect(filtrarMetricasResumo('e3', resultados), hasLength(2));
+    expect(filtrarMetricasResumo('e2', resultados), hasLength(1));
+    expect(
+      filtrarMetricasResumo('e2', resultados).single.tipo,
+      'e2_antes_2_sessoes',
+    );
   });
 }

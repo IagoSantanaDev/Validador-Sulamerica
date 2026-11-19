@@ -581,6 +581,18 @@ ResultadoMatriz _falha(
 Map<String, dynamic>? _mapa(Object? valor) =>
     valor is Map<String, dynamic> ? valor : null;
 
+List<ResultadoMatriz> filtrarMetricasResumo(
+  String cenario,
+  List<ResultadoMatriz> resultados,
+) =>
+    resultados
+        .where(
+          (ResultadoMatriz item) =>
+              item.tipo != 'lote_resumo' &&
+              (cenario == 'e3' || !item.tipo.startsWith('sessao')),
+        )
+        .toList();
+
 void _imprimirResumo(
   _ConfigMatriz config,
   List<ConsultaMatriz> consultas,
@@ -588,13 +600,9 @@ void _imprimirResumo(
   Duration duracao,
   String csvPath,
 ) {
-  final List<ResultadoMatriz> itens = resultados
-      .where(
-        (ResultadoMatriz item) =>
-            !item.tipo.startsWith('sessao') && item.tipo != 'lote_resumo',
-      )
-      .toList();
-  final List<int> latencias = resultados
+  final List<ResultadoMatriz> metricas =
+      filtrarMetricasResumo(config.cenario, resultados);
+  final List<int> latencias = metricas
       .map((ResultadoMatriz item) => item.latenciaMs)
       .whereType<int>()
       .toList()
@@ -614,13 +622,16 @@ void _imprimirResumo(
       'senhaXml':
           consultas.where((ConsultaMatriz item) => item.tipo == 'senha').length,
       'sucessos':
-          itens.where((ResultadoMatriz item) => item.sucesso == true).length,
-      'falhas':
-          itens.where((ResultadoMatriz item) => item.sucesso == false).length,
-      'http429':
-          itens.where((ResultadoMatriz item) => item.statusHttp == 429).length,
-      'http502':
-          itens.where((ResultadoMatriz item) => item.statusHttp == 502).length,
+          metricas.where((ResultadoMatriz item) => item.sucesso == true).length,
+      'falhas': metricas
+          .where((ResultadoMatriz item) => item.sucesso == false)
+          .length,
+      'http429': metricas
+          .where((ResultadoMatriz item) => item.statusHttp == 429)
+          .length,
+      'http502': metricas
+          .where((ResultadoMatriz item) => item.statusHttp == 502)
+          .length,
       'duracaoMs': duracao.inMilliseconds,
       (config.modo == 'item' ? 'latenciaConsultaMs' : 'latenciaLoteMs'):
           latencias.isEmpty
