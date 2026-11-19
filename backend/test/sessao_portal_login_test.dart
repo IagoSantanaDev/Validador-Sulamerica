@@ -26,8 +26,7 @@ class _AdapterFake implements HttpClientAdapter {
 
 void main() {
   group('SessaoPortal - leitura do Location', () {
-    test('Location repetido autentica em vez de virar falha de rede',
-        () async {
+    test('Location repetido autentica em vez de virar falha de rede', () async {
       // `headers.value('location')` lanca `Exception` quando o header chega
       // duplicado. A excecao subia para o `catch` do login e a resposta ao
       // cliente saia como "falha de rede". O login deve seguir o primeiro
@@ -35,7 +34,8 @@ void main() {
       final SessaoPortal sessao = SessaoPortal(
         dio: Dio()
           ..httpClientAdapter = _AdapterFake(<String, ResponseBody>{
-            'GET /main.jsp': ResponseBody.fromString('<html>formulario</html>', 200),
+            'GET /main.jsp':
+                ResponseBody.fromString('<html>formulario</html>', 200),
             'POST /main.jsp': ResponseBody.fromString(
               '',
               302,
@@ -90,7 +90,13 @@ void main() {
       final SessaoPortal sessao = SessaoPortal(
         dio: Dio()
           ..httpClientAdapter = _AdapterFake(<String, ResponseBody>{
-            'GET /main.jsp': ResponseBody.fromString('resposta ignorada', 403),
+            'GET /main.jsp': ResponseBody.fromString(
+              '<html><title>Request rejected</title>Support ID: ABCD123456</html>',
+              403,
+              headers: <String, List<String>>{
+                'content-type': <String>['text/html; charset=utf-8'],
+              },
+            ),
           }),
       );
 
@@ -103,6 +109,7 @@ void main() {
       expect(resultado.motivo, MotivoFalhaLogin.respostaInesperada);
       expect(sessao.diagnosticoSessao['loginGetHttp403'], 1);
       expect(sessao.diagnosticoSessao['loginGetRespostaInesperada'], 1);
+      expect(sessao.diagnosticoSessao['assinaturaResposta'], 1);
       await sessao.encerrar();
     });
   });

@@ -8,6 +8,7 @@ import 'package:dio/io.dart';
 import 'package:dio_cookie_manager/dio_cookie_manager.dart';
 import 'package:logger/logger.dart';
 
+import 'assinatura_resposta_portal.dart';
 import 'resultado_consulta_portal.dart';
 
 /// `falhaRede` cobre apenas `DioException`. Erro de codigo, header inesperado
@@ -22,9 +23,9 @@ enum MotivoFalhaLogin {
 
 class ResultadoLogin {
   const ResultadoLogin.autenticado()
-    : autenticada = true,
-      motivo = null,
-      detalhe = null;
+      : autenticada = true,
+        motivo = null,
+        detalhe = null;
 
   const ResultadoLogin.falha(this.motivo, {this.detalhe}) : autenticada = false;
 
@@ -36,9 +37,9 @@ class ResultadoLogin {
 
 class SessaoPortal {
   SessaoPortal({Dio? dio, CookieJar? cookieJar, Logger? logger})
-    : _dio = dio ?? Dio(),
-      _cookieJar = cookieJar ?? CookieJar(),
-      _logger = logger ?? Logger() {
+      : _dio = dio ?? Dio(),
+        _cookieJar = cookieJar ?? CookieJar(),
+        _logger = logger ?? Logger() {
     _dio.options = _dio.options.copyWith(
       connectTimeout: const Duration(seconds: 15),
       receiveTimeout: const Duration(seconds: 30),
@@ -75,8 +76,7 @@ class SessaoPortal {
     return true;
   }
 
-  static const String _userAgent =
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+  static const String _userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
       'AppleWebKit/537.36 (KHTML, like Gecko) '
       'Chrome/131.0.0.0 Safari/537.36';
 
@@ -142,6 +142,8 @@ class SessaoPortal {
   int _renovacoesFalhaSemMotivo = 0;
   int _renovacoesExcecaoInterna = 0;
   final Map<String, int> _diagnosticoEtapas = <String, int>{};
+  final ColetorAssinaturasRespostaPortal _assinaturas =
+      ColetorAssinaturasRespostaPortal();
 
   bool get autenticada => _autenticada;
 
@@ -149,48 +151,54 @@ class SessaoPortal {
       _semaforoGlobal.diagnostico;
 
   Map<String, int> get diagnosticoSessao => <String, int>{
-    ..._diagnosticoEtapas,
-    'rejeicoes401': _rejeicoes401,
-    'rejeicoes403': _rejeicoes403,
-    'rejeicoes401AposRenovacao': _rejeicoes401AposRenovacao,
-    'rejeicoes403AposRenovacao': _rejeicoes403AposRenovacao,
-    'renovacoesIniciadas': _renovacoesIniciadas,
-    'renovacoesSucesso': _renovacoesSucesso,
-    'renovacoesFalhaCredenciaisInvalidas': _renovacoesFalhaCredenciaisInvalidas,
-    'renovacoesFalhaRespostaInesperada': _renovacoesFalhaRespostaInesperada,
-    'renovacoesFalhaRede': _renovacoesFalhaRede,
-    'renovacoesFalhaInterna': _renovacoesFalhaInterna,
-    'renovacoesFalhaSemMotivo': _renovacoesFalhaSemMotivo,
-    'renovacoesExcecaoInterna': _renovacoesExcecaoInterna,
-  };
+        ..._diagnosticoEtapas,
+        'rejeicoes401': _rejeicoes401,
+        'rejeicoes403': _rejeicoes403,
+        'rejeicoes401AposRenovacao': _rejeicoes401AposRenovacao,
+        'rejeicoes403AposRenovacao': _rejeicoes403AposRenovacao,
+        'renovacoesIniciadas': _renovacoesIniciadas,
+        'renovacoesSucesso': _renovacoesSucesso,
+        'renovacoesFalhaCredenciaisInvalidas':
+            _renovacoesFalhaCredenciaisInvalidas,
+        'renovacoesFalhaRespostaInesperada': _renovacoesFalhaRespostaInesperada,
+        'renovacoesFalhaRede': _renovacoesFalhaRede,
+        'renovacoesFalhaInterna': _renovacoesFalhaInterna,
+        'renovacoesFalhaSemMotivo': _renovacoesFalhaSemMotivo,
+        'renovacoesExcecaoInterna': _renovacoesExcecaoInterna,
+      };
+
+  List<Map<String, dynamic>> get supportIdsRespostaPortal =>
+      _assinaturas.supportIdsRecentes;
 
   Map<String, String> get _headersNavegador => {
-    'User-Agent': _userAgent,
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-    'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8',
-    'Upgrade-Insecure-Requests': '1',
-  };
+        'User-Agent': _userAgent,
+        'Accept':
+            'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8',
+        'Upgrade-Insecure-Requests': '1',
+      };
 
   Map<String, String> get _headersPost => {
-    ..._headersNavegador,
-    'Content-Type': 'application/x-www-form-urlencoded',
-    'Origin': 'https://saude.sulamericaseguros.com.br',
-    'Referer': _urlLogin,
-    'Sec-Fetch-Site': 'same-origin',
-    'Sec-Fetch-Mode': 'navigate',
-    'Sec-Fetch-Dest': 'document',
-  };
+        ..._headersNavegador,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Origin': 'https://saude.sulamericaseguros.com.br',
+        'Referer': _urlLogin,
+        'Sec-Fetch-Site': 'same-origin',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Dest': 'document',
+      };
 
   Future<ResultadoLogin> login({
     required String code,
     required String user,
     required String senha,
-  }) => _loginCompartilhado(
-    code: code,
-    user: user,
-    senha: senha,
-    repetirFalhaRede: false,
-  );
+  }) =>
+      _loginCompartilhado(
+        code: code,
+        user: user,
+        senha: senha,
+        repetirFalhaRede: false,
+      );
 
   Future<ResultadoLogin> _loginCompartilhado({
     required String code,
@@ -229,12 +237,13 @@ class SessaoPortal {
 
   Future<ResultadoLogin> _limparLoginEmAndamento(
     Future<ResultadoLogin> futuro,
-  ) => futuro.whenComplete(() {
-    if (identical(_loginEmAndamento, futuro)) {
-      _loginEmAndamento = null;
-      _loginEmAndamentoRepeteFalhaRede = false;
-    }
-  });
+  ) =>
+      futuro.whenComplete(() {
+        if (identical(_loginEmAndamento, futuro)) {
+          _loginEmAndamento = null;
+          _loginEmAndamentoRepeteFalhaRede = false;
+        }
+      });
 
   Future<ResultadoLogin> garantirAutenticada() async {
     if (_autenticada) return const ResultadoLogin.autenticado();
@@ -257,9 +266,8 @@ class SessaoPortal {
     required bool repetirFalhaRede,
     Future<ResultadoLogin>? tentativaInicial,
   }) async {
-    final ResultadoLogin primeiro =
-        await (tentativaInicial ??
-            _executarLogin(code: code, user: user, senha: senha));
+    final ResultadoLogin primeiro = await (tentativaInicial ??
+        _executarLogin(code: code, user: user, senha: senha));
     if (primeiro.autenticada ||
         !repetirFalhaRede ||
         primeiro.motivo != MotivoFalhaLogin.falhaRede) {
@@ -289,6 +297,11 @@ class SessaoPortal {
       if (pagina.statusCode != 200) {
         _registrarStatus('loginGetHttp', pagina.statusCode);
         _incrementarDiagnostico('loginGetRespostaInesperada');
+        _registrarAssinaturaResposta(
+          status: pagina.statusCode,
+          contentType: pagina.headers['content-type']?.join(','),
+          body: pagina.data == null ? null : utf8.encode(pagina.data!),
+        );
         _logger.e(
           'GET inicial do login retornou HTTP ${pagina.statusCode} '
           '(possivel bloqueio do F5 ASM).',
@@ -315,6 +328,13 @@ class SessaoPortal {
         ),
       );
       _registrarStatus('loginPostHttp', resposta.statusCode);
+      if (resposta.statusCode != 302 && resposta.statusCode != 200) {
+        _registrarAssinaturaResposta(
+          status: resposta.statusCode,
+          contentType: resposta.headers['content-type']?.join(','),
+          body: resposta.data == null ? null : utf8.encode(resposta.data!),
+        );
+      }
 
       if (resposta.statusCode == 302) {
         final String? urlFinal = _urlDeRedirect(resposta);
@@ -336,6 +356,11 @@ class SessaoPortal {
         );
         _registrarStatus('loginRedirectHttp', pos.statusCode);
         if (pos.statusCode != 200) {
+          _registrarAssinaturaResposta(
+            status: pos.statusCode,
+            contentType: pos.headers['content-type']?.join(','),
+            body: pos.data == null ? null : utf8.encode(pos.data!),
+          );
           _incrementarDiagnostico('loginRedirectRespostaInesperada');
           _logger.e('Login Lumis: redirect final HTTP ${pos.statusCode}.');
           return const ResultadoLogin.falha(
@@ -343,14 +368,15 @@ class SessaoPortal {
           );
         }
         final bool paginaAutenticada = (pos.data ?? '').toLowerCase().contains(
-          'logout',
-        );
+              'logout',
+            );
         _codigoPrestador = code;
         _autenticada = paginaAutenticada;
         if (_autenticada) _geracao++;
         final int quantidadeCookies = (await _cookieJar.loadForRequest(
           Uri.parse(_urlLogin),
-        )).length;
+        ))
+            .length;
         _logger.i(
           'Login Lumis: redirect concluido | '
           'pagina autenticada: $_autenticada | '
@@ -380,7 +406,8 @@ class SessaoPortal {
       }
       final int quantidadeCookies = (await _cookieJar.loadForRequest(
         Uri.parse(_urlLogin),
-      )).length;
+      ))
+          .length;
       _logger.i(
         'Login Lumis: HTTP ${resposta.statusCode} | '
         'pagina autenticada: $_autenticada | '
@@ -593,6 +620,18 @@ class SessaoPortal {
       _registrarStatus('ajaxHttp', resposta.statusCode);
       _registrarContentTypeAjax(resposta.headers['content-type']);
 
+      if (resposta.statusCode == 200 &&
+          (resposta.headers['content-type'] ?? const <String>[])
+              .join(',')
+              .toLowerCase()
+              .startsWith('text/html')) {
+        _registrarAssinaturaResposta(
+          status: resposta.statusCode,
+          contentType: resposta.headers['content-type']?.join(','),
+          body: resposta.data,
+        );
+      }
+
       if (resposta.statusCode != 200) {
         return _falhaHttp<Map<String, dynamic>>(resposta.statusCode);
       }
@@ -624,6 +663,37 @@ class SessaoPortal {
         categoria: CategoriaFalhaConsultaPortal.respostaInesperada,
         status: null,
       );
+    }
+  }
+
+  void _registrarAssinaturaResposta({
+    required int? status,
+    required String? contentType,
+    required List<int>? body,
+  }) {
+    final AssinaturaRespostaPortal assinatura = _assinaturas.coletar(
+      status: status,
+      contentType: contentType,
+      body: body,
+    );
+    _incrementarDiagnostico('assinaturaResposta');
+    if (assinatura.bodySha256 != null) {
+      _incrementarDiagnostico('assinaturaBodyComHash');
+    }
+    if (assinatura.title != null) {
+      _incrementarDiagnostico('assinaturaComTitle');
+    }
+    if (assinatura.f5Rejected) {
+      _incrementarDiagnostico('assinaturaF5Rejected');
+    }
+    if (assinatura.hasRejectedMarker) {
+      _incrementarDiagnostico('assinaturaF5MarkerRejected');
+    }
+    if (assinatura.hasSupportIdMarker) {
+      _incrementarDiagnostico('assinaturaF5MarkerSupportId');
+    }
+    if (assinatura.supportId != null) {
+      _incrementarDiagnostico('assinaturaComSupportId');
     }
   }
 
@@ -825,19 +895,20 @@ class SessaoPortal {
       categoria: ehFalhaDeSessaoPortal(status)
           ? CategoriaFalhaConsultaPortal.sessao
           : _ehFalhaTransporte(erro)
-          ? CategoriaFalhaConsultaPortal.transporte
-          : CategoriaFalhaConsultaPortal.http,
+              ? CategoriaFalhaConsultaPortal.transporte
+              : CategoriaFalhaConsultaPortal.http,
       status: status,
     );
   }
 
   bool _ehFalhaTransporte(DioException erro) => switch (erro.type) {
-    DioExceptionType.connectionTimeout ||
-    DioExceptionType.sendTimeout ||
-    DioExceptionType.receiveTimeout ||
-    DioExceptionType.connectionError => true,
-    _ => false,
-  };
+        DioExceptionType.connectionTimeout ||
+        DioExceptionType.sendTimeout ||
+        DioExceptionType.receiveTimeout ||
+        DioExceptionType.connectionError =>
+          true,
+        _ => false,
+      };
 
   String _decodificarCorpo(List<int> bytes) {
     try {
@@ -885,13 +956,13 @@ class _SemaforoRequisicoes {
   final List<Completer<void>> _espera = <Completer<void>>[];
 
   Map<String, int> get diagnostico => <String, int>{
-    'limite': limite,
-    'ativasAgora': _ativas,
-    'picoAtivas': _picoAtivas,
-    'aguardandoAgora': _espera.length,
-    'picoAguardando': _picoEspera,
-    'totalAguardas': _totalEspera,
-  };
+        'limite': limite,
+        'ativasAgora': _ativas,
+        'picoAtivas': _picoAtivas,
+        'aguardandoAgora': _espera.length,
+        'picoAguardando': _picoEspera,
+        'totalAguardas': _totalEspera,
+      };
 
   Future<T> executar<T>(
     Future<T> Function() operacao, {
