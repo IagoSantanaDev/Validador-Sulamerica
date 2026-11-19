@@ -4,6 +4,23 @@ import 'package:test/test.dart';
 import '../tool/simular_carga.dart';
 
 void main() {
+  test('um cliente com 200 consultas conclui sem rejeicoes', () async {
+    final Map<String, Object> report = await executarCarga(
+      dividirIdentificadores: false,
+      clientes: 1,
+      itensPorCliente: 200,
+      latencia: const Duration(milliseconds: 2),
+    );
+
+    expect(report['clientes'], 1);
+    expect(report['itensPorCliente'], 200);
+    expect(report['concluidos'], 1);
+    expect(report['rejeicoes429'], 0);
+    expect((report['duracaoMs'] as Map)['p50'], greaterThanOrEqualTo(0));
+    expect((report['duracaoMs'] as Map)['p95'], greaterThanOrEqualTo(0));
+    expect(report['rssMb'], greaterThan(0));
+  });
+
   for (final bool dividirIdentificadores in [false, true]) {
     test(
       '12 clientes com 300 consultas concluem '
