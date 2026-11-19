@@ -154,7 +154,7 @@ class _ClienteMatriz {
         .cast<List<int>>()
         .transform(utf8.decoder)
         .join()
-        .timeout(const Duration(minutes: 3));
+        .timeout(const Duration(minutes: 10));
     return extrairEventosSse(corpo);
   }
 
