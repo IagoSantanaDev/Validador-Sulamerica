@@ -433,6 +433,9 @@ class ValidadorApi {
 
   Future<Response> _status(Request request) async {
     final Map<String, dynamic> alcancePortal = await _alcancePortal();
+    final bool exporSupportIds = (_ambiente ??
+            Platform.environment)['PORTAL_ASSINATURAS_SUPPORT_IDS_ATIVAS'] ==
+        'true';
     return respostaJson(<String, dynamic>{
       'status': 'ok',
       'sessoesAtivas': _pool.sessoesAtivas,
@@ -445,6 +448,8 @@ class ValidadorApi {
       'rateLimit': <String, int>{'rejeicoes429': _rejeicoes429},
       'falhasPortal': <String, int>{'502': _falhas502, '503': _falhas503},
       'diagnosticoSessaoPortal': _pool.diagnosticoSessaoPortal,
+      if (exporSupportIds)
+        'supportIdsRespostaPortal': _pool.supportIdsRespostaPortal,
       'concorrenciaPortal': <String, int>{
         ...SessaoPortal.diagnosticoConcorrencia,
         ..._pool.diagnosticoConcorrenciaPortal,
