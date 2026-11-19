@@ -428,6 +428,7 @@ class SessaoPortal {
     } on DioException catch (erro) {
       final int? status = erro.response?.statusCode;
       if (status != null) _registrarStatus('loginDioHttp', status);
+      _registrarAssinaturaDio(erro);
       _incrementarDiagnostico(
         _ehFalhaTransporte(erro)
             ? 'loginDioFalhaTransporte'
@@ -527,7 +528,14 @@ class SessaoPortal {
           ),
           cancelToken: cancelToken,
         );
-        if (pos.statusCode != 200) return _falhaHttp<String>(pos.statusCode);
+        if (pos.statusCode != 200) {
+          _registrarAssinaturaResposta(
+            status: pos.statusCode,
+            contentType: pos.headers['content-type']?.join(','),
+            body: pos.data == null ? null : utf8.encode(pos.data!),
+          );
+          return _falhaHttp<String>(pos.statusCode);
+        }
         return ResultadoConsultaPortal<String>.sucesso(
           dados: pos.data ?? '',
           status: pos.statusCode,
@@ -535,6 +543,11 @@ class SessaoPortal {
       }
 
       if (resposta.statusCode != 200) {
+        _registrarAssinaturaResposta(
+          status: resposta.statusCode,
+          contentType: resposta.headers['content-type']?.join(','),
+          body: resposta.data == null ? null : utf8.encode(resposta.data!),
+        );
         return _falhaHttp<String>(resposta.statusCode);
       }
       return ResultadoConsultaPortal<String>.sucesso(
@@ -633,6 +646,11 @@ class SessaoPortal {
       }
 
       if (resposta.statusCode != 200) {
+        _registrarAssinaturaResposta(
+          status: resposta.statusCode,
+          contentType: resposta.headers['content-type']?.join(','),
+          body: resposta.data,
+        );
         return _falhaHttp<Map<String, dynamic>>(resposta.statusCode);
       }
 
@@ -695,6 +713,22 @@ class SessaoPortal {
     if (assinatura.supportId != null) {
       _incrementarDiagnostico('assinaturaComSupportId');
     }
+  }
+
+  void _registrarAssinaturaDio(DioException erro) {
+    final Response<dynamic>? resposta = erro.response;
+    if (resposta == null) return;
+    final Object? corpo = resposta.data;
+    final List<int>? bytes = switch (corpo) {
+      String texto => utf8.encode(texto),
+      List<int> conteudo => conteudo,
+      _ => null,
+    };
+    _registrarAssinaturaResposta(
+      status: resposta.statusCode,
+      contentType: resposta.headers['content-type']?.join(','),
+      body: bytes,
+    );
   }
 
   Future<ResultadoConsultaPortal<T>> _consultarComRecuperacao<T>(
@@ -891,6 +925,7 @@ class SessaoPortal {
       );
     }
     final int? status = erro.response?.statusCode;
+    _registrarAssinaturaDio(erro);
     return ResultadoConsultaPortal<T>.falha(
       categoria: ehFalhaDeSessaoPortal(status)
           ? CategoriaFalhaConsultaPortal.sessao

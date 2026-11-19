@@ -68,7 +68,13 @@ void main() {
       if (request.method == 'POST' &&
           request.uri.queryParameters['lumPageId'] == _idConsulta) {
         consultas++;
-        return _resposta('rate limited', 429);
+        return ResponseBody.fromString(
+          '<html><title>Rejected</title>Support ID ABC12345</html>',
+          429,
+          headers: <String, List<String>>{
+            'content-type': <String>['text/html; charset=utf-8'],
+          },
+        );
       }
       if (request.uri.path == '/prestador/') {
         return _resposta('<html>logout</html>', 200);
@@ -88,6 +94,13 @@ void main() {
     expect(resultado.sucesso, isFalse);
     expect(resultado.status, 429);
     expect(resultado.categoria, CategoriaFalhaConsultaPortal.http);
+    expect(sessao.diagnosticoSessao['assinaturaResposta'], 1);
+    expect(sessao.diagnosticoSessao['assinaturaF5Rejected'], 1);
+    expect(sessao.diagnosticoSessao['assinaturaF5MarkerSupportId'], 1);
+    expect(
+      jsonEncode(sessao.diagnosticoSessao),
+      isNot(contains('ABC12345')),
+    );
     await sessao.encerrar();
   });
 
@@ -138,6 +151,53 @@ void main() {
     expect(
       jsonEncode(sessao.diagnosticoSessao),
       isNot(contains('block page')),
+    );
+    await sessao.encerrar();
+  });
+
+  test('assina AJAX HTTP nao-200 com HTML sem guardar o corpo', () async {
+    final _AdapterTeste adapter = _AdapterTeste((RequestOptions request) async {
+      if (request.method == 'POST' &&
+          request.uri.queryParameters['lumPageId'] == _idLogin) {
+        return _resposta(
+          '',
+          302,
+          headers: <String, List<String>>{
+            'location': <String>['/prestador/'],
+          },
+        );
+      }
+      if (request.uri.path == '/prestador/') {
+        return _resposta('<html>logout</html>', 200);
+      }
+      if (request.uri.path == '/ajax-controller.jsp') {
+        return ResponseBody.fromString(
+          '<html><title>Rejected</title>Support ID ABC12345</html>',
+          502,
+          headers: <String, List<String>>{
+            'content-type': <String>['text/html'],
+          },
+        );
+      }
+      return _resposta('<html>formulario</html>', 200);
+    });
+    final SessaoPortal sessao = SessaoPortal(
+      dio: Dio()..httpClientAdapter = adapter,
+      logger: Logger(output: const _LogMudo(), level: Level.off),
+    );
+    await _login(sessao);
+
+    final ResultadoConsultaPortal<Map<String, dynamic>> resultado =
+        await sessao.consultarSenha(senha: '5000000000');
+
+    expect(resultado.status, 502);
+    expect(resultado.categoria, CategoriaFalhaConsultaPortal.http);
+    expect(sessao.diagnosticoSessao['assinaturaResposta'], 1);
+    expect(sessao.diagnosticoSessao['assinaturaF5Rejected'], 1);
+    expect(sessao.diagnosticoSessao['assinaturaF5MarkerSupportId'], 1);
+    expect(
+      jsonEncode(sessao.diagnosticoSessao),
+      isNot(contains('ABC12345')),
     );
     await sessao.encerrar();
   });
