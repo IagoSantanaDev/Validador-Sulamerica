@@ -115,6 +115,25 @@ decidir qual variável adicional se quer testar.
   serviços responderam 200, com disjuntor fechado e sem lotes ativos/em fila.
   Não houve HTTP 429/502 nos quatro retestes. O `/api/status` local terminou
   com 8 falhas upstream 503 agregadas; no Render, zero.
+- Reteste adicional em 2026-11-20, a pedido, com o arquivo desidentificado
+  `521358.xml` (107 consultas únicas extraídas; 72 de elegibilidade e 35 de
+  senha), repetidas em ciclo para formar os lotes:
+  - Render, 6 × 200: 1.199 sucessos, 1 falha e nenhum item sem resultado;
+    duração 209,9 s.
+  - Render, 12 × 200: 1.778 sucessos, 2 falhas e 620 itens sem resultado;
+    duração 304,3 s; os 12 lotes ficaram parciais.
+  - Local, 6 × 200: 1.200/1.200 sucessos, sem falhas ou itens sem resultado;
+    duração 161,0 s.
+  - Local, 12 × 200: 2.311 sucessos, 4 falhas e 85 itens sem resultado;
+    duração 302,0 s; 1 lote concluído e 11 parciais.
+  - As falhas recebidas foram reportadas pelo harness como “Falha na consulta
+    ao portal SulAmerica”, sem status HTTP associado; a causa permanece
+    indeterminada. Nenhum cenário registrou HTTP 429 ou 502.
+  - Após os testes, `/api/status` respondeu `ok` em ambos os ambientes, sem
+    lotes ativos ou em fila e com o disjuntor fechado. O local reportou 9
+    retries do agendador iniciados e resolvidos, nenhum esgotado, e zero
+    falhas upstream 502 e 9 falhas upstream 503; Render reportou os três
+    contadores de retry e as falhas upstream 502/503 em zero.
 - Naquelas execuções 12 × 200, `resilienciaPortal.retriesTransitorios*`
   permaneceu zero. Como o backend desativa o retry interno da `SessaoPortal` e
   delega as tentativas ao agendador, esses valores históricos não mediam a
