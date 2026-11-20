@@ -89,7 +89,9 @@ conta rejeições 401/403 antes e depois da renovação, renovações bem-sucedi
 falhas por motivo e exceções internas. Também registra status HTTP por etapa do
 login, redirect sem `Location`, login sem indicador de sessão, status da chamada
 AJAX, classe do `Content-Type` e resultado do parse JSON. `concorrenciaPortal`
-mostra limites e picos do semáforo global e do pool. Contadores de sessões
+mostra limites e picos do semáforo de requisições e do pool. O objeto
+`concorrenciaPortal.logins` publica `limite`, `ativasAgora`, `picoAtivas`,
+`aguardandoAgora`, `picoAguardando` e `totalAguardas`. Contadores de sessões
 descartadas após falha inicial de login são preservados. Métricas agregam em
 memória e zeram quando o processo reinicia. Não inclui corpo de resposta,
 cookies, tokens, identificadores nem dados de consulta.
@@ -99,6 +101,8 @@ cookies, tokens, identificadores nem dados de consulta.
 - Uma instância, com estado apenas em memória; reinício encerra sessões e lotes.
 - Até 4 sessões do portal por identificador e no máximo 8 no processo.
 - Até 24 execuções na fila e em processamento; a 25ª é rejeitada.
+- Até 2 logins simultâneos no processo por padrão; configure
+  `PORTAL_LOGIN_MAX_CONCORRENCIA` entre 1 e 16.
 - Até 16 requisições simultâneas ao portal.
 - Elegibilidade serial por sessão; até 3 consultas de senha concorrentes por
   sessão.
@@ -117,6 +121,8 @@ repetidas automaticamente. Rejeições HTTP não são tratadas como falhas de re
 Configure `PORTAL_RETRY_MAX_TENTATIVAS` (padrão 3),
 `PORTAL_RETRY_BACKOFF_BASE_MS` (1000), `PORTAL_RETRY_BACKOFF_MAX_MS` (20000) e
 `PORTAL_RETRY_JITTER_PERCENT` (30) no ambiente do backend.
+`GET /api/status` publica os valores efetivos em `resilienciaPortal.retryConfiguracao`
+e os contadores de retries iniciados, resolvidos e esgotados.
 
 Em 401 na submissão ou no SSE, o frontend cria uma sessão uma vez; na submissão,
 mantém a mesma chave idempotente, e no SSE, o último id recebido. Na criação de
@@ -167,3 +173,13 @@ Windows, os dois cenários concluíram 12 lotes sem 429 e mediram RSS de
 61,6–67,7 MB. `ProcessInfo.currentRss` depende da plataforma, portanto esse
 resultado não certifica o RSS no Linux/Render. Não há SLA numérico de duração
 antes de medir o comportamento observado no portal real.
+
+O cenário E2 conecta diretamente ao portal, sem passar pelo pool da API. Ele
+exige `PORTAL_PRESTADOR_ID_<CNPJ>_{CODE,USER,SENHA}` no ambiente do processo.
+Para cada braço (2 e 4 logins), consulta a primeira sessão antes e depois dos
+logins adicionais, sem renovação automática durante a sonda; assim 401/403 da
+sessão original ficam observáveis. O relatório não inclui carteiras ou senhas.
+
+```powershell
+dart run tool/matriz_carga.dart --xml "caminho/arquivo.xml" --cenario e2
+```
