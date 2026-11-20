@@ -7,6 +7,7 @@ enum EstadoExecucaoLote {
   naFila,
   processando,
   concluido,
+  parcial,
   falhou,
   cancelado,
 }
@@ -119,6 +120,24 @@ class ExecucaoLote {
     _emitir('resultado', <String, dynamic>{
       'status': 'ok',
       'resultados': resultados,
+    });
+    _encerrarAssinantes();
+  }
+
+  void concluirParcial({
+    required List<Map<String, dynamic>> resultados,
+    required List<Map<String, String>> pendentes,
+  }) {
+    if (!ativo) return;
+    _finalizar();
+    _resultados
+      ..clear()
+      ..addAll(resultados);
+    _estado = EstadoExecucaoLote.parcial;
+    _emitir('resultado', <String, dynamic>{
+      'status': 'parcial',
+      'resultados': resultados,
+      'pendentes': pendentes,
     });
     _encerrarAssinantes();
   }

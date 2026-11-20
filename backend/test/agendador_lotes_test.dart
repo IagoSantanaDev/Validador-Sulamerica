@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:dio/dio.dart';
 import 'package:logger/logger.dart';
 import 'package:test/test.dart';
 import 'package:validador_backend/modules/sulamerica/data/agendador_lotes.dart';
 import 'package:validador_backend/modules/sulamerica/data/credenciais_portal.dart';
+import 'package:validador_backend/modules/sulamerica/data/disjuntor_portal.dart';
 import 'package:validador_backend/modules/sulamerica/data/pool_sessoes_portal.dart';
 import 'package:validador_backend/modules/sulamerica/data/sessao_portal.dart';
 
@@ -67,7 +69,9 @@ void main() {
       executarConsulta: (sessao, consulta, cancelToken) async {
         iniciadas.add(consulta['lote'] as String);
         await gate.future;
-        return <String, dynamic>{'sucesso': true};
+        return const ResultadoConsultaAgendada(
+          dados: <String, dynamic>{'sucesso': true},
+        );
       },
       limiteGlobal: 3,
     );
@@ -106,7 +110,9 @@ void main() {
       executarConsulta: (sessao, consulta, cancelToken) async {
         tokens.add(cancelToken);
         await gate.future;
-        return <String, dynamic>{'sucesso': true};
+        return const ResultadoConsultaAgendada(
+          dados: <String, dynamic>{'sucesso': true},
+        );
       },
     );
     final ExecucaoAgendada primeira = _agendar(agendador, 'teste', 'one');
@@ -137,7 +143,9 @@ void main() {
       pool: pool,
       executarConsulta: (sessao, consulta, cancelToken) async {
         await gate.future;
-        return <String, dynamic>{'sucesso': true};
+        return const ResultadoConsultaAgendada(
+          dados: <String, dynamic>{'sucesso': true},
+        );
       },
     );
     final List<ExecucaoAgendada> aceitas = <ExecucaoAgendada>[
@@ -171,7 +179,9 @@ void main() {
           iniciadas.add(consulta['lote'] as String);
           await primeirasConsultas.future;
         }
-        return <String, dynamic>{'sucesso': true};
+        return const ResultadoConsultaAgendada(
+          dados: <String, dynamic>{'sucesso': true},
+        );
       },
     );
     final List<ExecucaoAgendada> execucoes = <ExecucaoAgendada>[
@@ -229,7 +239,9 @@ void main() {
         if (ativas > maximo) maximo = ativas;
         await gate.future;
         ativas--;
-        return <String, dynamic>{'sucesso': true};
+        return const ResultadoConsultaAgendada(
+          dados: <String, dynamic>{'sucesso': true},
+        );
       },
     );
     final List<ExecucaoAgendada> aceitas = <ExecucaoAgendada>[
@@ -246,6 +258,151 @@ void main() {
       execucao.execucao.descartar();
     }
   });
+
+  test(
+    'repete falhas transitórias até quatro tentativas e marca pendência',
+    () async {
+      final PoolSessoesPortal pool = PoolSessoesPortal(
+        fabricaSessao: (_) => _SessaoFake(),
+      );
+      await pool.garantirAutenticada('teste', _credenciais());
+      int tentativas = 0;
+      final List<Duration> esperas = <Duration>[];
+      final AgendadorLotes agendador = AgendadorLotes(
+        pool: pool,
+        executarConsulta: (sessao, consulta, cancelToken) async {
+          tentativas++;
+          return const ResultadoConsultaAgendada(
+            dados: <String, dynamic>{
+              'tipo': 'senha',
+              'chave': '5000000000',
+              'sucesso': false,
+              'erro': 'Falha de rede.',
+            },
+            retryable: true,
+          );
+        },
+        aguardar: (Duration duracao) async => esperas.add(duracao),
+      );
+      final ExecucaoAgendada execucao = _agendar(agendador, 'teste', 'retry');
+      final Completer<String> resultadoSse = Completer<String>();
+      final subscription = execucao.execucao.assinar().listen((bytes) {
+        final String texto = utf8.decode(bytes);
+        if (texto.contains('event: resultado')) resultadoSse.complete(texto);
+      });
+      addTearDown(subscription.cancel);
+
+      final String evento = await resultadoSse.future;
+      await _aguardar(() => agendador.ativas == 0);
+
+      expect(tentativas, 4);
+      expect(esperas, hasLength(3));
+      expect(evento, contains('"status":"parcial"'));
+      expect(evento, contains('"motivo":"tentativas_esgotadas"'));
+    },
+  );
+
+  test(
+    'prazo corta novos itens e finaliza parcialmente após chamadas ativas',
+    () async {
+      final PoolSessoesPortal pool = PoolSessoesPortal(
+        fabricaSessao: (_) => _SessaoFake(),
+      );
+      await pool.garantirAutenticada('teste', _credenciais());
+      final Completer<void> primeiraConsulta = Completer<void>();
+      final Completer<String> resultadoSse = Completer<String>();
+      final List<String> iniciadas = <String>[];
+      final AgendadorLotes agendador = AgendadorLotes(
+        pool: pool,
+        limiteGlobal: 1,
+        limiteTempoLote: const Duration(milliseconds: 30),
+        executarConsulta: (sessao, consulta, cancelToken) async {
+          iniciadas.add(consulta['chave'] as String);
+          if (iniciadas.length == 1) await primeiraConsulta.future;
+          return const ResultadoConsultaAgendada(
+            dados: <String, dynamic>{'sucesso': true},
+          );
+        },
+      );
+      final ExecucaoAgendada execucao = agendador.agendar(
+        identificadorPrestador: 'teste',
+        tokenDono: 'token-prazo',
+        credenciais: _credenciais(),
+        consultas: <Map<String, dynamic>>[
+          <String, dynamic>{'tipo': 'senha', 'chave': '5000000000'},
+          <String, dynamic>{'tipo': 'senha', 'chave': '5000000001'},
+        ],
+        aoFinalizar: () {},
+      );
+      final subscription = execucao.execucao.assinar().listen((bytes) {
+        final String texto = utf8.decode(bytes);
+        if (texto.contains('event: resultado')) resultadoSse.complete(texto);
+      });
+      addTearDown(subscription.cancel);
+      await _aguardar(() => iniciadas.isNotEmpty);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      primeiraConsulta.complete();
+
+      final String evento = await resultadoSse.future;
+      await _aguardar(() => agendador.ativas == 0);
+
+      expect(iniciadas, ['5000000000']);
+      expect(evento, contains('"status":"parcial"'));
+      expect(evento, contains('"chave":"5000000001"'));
+      expect(evento, contains('"motivo":"prazo_5_minutos"'));
+    },
+  );
+
+  test(
+    'itens ainda não iniciados aguardam breaker e viram pendentes no prazo',
+    () async {
+      final DisjuntorPortal disjuntor = DisjuntorPortal(
+        sondarPortal: () async => const ResultadoSondaDisjuntor(status: 200),
+      );
+      for (int i = 0; i < 5; i++) {
+        disjuntor.registrar(ResultadoDisjuntorPortal.falhaElegivel);
+      }
+      int sessoesCriadas = 0;
+      final PoolSessoesPortal pool = PoolSessoesPortal(
+        fabricaSessao: (_) {
+          sessoesCriadas++;
+          return _SessaoFake();
+        },
+      );
+      final AgendadorLotes agendador = AgendadorLotes(
+        pool: pool,
+        disjuntor: disjuntor,
+        limiteTempoLote: const Duration(milliseconds: 25),
+        executarConsulta: (sessao, consulta, cancelToken) async =>
+            const ResultadoConsultaAgendada(
+              dados: <String, dynamic>{'sucesso': true},
+            ),
+      );
+      final ExecucaoAgendada execucao = agendador.agendar(
+        identificadorPrestador: 'teste',
+        tokenDono: 'token-pausado',
+        credenciais: _credenciais(),
+        consultas: <Map<String, dynamic>>[
+          <String, dynamic>{'tipo': 'senha', 'chave': '5000000000'},
+        ],
+        aoFinalizar: () {},
+      );
+      final Completer<String> resultadoSse = Completer<String>();
+      final subscription = execucao.execucao.assinar().listen((bytes) {
+        final String texto = utf8.decode(bytes);
+        if (texto.contains('event: resultado')) {
+          resultadoSse.complete(texto);
+        }
+      });
+      addTearDown(subscription.cancel);
+
+      final String evento = await resultadoSse.future;
+      await _aguardar(() => agendador.ativas == 0);
+      expect(sessoesCriadas, 0);
+      expect(evento, contains('"status":"parcial"'));
+      expect(evento, contains('"motivo":"prazo_5_minutos"'));
+    },
+  );
 }
 
 ExecucaoAgendada _agendar(

@@ -27,19 +27,30 @@ class ResultadoLogin {
   const ResultadoLogin.autenticado()
     : autenticada = true,
       motivo = null,
-      detalhe = null;
+      detalhe = null,
+      falhaElegivelCircuito = false;
 
-  const ResultadoLogin.falha(this.motivo, {this.detalhe}) : autenticada = false;
+  const ResultadoLogin.falha(
+    this.motivo, {
+    this.detalhe,
+    this.falhaElegivelCircuito = false,
+  }) : autenticada = false;
 
   final bool autenticada;
   final MotivoFalhaLogin? motivo;
 
   final String? detalhe;
+  final bool falhaElegivelCircuito;
 }
 
 class SessaoPortal {
-  SessaoPortal({Dio? dio, CookieJar? cookieJar, Logger? logger})
-    : _dio = dio ?? Dio(),
+  SessaoPortal({
+    Dio? dio,
+    CookieJar? cookieJar,
+    Logger? logger,
+    bool repetirFalhasTransitorias = true,
+  }) : _repetirFalhasTransitorias = repetirFalhasTransitorias,
+       _dio = dio ?? Dio(),
       _cookieJar = cookieJar ?? CookieJar(),
       _logger = logger ?? Logger() {
     _dio.options = _dio.options.copyWith(
@@ -161,6 +172,7 @@ class SessaoPortal {
   final Dio _dio;
   final CookieJar _cookieJar;
   final Logger _logger;
+  final bool _repetirFalhasTransitorias;
   static final SemaforoRequisicoes _semaforoGlobal =
       SemaforoRequisicoes(16);
   static final SemaforoRequisicoes _semaforoLogins =
@@ -225,6 +237,11 @@ class SessaoPortal {
     'backoffMaxMs': _maxBackoffMs,
     'jitterPercent': _jitterPercent,
   };
+
+  static int get retriesTransitorios => _maxRetriesFalhaTransitoria;
+
+  static Duration esperaRetryTransitorio(int tentativa) =>
+      _backoffFalhaTransitoria(tentativa);
 
   List<Map<String, dynamic>> get supportIdsRespostaPortal =>
       _assinaturas.supportIdsRecentes;
@@ -360,7 +377,7 @@ class SessaoPortal {
       if (pagina.statusCode != 200) {
         _registrarStatus('loginGetHttp', pagina.statusCode);
         _incrementarDiagnostico('loginGetRespostaInesperada');
-        _registrarAssinaturaResposta(
+        final bool rejeicaoF5 = _registrarAssinaturaResposta(
           status: pagina.statusCode,
           contentType: pagina.headers['content-type']?.join(','),
           body: pagina.data == null ? null : utf8.encode(pagina.data!),
@@ -369,7 +386,11 @@ class SessaoPortal {
           'GET inicial do login retornou HTTP ${pagina.statusCode} '
           '(possivel bloqueio do F5 ASM).',
         );
-        return const ResultadoLogin.falha(MotivoFalhaLogin.respostaInesperada);
+        return ResultadoLogin.falha(
+          MotivoFalhaLogin.respostaInesperada,
+          falhaElegivelCircuito:
+              _falhaElegivelCircuito(pagina.statusCode) && !rejeicaoF5,
+        );
       }
       _registrarStatus('loginGetHttp', pagina.statusCode);
 
@@ -419,15 +440,17 @@ class SessaoPortal {
         );
         _registrarStatus('loginRedirectHttp', pos.statusCode);
         if (pos.statusCode != 200) {
-          _registrarAssinaturaResposta(
+          final bool rejeicaoF5 = _registrarAssinaturaResposta(
             status: pos.statusCode,
             contentType: pos.headers['content-type']?.join(','),
             body: pos.data == null ? null : utf8.encode(pos.data!),
           );
           _incrementarDiagnostico('loginRedirectRespostaInesperada');
           _logger.e('Login Lumis: redirect final HTTP ${pos.statusCode}.');
-          return const ResultadoLogin.falha(
+          return ResultadoLogin.falha(
             MotivoFalhaLogin.respostaInesperada,
+            falhaElegivelCircuito:
+                _falhaElegivelCircuito(pos.statusCode) && !rejeicaoF5,
           );
         }
         final bool paginaAutenticada = (pos.data ?? '').toLowerCase().contains(
@@ -457,7 +480,10 @@ class SessaoPortal {
       if (resposta.statusCode != 200) {
         _incrementarDiagnostico('loginPostRespostaInesperada');
         _logger.e('Login Lumis retornou HTTP ${resposta.statusCode}.');
-        return const ResultadoLogin.falha(MotivoFalhaLogin.respostaInesperada);
+        return ResultadoLogin.falha(
+          MotivoFalhaLogin.respostaInesperada,
+          falhaElegivelCircuito: _falhaElegivelCircuito(resposta.statusCode),
+        );
       }
 
       final String corpo = resposta.data ?? '';
@@ -491,6 +517,10 @@ class SessaoPortal {
       if (status != null) _registrarStatus('loginDioHttp', status);
       final bool rejeicaoF5 = _registrarAssinaturaDio(erro);
       final bool falhaTransporte = _ehFalhaTransporte(erro) && !rejeicaoF5;
+      final bool falhaElegivel =
+          !rejeicaoF5 &&
+          ((status == null && falhaTransporte) ||
+              _falhaElegivelCircuito(status));
       _incrementarDiagnostico(
         falhaTransporte
             ? 'loginDioFalhaTransporte'
@@ -506,6 +536,7 @@ class SessaoPortal {
             ? MotivoFalhaLogin.falhaRede
             : MotivoFalhaLogin.respostaInesperada,
         detalhe: _detalheDioException(erro),
+        falhaElegivelCircuito: falhaElegivel,
       );
     }
   }
@@ -607,6 +638,7 @@ class SessaoPortal {
           return _falhaHttp<String>(
             pos.statusCode,
             retryable: _statusTransitorio(pos.statusCode) && !rejeicaoF5,
+            rejeicaoF5: rejeicaoF5,
           );
         }
         return ResultadoConsultaPortal<String>.sucesso(
@@ -624,6 +656,7 @@ class SessaoPortal {
         return _falhaHttp<String>(
           resposta.statusCode,
           retryable: _statusTransitorio(resposta.statusCode) && !rejeicaoF5,
+          rejeicaoF5: rejeicaoF5,
         );
       }
       return ResultadoConsultaPortal<String>.sucesso(
@@ -858,11 +891,14 @@ class SessaoPortal {
             return ResultadoConsultaPortal<T>.falha(
               categoria: CategoriaFalhaConsultaPortal.sessao,
               status: resultado.status,
+              retryable: login.falhaElegivelCircuito,
+              falhaElegivelCircuito: login.falhaElegivelCircuito,
             );
           }
           continue;
         }
-        if (_ehFalhaTransitoria(resultado) &&
+        if (_repetirFalhasTransitorias &&
+            _ehFalhaTransitoria(resultado) &&
             retriesFalhaTransitoria < _maxRetriesFalhaTransitoria) {
           retriesFalhaTransitoria++;
           _retriesTransitoriosIniciados++;
@@ -871,7 +907,7 @@ class SessaoPortal {
           );
           continue;
         }
-        if (_ehFalhaTransitoria(resultado)) {
+        if (_repetirFalhasTransitorias && _ehFalhaTransitoria(resultado)) {
           _retriesTransitoriosEsgotados++;
         }
         return resultado;
@@ -890,10 +926,13 @@ class SessaoPortal {
     _ => false,
   };
 
+  bool _falhaElegivelCircuito(int? status) =>
+      status == 502 || status == 503 || status == 504;
+
   bool _assinaturaFalhaRetryable(int? status, bool rejeicaoF5) =>
       _statusTransitorio(status) && !rejeicaoF5;
 
-  Duration _backoffFalhaTransitoria(int tentativa) {
+  static Duration _backoffFalhaTransitoria(int tentativa) {
     final int base = min(
       _maxBackoffMs,
       _baseBackoffMs * (1 << (tentativa - 1)),
@@ -1027,6 +1066,7 @@ class SessaoPortal {
   ResultadoConsultaPortal<T> _falhaHttp<T>(
     int? status, {
     bool retryable = false,
+    bool rejeicaoF5 = false,
   }) {
     return ResultadoConsultaPortal<T>.falha(
       categoria: ehFalhaDeSessaoPortal(status)
@@ -1034,6 +1074,8 @@ class SessaoPortal {
           : CategoriaFalhaConsultaPortal.http,
       status: status,
       retryable: retryable,
+      falhaElegivelCircuito:
+          !rejeicaoF5 && _falhaElegivelCircuito(status),
     );
   }
 
@@ -1061,6 +1103,9 @@ class SessaoPortal {
           (transporte
               ? status == null || _statusTransitorio(status)
               : _assinaturaFalhaRetryable(status, false)),
+      falhaElegivelCircuito:
+          !rejeicaoF5 &&
+          ((status == null && transporte) || _falhaElegivelCircuito(status)),
     );
   }
 

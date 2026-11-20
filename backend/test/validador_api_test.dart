@@ -5,6 +5,7 @@ import 'package:dio/dio.dart' show CancelToken;
 import 'package:logger/logger.dart';
 import 'package:shelf/shelf.dart';
 import 'package:test/test.dart';
+import 'package:validador_backend/modules/sulamerica/data/disjuntor_portal.dart';
 import 'package:validador_backend/modules/sulamerica/data/repositorio_sessoes.dart';
 import 'package:validador_backend/modules/sulamerica/data/resultado_consulta_portal.dart';
 import 'package:validador_backend/modules/sulamerica/data/sessao_portal.dart';
@@ -121,6 +122,7 @@ _ContextoApi _criarApi({
   RepositorioSessoes? repositorio,
   ResultadoLogin? loginResult,
   ResultadoConsultaPortal<String>? beneficiaryResult,
+  DisjuntorPortal? disjuntor,
   Map<String, String> ambiente = _ambiente,
   List<Map<String, dynamic>> supportIds = const <Map<String, dynamic>>[],
 }) {
@@ -141,6 +143,7 @@ _ContextoApi _criarApi({
     },
     sondaPortal: () async => 200,
     repositorio: repositorio,
+    disjuntor: disjuntor,
     limiteRequisicoesPorChave: limitePorChave,
     limiteRequisicoesGlobal: limiteGlobal,
     limiteExecucoes: limiteExecucoes,
@@ -214,6 +217,45 @@ void main() {
       },
     );
 
+    test('retorna 503 com Retry-After enquanto o circuito está aberto', () async {
+      DateTime agora = DateTime.utc(2026);
+      int sondas = 0;
+      final DisjuntorPortal disjuntor = DisjuntorPortal(
+        sondarPortal: () async {
+          sondas++;
+          return const ResultadoSondaDisjuntor(status: 200);
+        },
+        agora: () => agora,
+      );
+      for (int i = 0; i < 5; i++) {
+        disjuntor.registrar(ResultadoDisjuntorPortal.falhaElegivel);
+      }
+      final _ContextoApi contexto = _criarApi(disjuntor: disjuntor);
+
+      final Response aberta = await contexto.api.handler(
+        _request(
+          'POST',
+          '/api/sessoes',
+          body: const <String, String>{'identificadorPrestador': 'teste'},
+        ),
+      );
+      expect(aberta.statusCode, 503);
+      expect(aberta.headers['retry-after'], '60');
+      expect(contexto.sessoes, isEmpty);
+
+      agora = agora.add(const Duration(seconds: 60));
+      final Response recuperada = await contexto.api.handler(
+        _request(
+          'POST',
+          '/api/sessoes',
+          body: const <String, String>{'identificadorPrestador': 'teste'},
+        ),
+      );
+      expect(recuperada.statusCode, 201);
+      expect(sondas, 1);
+      expect(disjuntor.estado, EstadoDisjuntorPortal.fechado);
+    });
+
     test(
       'valida identificador e responde 401 quando não há credenciais',
       () async {
@@ -234,6 +276,39 @@ void main() {
         expect(invalida.statusCode, 400);
         expect(desconhecida.statusCode, 401);
         expect(contexto.sessoes, isEmpty);
+      },
+    );
+
+    test(
+      'reutilização de sessão autenticada não limpa falhas do disjuntor',
+      () async {
+        final DisjuntorPortal disjuntor = DisjuntorPortal(
+          sondarPortal: () async =>
+              const ResultadoSondaDisjuntor(status: 200),
+        );
+        final _ContextoApi contexto = _criarApi(disjuntor: disjuntor);
+        await _criarSessao(contexto.api);
+        for (int i = 0; i < 4; i++) {
+          disjuntor.registrar(ResultadoDisjuntorPortal.falhaElegivel);
+        }
+
+        final Response reutilizada = await contexto.api.handler(
+          _request(
+            'POST',
+            '/api/sessoes',
+            body: const <String, String>{'identificadorPrestador': 'teste'},
+          ),
+        );
+        final Response status = await contexto.api.handler(
+          Request('GET', Uri.parse('http://localhost/api/status')),
+        );
+        final Map<String, dynamic> dados =
+            jsonDecode(await status.readAsString()) as Map<String, dynamic>;
+        final Map<String, dynamic> circuito =
+            dados['disjuntorPortal'] as Map<String, dynamic>;
+
+        expect(reutilizada.statusCode, 201);
+        expect(circuito['falhasConsecutivas'], 4);
       },
     );
 
@@ -333,6 +408,60 @@ void main() {
   });
 
   group('POST /api/lotes', () {
+    test(
+      'rejeita novo lote com 503 e Retry-After quando o circuito abre',
+      () async {
+        final DisjuntorPortal disjuntor = DisjuntorPortal(
+          sondarPortal: () async =>
+              const ResultadoSondaDisjuntor(status: 200),
+        );
+        final _ContextoApi contexto = _criarApi(disjuntor: disjuntor);
+        final String token = await _criarSessao(contexto.api);
+        for (int i = 0; i < 5; i++) {
+          disjuntor.registrar(ResultadoDisjuntorPortal.falhaElegivel);
+        }
+
+        final Response resposta = await _criarLote(
+          contexto.api,
+          token,
+          'lote-enquanto-aberto',
+        );
+
+        expect(resposta.statusCode, 503);
+        expect(resposta.headers['retry-after'], '60');
+      },
+    );
+
+    test('replay idempotente continua disponível com o circuito aberto', () async {
+      final DisjuntorPortal disjuntor = DisjuntorPortal(
+        sondarPortal: () async =>
+            const ResultadoSondaDisjuntor(status: 200),
+      );
+      final _ContextoApi contexto = _criarApi(disjuntor: disjuntor);
+      final String token = await _criarSessao(contexto.api);
+      final Response original = await _criarLote(
+        contexto.api,
+        token,
+        'chave-replay',
+      );
+      final String id =
+          (jsonDecode(await original.readAsString()) as Map)['id'] as String;
+      for (int i = 0; i < 5; i++) {
+        disjuntor.registrar(ResultadoDisjuntorPortal.falhaElegivel);
+      }
+
+      final Response repetida = await _criarLote(
+        contexto.api,
+        token,
+        'chave-replay',
+      );
+      final Map<String, dynamic> corpo =
+          jsonDecode(await repetida.readAsString()) as Map<String, dynamic>;
+      expect(repetida.statusCode, 202);
+      expect(corpo['id'], id);
+      contexto.gate.complete();
+    });
+
     test('valida o payload antes de exigir Bearer', () async {
       final _ContextoApi contexto = _criarApi();
       final Response resposta = await contexto.api.handler(
@@ -608,6 +737,11 @@ void main() {
         expect(resposta.statusCode, 200);
         expect(dados['sessoesAtivas'], 1);
         expect(dados['lotes'], containsPair('ativos', 0));
+        expect(dados['lotes'], containsPair('parciais', 0));
+        expect(
+          dados['disjuntorPortal'],
+          containsPair('estado', 'fechado'),
+        );
         expect(dados['memoriaRssMb'], isA<int>());
         expect(dados['rateLimit'], containsPair('rejeicoes429', 0));
         expect(dados['falhasPortal'], containsPair('502', 0));

@@ -23,11 +23,14 @@ class PoolSessoesPortal {
     Logger? logger,
     SessaoPortal Function(Logger logger)? fabricaSessao,
     this.limitePorIdentificador = 4,
+    bool repetirFalhasTransitorias = true,
   }) : _logger = logger ?? Logger(),
-       _fabricaSessao = fabricaSessao ?? _fabricaPadrao;
-
-  static SessaoPortal _fabricaPadrao(Logger logger) =>
-      SessaoPortal(logger: logger);
+       _fabricaSessao =
+           fabricaSessao ??
+           ((Logger logger) => SessaoPortal(
+             logger: logger,
+             repetirFalhasTransitorias: repetirFalhasTransitorias,
+           ));
 
   final Logger _logger;
   final SessaoPortal Function(Logger logger) _fabricaSessao;
@@ -43,6 +46,12 @@ class PoolSessoesPortal {
     0,
     (int total, _PoolPrestador pool) => total + pool.sessoes.length,
   );
+
+  bool possuiSessaoAutenticada(String identificador) =>
+      _porIdentificador[identificador]?.sessoes.any(
+        (_SessaoGerenciada sessao) => sessao.sessao.autenticada,
+      ) ??
+      false;
 
   Map<String, int> get diagnosticoSessaoPortal {
     final Map<String, int> total = Map<String, int>.of(

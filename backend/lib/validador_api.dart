@@ -11,7 +11,9 @@ import 'package:validador_backend/http/json.dart';
 import 'package:validador_backend/http/rate_limit.dart';
 import 'package:validador_backend/http/sse.dart';
 import 'package:validador_backend/modules/sulamerica/data/agendador_lotes.dart';
+import 'package:validador_backend/modules/sulamerica/data/assinatura_resposta_portal.dart';
 import 'package:validador_backend/modules/sulamerica/data/credenciais_portal.dart';
+import 'package:validador_backend/modules/sulamerica/data/disjuntor_portal.dart';
 import 'package:validador_backend/modules/sulamerica/data/execucao_lote.dart';
 import 'package:validador_backend/modules/sulamerica/data/pool_sessoes_portal.dart';
 import 'package:validador_backend/modules/sulamerica/data/repositorio_sessoes.dart';
@@ -29,9 +31,11 @@ class ValidadorApi {
     Map<String, String>? ambiente,
     SessaoPortal Function(Logger logger)? fabricaSessao,
     Future<int> Function()? sondaPortal,
+    Future<ResultadoSondaDisjuntor> Function()? sondaDisjuntor,
     Duration janelaCacheAlcance = const Duration(seconds: 10),
     RepositorioSessoes? repositorio,
     RateLimit? rateLimit,
+    DisjuntorPortal? disjuntor,
     int limiteSessoesLogicas = 200,
     int limiteRequisicoesPorChave = 20,
     int limiteRequisicoesGlobal = 120,
@@ -48,12 +52,30 @@ class ValidadorApi {
              limitePorChave: limiteRequisicoesPorChave,
              limiteGlobal: limiteRequisicoesGlobal,
            ) {
-    _pool = PoolSessoesPortal(logger: _logger, fabricaSessao: fabricaSessao);
+    _pool = PoolSessoesPortal(
+      logger: _logger,
+      fabricaSessao: fabricaSessao,
+      repetirFalhasTransitorias: false,
+    );
+    final Future<int> Function()? sondaPortalPersonalizada = sondaPortal;
+    _disjuntor =
+        disjuntor ??
+        DisjuntorPortal(
+          sondarPortal:
+              sondaDisjuntor ??
+              (sondaPortalPersonalizada == null
+                  ? _sondarPortalDisjuntorPadrao
+                  : () async => ResultadoSondaDisjuntor(
+                      status: await sondaPortalPersonalizada(),
+                    )),
+        );
     _agendador = AgendadorLotes(
       pool: _pool,
       limiteExecucoes: limiteExecucoes,
       executarConsulta: _executarConsultaPortal,
+      mapearFalhaSessao: _mapearFalhaSessaoLote,
       validarConsulta: _validarFormatoConsulta,
+      disjuntor: _disjuntor,
     );
   }
 
@@ -65,6 +87,7 @@ class ValidadorApi {
   final RateLimit _rateLimit;
   late final PoolSessoesPortal _pool;
   late final AgendadorLotes _agendador;
+  late final DisjuntorPortal _disjuntor;
 
   static const int _maxItensPorLote = 300;
   static const int _maxBytesCorpo = 1 << 20;
@@ -131,23 +154,52 @@ class ValidadorApi {
       );
     }
 
+    final PermissaoDisjuntorPortal? permissao = await _disjuntor
+        .tentarAdquirir();
+    if (permissao == null) return _respostaDisjuntorAberto();
+
     late final SessaoLogica sessaoLogica;
     try {
       sessaoLogica = _repositorio.criar(identificador);
     } on RepositorioSessoesCheioException {
+      permissao.concluir(ResultadoDisjuntorPortal.neutra);
       _rejeicoes429++;
       return respostaErro('Limite de sessoes ativas atingido.', 429);
     }
 
     try {
+      final bool sessaoJaAutenticada = _pool.possuiSessaoAutenticada(
+        identificador,
+      );
       await _pool.garantirAutenticada(identificador, credenciais);
+      permissao.concluir(
+        sessaoJaAutenticada
+            ? ResultadoDisjuntorPortal.neutra
+            : ResultadoDisjuntorPortal.sucesso,
+      );
     } on FalhaPoolSessoesException catch (erro) {
+      permissao.concluir(
+        erro.resultado.falhaElegivelCircuito
+            ? ResultadoDisjuntorPortal.falhaElegivel
+            : ResultadoDisjuntorPortal.neutra,
+      );
       _repositorio.remover(sessaoLogica.token);
       final int status = _statusFalhaLogin(erro.resultado);
       _contarFalhaUpstream(status);
       _logger.w('Criacao de sessao rejeitada: falha no login do portal.');
-      return respostaErro(_mensagemFalhaLogin(status), status);
+      return respostaErro(
+        _mensagemFalhaLogin(status),
+        status,
+        headers: status == 503
+            ? cabecalhosRetryAfter(
+                _disjuntor.retryAfterSegundos == 0
+                    ? 1
+                    : _disjuntor.retryAfterSegundos,
+              )
+            : null,
+      );
     } on Exception {
+      permissao.concluir(ResultadoDisjuntorPortal.neutra);
       _repositorio.remover(sessaoLogica.token);
       _logger.e('Falha interna ao criar sessao logica.');
       return respostaErro(_mensagemFalhaLogin(500), 500);
@@ -222,6 +274,11 @@ class ValidadorApi {
       return _respostaLote(anterior.id!, execucao, consultas.length);
     }
 
+    final PermissaoDisjuntorPortal? permissao = await _disjuntor
+        .tentarAdquirir();
+    if (permissao == null) return _respostaDisjuntorAberto();
+    permissao.concluir(ResultadoDisjuntorPortal.neutra);
+
     final CredenciaisPortal? credenciais = CredenciaisPortal.resolver(
       sessaoLogica.identificadorPrestador,
       ambiente: _ambiente,
@@ -269,6 +326,7 @@ class ValidadorApi {
       EstadoExecucaoLote.naFila => 'na_fila',
       EstadoExecucaoLote.processando => 'processando',
       EstadoExecucaoLote.concluido => 'concluido',
+      EstadoExecucaoLote.parcial => 'parcial',
       EstadoExecucaoLote.falhou => 'falhou',
       EstadoExecucaoLote.cancelado => 'cancelado',
     };
@@ -316,7 +374,7 @@ class ValidadorApi {
     );
   }
 
-  Future<Map<String, dynamic>> _executarConsultaPortal(
+  Future<ResultadoConsultaAgendada> _executarConsultaPortal(
     SessaoPortal sessao,
     Map<String, dynamic> consulta,
     CancelToken cancelToken,
@@ -325,9 +383,11 @@ class ValidadorApi {
     final String chave = consulta['chave'] as String;
     if (tipo == 'elegibilidade') {
       if (!_carteiraValida(chave)) {
-        return _falhaItem(
-          consulta,
-          'Carteira deve conter exatamente 20 digitos.',
+        return ResultadoConsultaAgendada(
+          dados: _falhaItem(
+            consulta,
+            'Carteira deve conter exatamente 20 digitos.',
+          ),
         );
       }
       final ResultadoConsultaPortal<String> resposta = await sessao
@@ -337,9 +397,13 @@ class ValidadorApi {
           );
       if (!resposta.sucesso) {
         _contarFalhaConsulta(resposta);
-        return _falhaItem(
-          consulta,
-          _mensagemFalhaConsulta(resposta.categoria, resposta.status),
+        return ResultadoConsultaAgendada(
+          dados: _falhaItem(
+            consulta,
+            _mensagemFalhaConsulta(resposta.categoria, resposta.status),
+          ),
+          retryable: resposta.retryable,
+          falhaElegivelCircuito: resposta.falhaElegivelCircuito,
         );
       }
       final String html = resposta.dados!;
@@ -347,38 +411,63 @@ class ValidadorApi {
       if (elegivel == null) {
         _logger.w('Elegibilidade sem indicador no portal.');
       }
-      return <String, dynamic>{
-        ...consulta,
-        'sucesso': true,
-        'elegivel': elegivel,
-        'rotuloElegibilidade': extrairRotuloElegibilidade(html),
-      };
+      return ResultadoConsultaAgendada(
+        dados: <String, dynamic>{
+          ...consulta,
+          'sucesso': true,
+          'elegivel': elegivel,
+          'rotuloElegibilidade': extrairRotuloElegibilidade(html),
+        },
+      );
     }
 
     if (tipo == 'senha') {
       if (!_senhaValida(chave)) {
-        return _falhaItem(
-          consulta,
-          'Senha invalida: deve ter exatamente 10 digitos comecando com 5.',
+        return ResultadoConsultaAgendada(
+          dados: _falhaItem(
+            consulta,
+            'Senha invalida: deve ter exatamente 10 digitos comecando com 5.',
+          ),
         );
       }
       final ResultadoConsultaPortal<Map<String, dynamic>> resposta =
           await sessao.consultarSenha(senha: chave, cancelToken: cancelToken);
       if (!resposta.sucesso) {
         _contarFalhaConsulta(resposta);
-        return _falhaItem(
-          consulta,
-          _mensagemFalhaConsulta(resposta.categoria, resposta.status),
+        return ResultadoConsultaAgendada(
+          dados: _falhaItem(
+            consulta,
+            _mensagemFalhaConsulta(resposta.categoria, resposta.status),
+          ),
+          retryable: resposta.retryable,
+          falhaElegivelCircuito: resposta.falhaElegivelCircuito,
         );
       }
-      return <String, dynamic>{
-        ...consulta,
-        'sucesso': true,
-        'statusSenha': _extrairStatusSenha(resposta.dados!),
-      };
+      return ResultadoConsultaAgendada(
+        dados: <String, dynamic>{
+          ...consulta,
+          'sucesso': true,
+          'statusSenha': _extrairStatusSenha(resposta.dados!),
+        },
+      );
     }
 
-    return _falhaItem(consulta, 'Tipo de consulta desconhecido.');
+    return ResultadoConsultaAgendada(
+      dados: _falhaItem(consulta, 'Tipo de consulta desconhecido.'),
+    );
+  }
+
+  ResultadoConsultaAgendada _mapearFalhaSessaoLote(
+    Map<String, dynamic> consulta,
+    ResultadoLogin login,
+  ) {
+    final int status = _statusFalhaLogin(login);
+    _contarFalhaUpstream(status);
+    return ResultadoConsultaAgendada(
+      dados: _falhaItem(consulta, _mensagemFalhaLogin(status)),
+      retryable: login.falhaElegivelCircuito,
+      falhaElegivelCircuito: login.falhaElegivelCircuito,
+    );
   }
 
   Map<String, dynamic>? _validarFormatoConsulta(Map<String, dynamic> consulta) {
@@ -453,9 +542,11 @@ class ValidadorApi {
         'ativos': _agendador.ativas,
         'naFila': _agendador.naFila,
         'concluidos': _agendador.concluidos,
+        'parciais': _agendador.parciais,
       },
       'memoriaRssMb': (ProcessInfo.currentRss / (1024 * 1024)).round(),
       'rateLimit': <String, int>{'rejeicoes429': _rejeicoes429},
+      'disjuntorPortal': _disjuntor.diagnostico,
       'falhasPortal': <String, int>{'502': _falhas502, '503': _falhas503},
       'diagnosticoSessaoPortal': diagnosticoSessao,
       'resilienciaPortal': <String, Object>{
@@ -533,9 +624,55 @@ class ValidadorApi {
     }
   }
 
+  static Future<ResultadoSondaDisjuntor> _sondarPortalDisjuntorPadrao() async {
+    final HttpClient http = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 10);
+    try {
+      final HttpClientRequest requisicao = await http
+          .getUrl(Uri.parse('https://saude.sulamericaseguros.com.br/'))
+          .timeout(const Duration(seconds: 10));
+      final HttpClientResponse resposta = await requisicao.close().timeout(
+        const Duration(seconds: 10),
+      );
+      final List<int> corpo = await _lerCorpoSonda(resposta)
+          .timeout(const Duration(seconds: 10));
+      final assinatura =
+          ColetorAssinaturasRespostaPortal(supportIdsHabilitados: false)
+              .coletar(
+                status: resposta.statusCode,
+                contentType: resposta.headers.contentType?.mimeType,
+                body: corpo,
+              );
+      return ResultadoSondaDisjuntor(
+        status: resposta.statusCode,
+        rejeicaoF5: assinatura.f5Rejected,
+      );
+    } on Exception {
+      return const ResultadoSondaDisjuntor(status: null, falhaTransporte: true);
+    } finally {
+      http.close(force: true);
+    }
+  }
+
+  static Future<List<int>> _lerCorpoSonda(HttpClientResponse resposta) async {
+    const int limiteBytes = 65536;
+    final List<int> corpo = <int>[];
+    await for (final List<int> parte in resposta) {
+      corpo.addAll(parte.take(limiteBytes - corpo.length));
+      if (corpo.length >= limiteBytes) break;
+    }
+    return corpo;
+  }
+
   Response _erroCorpoGrande() => respostaErro(
     'Corpo excede o limite de ${_maxBytesCorpo ~/ (1 << 20)} MB.',
     413,
+  );
+
+  Response _respostaDisjuntorAberto() => respostaErro(
+    'Portal SulAmerica temporariamente indisponivel.',
+    503,
+    headers: cabecalhosRetryAfter(_disjuntor.retryAfterSegundos),
   );
 
   List<Map<String, dynamic>>? _validarConsultas(Object? valor) {
