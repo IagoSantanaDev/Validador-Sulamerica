@@ -339,7 +339,10 @@ class ValidadorApi {
           );
       if (!resposta.sucesso) {
         _contarFalhaConsulta(resposta);
-        return _falhaItem(consulta, _mensagemFalhaConsulta(resposta.categoria));
+        return _falhaItem(
+          consulta,
+          _mensagemFalhaConsulta(resposta.categoria, resposta.status),
+        );
       }
       final String html = resposta.dados!;
       final bool? elegivel = extrairElegivel(html);
@@ -365,7 +368,10 @@ class ValidadorApi {
           await sessao.consultarSenha(senha: chave, cancelToken: cancelToken);
       if (!resposta.sucesso) {
         _contarFalhaConsulta(resposta);
-        return _falhaItem(consulta, _mensagemFalhaConsulta(resposta.categoria));
+        return _falhaItem(
+          consulta,
+          _mensagemFalhaConsulta(resposta.categoria, resposta.status),
+        );
       }
       return <String, dynamic>{
         ...consulta,
@@ -406,14 +412,18 @@ class ValidadorApi {
     String mensagem,
   ) => <String, dynamic>{...consulta, 'sucesso': false, 'erro': mensagem};
 
-  String _mensagemFalhaConsulta(CategoriaFalhaConsultaPortal? categoria) =>
+  String _mensagemFalhaConsulta(
+    CategoriaFalhaConsultaPortal? categoria,
+    int? status,
+  ) =>
       switch (categoria) {
         CategoriaFalhaConsultaPortal.sessao => 'Sessao do portal indisponivel.',
         CategoriaFalhaConsultaPortal.transporte =>
           'Falha de rede ao acessar o portal SulAmerica.',
         CategoriaFalhaConsultaPortal.cancelada => 'Consulta cancelada.',
-        CategoriaFalhaConsultaPortal.http =>
-          'Falha na consulta ao portal SulAmerica.',
+        CategoriaFalhaConsultaPortal.http => status == null
+            ? 'Falha na consulta ao portal SulAmerica.'
+            : 'Falha na consulta ao portal SulAmerica (HTTP $status).',
         CategoriaFalhaConsultaPortal.respostaInesperada ||
         null => 'Resposta inesperada do portal SulAmerica.',
       };

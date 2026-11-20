@@ -31,11 +31,17 @@ class _LogMudo implements LogOutput {
 }
 
 class _SessaoFake extends SessaoPortal {
-  _SessaoFake({this.gate, this.loginResult, this.supportIds = const []})
+  _SessaoFake({
+    this.gate,
+    this.loginResult,
+    this.beneficiaryResult,
+    this.supportIds = const [],
+  })
     : super(logger: Logger(level: Level.off));
 
   final Completer<void>? gate;
   final ResultadoLogin? loginResult;
+  final ResultadoConsultaPortal<String>? beneficiaryResult;
   final List<Map<String, dynamic>> supportIds;
   bool _autenticada = false;
   int logins = 0;
@@ -75,10 +81,11 @@ class _SessaoFake extends SessaoPortal {
     consultas++;
     tokensCancelamento.add(cancelToken);
     await gate?.future;
-    return const ResultadoConsultaPortal<String>.sucesso(
-      dados: '<html>elegivel</html>',
-      status: 200,
-    );
+    return beneficiaryResult ??
+        const ResultadoConsultaPortal<String>.sucesso(
+          dados: '<html>elegivel</html>',
+          status: 200,
+        );
   }
 
   @override
@@ -113,6 +120,7 @@ _ContextoApi _criarApi({
   int limiteExecucoes = 24,
   RepositorioSessoes? repositorio,
   ResultadoLogin? loginResult,
+  ResultadoConsultaPortal<String>? beneficiaryResult,
   Map<String, String> ambiente = _ambiente,
   List<Map<String, dynamic>> supportIds = const <Map<String, dynamic>>[],
 }) {
@@ -125,6 +133,7 @@ _ContextoApi _criarApi({
       final _SessaoFake sessao = _SessaoFake(
         gate: gate,
         loginResult: loginResult,
+        beneficiaryResult: beneficiaryResult,
         supportIds: supportIds,
       );
       sessoes.add(sessao);
@@ -471,6 +480,46 @@ void main() {
   });
 
   group('SSE e ownership', () {
+    test('resultado HTTP inclui status sem expor chave da consulta', () async {
+      final _ContextoApi contexto = _criarApi(
+        beneficiaryResult: const ResultadoConsultaPortal<String>.falha(
+          categoria: CategoriaFalhaConsultaPortal.http,
+          status: 429,
+        ),
+      );
+      final String token = await _criarSessao(contexto.api);
+      final Response lote = await _criarLote(
+        contexto.api,
+        token,
+        'http-status',
+      );
+      final String id =
+          (jsonDecode(await lote.readAsString()) as Map)['id'] as String;
+      final Response eventos = await contexto.api.handler(
+        _request('GET', '/api/lotes/$id/eventos', token: token),
+      );
+      final Future<String> corpo = eventos.readAsString();
+      contexto.gate.complete();
+      final String sse = await corpo.timeout(const Duration(seconds: 2));
+      final String blocoResultado = sse
+          .split(RegExp(r'\r?\n\r?\n'))
+          .firstWhere((String bloco) => bloco.contains('event: resultado'));
+      final String dadosResultado = blocoResultado
+          .split(RegExp(r'\r?\n'))
+          .firstWhere((String linha) => linha.startsWith('data:'))
+          .substring(5)
+          .trimLeft();
+      final Map<String, dynamic> payload =
+          jsonDecode(dadosResultado) as Map<String, dynamic>;
+      final List<dynamic> resultados = payload['resultados'] as List<dynamic>;
+      final String erro =
+          (resultados.single as Map<String, dynamic>)['erro'] as String;
+
+      expect(erro, 'Falha na consulta ao portal SulAmerica (HTTP 429).');
+      expect(erro, isNot(contains('12345678901234567890')));
+      await _aguardar(() async => await _ativos(contexto.api) == 0);
+    });
+
     test('outro token não pode abrir eventos do lote', () async {
       final _ContextoApi contexto = _criarApi();
       final String dono = await _criarSessao(contexto.api);
