@@ -36,8 +36,7 @@ class _SessaoFake extends SessaoPortal {
     this.loginResult,
     this.beneficiaryResult,
     this.supportIds = const [],
-  })
-    : super(logger: Logger(level: Level.off));
+  }) : super(logger: Logger(level: Level.off));
 
   final Completer<void>? gate;
   final ResultadoLogin? loginResult;
@@ -77,6 +76,7 @@ class _SessaoFake extends SessaoPortal {
   Future<ResultadoConsultaPortal<String>> consultarBeneficiario({
     required String carteirinhaCompleta,
     CancelToken? cancelToken,
+    bool recuperarFalhaSessao = true,
   }) async {
     consultas++;
     tokensCancelamento.add(cancelToken);
@@ -616,15 +616,31 @@ void main() {
           dados['diagnosticoSessaoPortal'],
           containsPair('rejeicoes401', 0),
         );
+        final Map resiliencia = dados['resilienciaPortal'] as Map;
+        expect(resiliencia['retryConfiguracao'], contains('maxRetries'));
+        expect(resiliencia['retryConfiguracao'], contains('backoffBaseMs'));
+        expect(resiliencia['retryConfiguracao'], contains('backoffMaxMs'));
+        expect(resiliencia['retryConfiguracao'], contains('jitterPercent'));
+        expect(resiliencia['retriesTransitoriosIniciados'], 0);
+        expect(resiliencia['retriesTransitoriosResolvidos'], 0);
+        expect(resiliencia['retriesTransitoriosEsgotados'], 0);
         expect(
           dados['diagnosticoSessaoPortal'],
           containsPair('renovacoesFalhaCredenciaisInvalidas', 0),
         );
-        expect(dados['concorrenciaPortal'], containsPair('limite', 16));
+        final Map concorrencia = dados['concorrenciaPortal'] as Map;
+        expect(concorrencia, containsPair('limite', 16));
         expect(
-          dados['concorrenciaPortal'],
+          concorrencia,
           containsPair('limiteSessoesPorIdentificador', 4),
         );
+        final Map logins = concorrencia['logins'] as Map;
+        expect(logins['limite'], inInclusiveRange(1, 16));
+        expect(logins['ativasAgora'], isA<int>());
+        expect(logins['picoAtivas'], isA<int>());
+        expect(logins['aguardandoAgora'], isA<int>());
+        expect(logins['picoAguardando'], isA<int>());
+        expect(logins['totalAguardas'], isA<int>());
         expect(dados.containsKey('supportIdsRespostaPortal'), isFalse);
         expect(texto, isNot(contains('usuario-teste')));
         expect(texto, isNot(contains('PORTAL_PRESTADOR')));

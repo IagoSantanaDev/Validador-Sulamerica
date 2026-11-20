@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
@@ -24,6 +26,68 @@ class _AdapterFake implements HttpClientAdapter {
   void close({bool force = false}) {}
 }
 
+class _AdapterFalhaF5 implements HttpClientAdapter {
+  int requisicoes = 0;
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async {
+    requisicoes++;
+    throw DioException(
+      requestOptions: options,
+      type: DioExceptionType.connectionError,
+      response: Response<dynamic>(
+        requestOptions: options,
+        statusCode: 503,
+        data: '<html><title>Rejected</title>Support ID ABC12345</html>',
+        headers: Headers.fromMap(<String, List<String>>{
+          'content-type': <String>['text/html; charset=utf-8'],
+        }),
+      ),
+    );
+  }
+
+  @override
+  void close({bool force = false}) {}
+}
+
+class _AdapterLoginBloqueado implements HttpClientAdapter {
+  _AdapterLoginBloqueado(this.liberarGet);
+
+  final Completer<void> liberarGet;
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async {
+    if (options.method == 'GET' && options.uri.path == '/main.jsp') {
+      await liberarGet.future;
+      return ResponseBody.fromString('<html>formulario</html>', 200);
+    }
+    if (options.method == 'POST' && options.uri.path == '/main.jsp') {
+      return ResponseBody.fromString(
+        '',
+        302,
+        headers: <String, List<String>>{
+          'location': <String>['/prestador/'],
+        },
+      );
+    }
+    if (options.method == 'GET' && options.uri.path == '/prestador/') {
+      return ResponseBody.fromString('<html>logout</html>', 200);
+    }
+    return ResponseBody.fromString('sem resposta', 404);
+  }
+
+  @override
+  void close({bool force = false}) {}
+}
+
 void main() {
   group('SessaoPortal - leitura do Location', () {
     test('Location repetido autentica em vez de virar falha de rede', () async {
@@ -34,8 +98,10 @@ void main() {
       final SessaoPortal sessao = SessaoPortal(
         dio: Dio()
           ..httpClientAdapter = _AdapterFake(<String, ResponseBody>{
-            'GET /main.jsp':
-                ResponseBody.fromString('<html>formulario</html>', 200),
+            'GET /main.jsp': ResponseBody.fromString(
+              '<html>formulario</html>',
+              200,
+            ),
             'POST /main.jsp': ResponseBody.fromString(
               '',
               302,
@@ -43,8 +109,10 @@ void main() {
                 'location': <String>['/prestador/', '/redundante/'],
               },
             ),
-            'GET /prestador/':
-                ResponseBody.fromString('<html>logout</html>', 200),
+            'GET /prestador/': ResponseBody.fromString(
+              '<html>logout</html>',
+              200,
+            ),
           }),
       );
 
@@ -67,8 +135,10 @@ void main() {
       final SessaoPortal sessao = SessaoPortal(
         dio: Dio()
           ..httpClientAdapter = _AdapterFake(<String, ResponseBody>{
-            'GET /main.jsp':
-                ResponseBody.fromString('<html>formulario</html>', 200),
+            'GET /main.jsp': ResponseBody.fromString(
+              '<html>formulario</html>',
+              200,
+            ),
             'POST /main.jsp': ResponseBody.fromString('', 302),
           }),
       );
@@ -112,5 +182,67 @@ void main() {
       expect(sessao.diagnosticoSessao['assinaturaResposta'], 1);
       await sessao.encerrar();
     });
+
+    test(
+      'resposta F5 anexada a erro de transporte não vira retry de rede',
+      () async {
+        final _AdapterFalhaF5 adapter = _AdapterFalhaF5();
+        final SessaoPortal sessao = SessaoPortal(
+          dio: Dio()..httpClientAdapter = adapter,
+        );
+
+        final ResultadoLogin resultado = await sessao.login(
+          code: 'codigo',
+          user: 'usuario',
+          senha: 'senha',
+        );
+
+        expect(adapter.requisicoes, 1);
+        expect(resultado.autenticada, isFalse);
+        expect(resultado.motivo, MotivoFalhaLogin.respostaInesperada);
+        expect(sessao.diagnosticoSessao['assinaturaF5Rejected'], 1);
+        await sessao.encerrar();
+      },
+    );
+  });
+
+  test('limita logins globais e publica métricas de fila', () async {
+    final int limite = SessaoPortal.diagnosticoLogins['limite']!;
+    if (Platform.environment['PORTAL_LOGIN_MAX_CONCORRENCIA'] == null) {
+      expect(limite, 2);
+    }
+    final Completer<void> liberarGet = Completer<void>();
+    final List<SessaoPortal> sessoes = List<SessaoPortal>.generate(
+      limite + 1,
+      (_) => SessaoPortal(
+        dio: Dio()..httpClientAdapter = _AdapterLoginBloqueado(liberarGet),
+      ),
+      growable: false,
+    );
+    final List<Future<ResultadoLogin>> logins = sessoes
+        .map(
+          (SessaoPortal sessao) =>
+              sessao.login(code: 'codigo', user: 'usuario', senha: 'senha'),
+        )
+        .toList();
+
+    try {
+      await Future<void>.delayed(Duration.zero);
+      final Map<String, int> diagnostico = SessaoPortal.diagnosticoLogins;
+      expect(diagnostico['ativasAgora'], limite);
+      expect(diagnostico['aguardandoAgora'], 1);
+      expect(diagnostico['picoAtivas'], greaterThanOrEqualTo(limite));
+      expect(diagnostico['picoAguardando'], greaterThanOrEqualTo(1));
+
+      liberarGet.complete();
+      final List<ResultadoLogin> resultados = await Future.wait(logins);
+      expect(resultados.every((ResultadoLogin r) => r.autenticada), isTrue);
+    } finally {
+      if (!liberarGet.isCompleted) liberarGet.complete();
+      await Future.wait(logins);
+      await Future.wait<void>(
+        sessoes.map((SessaoPortal sessao) => sessao.encerrar()),
+      );
+    }
   });
 }

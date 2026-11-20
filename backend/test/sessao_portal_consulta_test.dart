@@ -202,6 +202,157 @@ void main() {
     await sessao.encerrar();
   });
 
+  test('nao repete transporte quando a resposta anexada tem marcador F5',
+      () async {
+    int consultas = 0;
+    final _AdapterTeste adapter = _AdapterTeste((RequestOptions request) async {
+      if (request.method == 'POST' &&
+          request.uri.queryParameters['lumPageId'] == _idLogin) {
+        return _resposta(
+          '',
+          302,
+          headers: <String, List<String>>{
+            'location': <String>['/prestador/'],
+          },
+        );
+      }
+      if (request.uri.path == '/prestador/') {
+        return _resposta('<html>logout</html>', 200);
+      }
+      if (request.method == 'POST' &&
+          request.uri.queryParameters['lumPageId'] == _idConsulta) {
+        consultas++;
+        throw DioException(
+          requestOptions: request,
+          type: DioExceptionType.connectionError,
+          response: Response<dynamic>(
+            requestOptions: request,
+            statusCode: 503,
+            data: '<html><title>Rejected</title>Support ID ABC12345</html>',
+            headers: Headers.fromMap(<String, List<String>>{
+              'content-type': <String>['text/html; charset=utf-8'],
+            }),
+          ),
+        );
+      }
+      return _resposta('<html>formulario</html>', 200);
+    });
+    final SessaoPortal sessao = SessaoPortal(
+      dio: Dio()..httpClientAdapter = adapter,
+      logger: Logger(output: const _LogMudo(), level: Level.off),
+    );
+    await _login(sessao);
+
+    final ResultadoConsultaPortal<String> resultado = await sessao
+        .consultarBeneficiario(carteirinhaCompleta: '12345678901234567890');
+
+    expect(consultas, 1);
+    expect(resultado.sucesso, isFalse);
+    expect(resultado.status, 503);
+    expect(resultado.categoria, CategoriaFalhaConsultaPortal.http);
+    expect(sessao.diagnosticoSessao['assinaturaF5Rejected'], 1);
+    expect(sessao.diagnosticoSessao['retriesTransitoriosIniciados'], 0);
+    await sessao.encerrar();
+  });
+
+  test('repete transporte com HTTP 503 sem marcador F5', () async {
+    int consultas = 0;
+    final _AdapterTeste adapter = _AdapterTeste((RequestOptions request) async {
+      if (request.method == 'POST' &&
+          request.uri.queryParameters['lumPageId'] == _idLogin) {
+        return _resposta(
+          '',
+          302,
+          headers: <String, List<String>>{
+            'location': <String>['/prestador/'],
+          },
+        );
+      }
+      if (request.uri.path == '/prestador/') {
+        return _resposta('<html>logout</html>', 200);
+      }
+      if (request.method == 'POST' &&
+          request.uri.queryParameters['lumPageId'] == _idConsulta) {
+        consultas++;
+        if (consultas == 1) {
+          throw DioException(
+            requestOptions: request,
+            type: DioExceptionType.connectionError,
+            response: Response<dynamic>(
+              requestOptions: request,
+              statusCode: 503,
+              data: 'temporarily unavailable',
+              headers: Headers.fromMap(<String, List<String>>{
+                'content-type': <String>['text/plain'],
+              }),
+            ),
+          );
+        }
+        return _resposta('<html>elegivel</html>', 200);
+      }
+      return _resposta('<html>formulario</html>', 200);
+    });
+    final SessaoPortal sessao = SessaoPortal(
+      dio: Dio()..httpClientAdapter = adapter,
+      logger: Logger(output: const _LogMudo(), level: Level.off),
+    );
+    await _login(sessao);
+
+    final ResultadoConsultaPortal<String> resultado = await sessao
+        .consultarBeneficiario(carteirinhaCompleta: '12345678901234567890');
+
+    expect(consultas, 2);
+    expect(resultado.sucesso, isTrue);
+    expect(sessao.diagnosticoSessao['retriesTransitoriosIniciados'], 1);
+    expect(sessao.diagnosticoSessao['retriesTransitoriosResolvidos'], 1);
+    await sessao.encerrar();
+  });
+
+  test('consulta diagnóstica retorna 401 sem renovar a sessão', () async {
+    int logins = 0;
+    int consultas = 0;
+    final _AdapterTeste adapter = _AdapterTeste((RequestOptions request) async {
+      if (request.method == 'POST' &&
+          request.uri.queryParameters['lumPageId'] == _idLogin) {
+        logins++;
+        return _resposta(
+          '',
+          302,
+          headers: <String, List<String>>{
+            'location': <String>['/prestador/'],
+          },
+        );
+      }
+      if (request.uri.path == '/prestador/') {
+        return _resposta('<html>logout</html>', 200);
+      }
+      if (request.method == 'POST' &&
+          request.uri.queryParameters['lumPageId'] == _idConsulta) {
+        consultas++;
+        return _resposta('expired', 401);
+      }
+      return _resposta('<html>formulario</html>', 200);
+    });
+    final SessaoPortal sessao = SessaoPortal(
+      dio: Dio()..httpClientAdapter = adapter,
+      logger: Logger(output: const _LogMudo(), level: Level.off),
+    );
+    await _login(sessao);
+
+    final ResultadoConsultaPortal<String> resultado =
+        await sessao.consultarBeneficiario(
+      carteirinhaCompleta: '12345678901234567890',
+      recuperarFalhaSessao: false,
+    );
+
+    expect(consultas, 1);
+    expect(logins, 1);
+    expect(resultado.sucesso, isFalse);
+    expect(resultado.status, 401);
+    expect(resultado.categoria, CategoriaFalhaConsultaPortal.sessao);
+    await sessao.encerrar();
+  });
+
   test(
     'timeout de transporte tem um retry e retorna resultado tipado',
     () async {
