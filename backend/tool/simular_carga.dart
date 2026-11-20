@@ -54,6 +54,7 @@ class SessaoPortalFake extends SessaoPortal {
   Future<ResultadoConsultaPortal<String>> consultarBeneficiario({
     required String carteirinhaCompleta,
     CancelToken? cancelToken,
+    bool recuperarFalhaSessao = true,
   }) async {
     await _aguardar(cancelToken);
     return const ResultadoConsultaPortal<String>.sucesso(

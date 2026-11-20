@@ -3,7 +3,11 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
+import 'package:logger/logger.dart';
+import 'package:validador_backend/modules/sulamerica/data/credenciais_portal.dart';
+import 'package:validador_backend/modules/sulamerica/data/sessao_portal.dart';
 
+import 'matriz_e2.dart';
 import 'matriz_dados.dart';
 
 const String _baseUrlPadrao = 'https://validador-api-rw0a.onrender.com';
@@ -42,13 +46,31 @@ Future<void> main(List<String> args) async {
       throw const FormatException('--base-url deve usar http ou https.');
     }
 
-    cliente = _ClienteMatriz(config.baseUrl);
     final Stopwatch duracao = Stopwatch()..start();
-    final List<ResultadoMatriz> resultados = switch (config.cenario) {
-      'e2' => await _executarE2(cliente, config, consultas.first),
-      'e3' => await _executarE3(cliente, config),
-      _ => await _executarMatriz(cliente, config, consultas),
-    };
+    final List<ResultadoMatriz> resultados;
+    if (config.cenario == 'e2') {
+      final CredenciaisPortal? credenciais = CredenciaisPortal.resolver(
+        config.identificador,
+      );
+      if (credenciais == null) {
+        stderr.writeln(
+          'E2 requer PORTAL_PRESTADOR_ID_<CNPJ>_{CODE,USER,SENHA} no ambiente.',
+        );
+        exitCode = 2;
+        return;
+      }
+      resultados = await executarE2Independente(
+        credenciais: credenciais,
+        consulta: consultas.first,
+        fabricaSessao: () => SessaoPortal(logger: Logger(level: Level.off)),
+      );
+    } else {
+      cliente = _ClienteMatriz(config.baseUrl);
+      resultados = switch (config.cenario) {
+        'e3' => await _executarE3(cliente, config),
+        _ => await _executarMatriz(cliente, config, consultas),
+      };
+    }
     duracao.stop();
 
     final String csvPath = opcoes['csv'] ?? _caminhoCsv();
@@ -415,57 +437,6 @@ Future<void> _executarConsultaItem(
   }
 }
 
-Future<List<ResultadoMatriz>> _executarE2(
-  _ClienteMatriz cliente,
-  _ConfigMatriz config,
-  ConsultaMatriz consulta,
-) async {
-  final List<ResultadoMatriz> resultados = <ResultadoMatriz>[];
-  int usuario = 0;
-  for (final int quantidade in <int>[2, 4]) {
-    final _SessaoApi? primeira = await _criarSessaoTeste(
-      cliente,
-      config,
-      ++usuario,
-      'sessao_e2_$quantidade',
-      resultados,
-    );
-    if (primeira == null) continue;
-    final _Pacing pacing = _Pacing(
-      porToken: Duration(milliseconds: config.intervaloItemMs),
-      global: Duration(milliseconds: config.intervaloGlobalMs),
-    );
-    await pacing.aguardar(primeira.token);
-    await _executarConsultaItem(
-      cliente,
-      primeira,
-      consulta,
-      quantidade,
-      'e2_antes_${quantidade}_sessoes',
-      resultados,
-    );
-    for (int i = 1; i < quantidade; i++) {
-      await _criarSessaoTeste(
-        cliente,
-        config,
-        ++usuario,
-        'sessao_e2_$quantidade',
-        resultados,
-      );
-    }
-    await pacing.aguardar(primeira.token);
-    await _executarConsultaItem(
-      cliente,
-      primeira,
-      consulta,
-      quantidade,
-      'e2_depois_${quantidade}_sessoes',
-      resultados,
-    );
-  }
-  return resultados;
-}
-
 Future<List<ResultadoMatriz>> _executarE3(
   _ClienteMatriz cliente,
   _ConfigMatriz config,
@@ -619,11 +590,12 @@ void _imprimirResumo(
   stdout.writeln(
     jsonEncode(<String, Object?>{
       'cenario': config.cenario,
-      'baseUrl': config.baseUrl,
-      'modo': config.modo,
-      'usuarios': config.usuarios,
-      'itensPorUsuario': config.itens,
-      'ritmoSessao': config.ritmoSessao,
+      'baseUrl': config.cenario == 'e2' ? 'portal-direto' : config.baseUrl,
+      'modo': config.cenario == 'e2' ? 'portal-direto' : config.modo,
+      'usuarios': config.cenario == 'e2' ? null : config.usuarios,
+      'itensPorUsuario': config.cenario == 'e2' ? null : config.itens,
+      'ritmoSessao': config.cenario == 'e2' ? 'sequencial' : config.ritmoSessao,
+      if (config.cenario == 'e2') 'sessoesIndependentesTestadas': <int>[2, 4],
       'itensXmlUnicos': consultas.length,
       'elegibilidadeXml': consultas
           .where((ConsultaMatriz item) => item.tipo == 'elegibilidade')
@@ -652,7 +624,7 @@ void _imprimirResumo(
       'csv': csvPath,
       if (config.cenario == 'e2')
         'limitacao':
-            'tokens da API compartilham pool por CNPJ; E2 nao prova logins independentes.',
+            'sessões independentes; consulta não renova automaticamente 401/403.',
       if (config.cenario == 'e3')
         'limitacao':
             'E3 mede POST /api/sessoes; pool pode reutilizar ou coalescer login.',
@@ -748,5 +720,6 @@ Uso: dart run tool/matriz_carga.dart --xml <arquivo.xml> [opcoes]
   --csv <arquivo.csv>    saida; padrao em diretorio temporario
   --help                 ajuda
 CSV e resumo nao incluem carteiras, senhas, tokens ou bodies.
-E2/E3 via API nao garantem logins independentes: pool compartilha sessoes por CNPJ.
+E2 cria sessões independentes e exige credenciais locais PORTAL_PRESTADOR_ID_<CNPJ>_{CODE,USER,SENHA}.
+E3 via API mede POST /api/sessoes; o pool pode compartilhar sessões por CNPJ.
 ''';
