@@ -153,13 +153,10 @@ class ValidadorApi {
       return respostaErro(_mensagemFalhaLogin(500), 500);
     }
 
-    return respostaJson(
-      <String, dynamic>{
-        'token': sessaoLogica.token,
-        'identificadorPrestador': identificador,
-      },
-      status: 201,
-    );
+    return respostaJson(<String, dynamic>{
+      'token': sessaoLogica.token,
+      'identificadorPrestador': identificador,
+    }, status: 201);
   }
 
   Future<Response> _criarLote(Request request) async {
@@ -415,18 +412,18 @@ class ValidadorApi {
   String _mensagemFalhaConsulta(
     CategoriaFalhaConsultaPortal? categoria,
     int? status,
-  ) =>
-      switch (categoria) {
-        CategoriaFalhaConsultaPortal.sessao => 'Sessao do portal indisponivel.',
-        CategoriaFalhaConsultaPortal.transporte =>
-          'Falha de rede ao acessar o portal SulAmerica.',
-        CategoriaFalhaConsultaPortal.cancelada => 'Consulta cancelada.',
-        CategoriaFalhaConsultaPortal.http => status == null
-            ? 'Falha na consulta ao portal SulAmerica.'
-            : 'Falha na consulta ao portal SulAmerica (HTTP $status).',
-        CategoriaFalhaConsultaPortal.respostaInesperada ||
-        null => 'Resposta inesperada do portal SulAmerica.',
-      };
+  ) => switch (categoria) {
+    CategoriaFalhaConsultaPortal.sessao => 'Sessao do portal indisponivel.',
+    CategoriaFalhaConsultaPortal.transporte =>
+      'Falha de rede ao acessar o portal SulAmerica.',
+    CategoriaFalhaConsultaPortal.cancelada => 'Consulta cancelada.',
+    CategoriaFalhaConsultaPortal.http =>
+      status == null
+          ? 'Falha na consulta ao portal SulAmerica.'
+          : 'Falha na consulta ao portal SulAmerica (HTTP $status).',
+    CategoriaFalhaConsultaPortal.respostaInesperada ||
+    null => 'Resposta inesperada do portal SulAmerica.',
+  };
 
   String? _extrairStatusSenha(Map<String, dynamic> dados) {
     final dynamic registros = dados['registros'];
@@ -443,7 +440,9 @@ class ValidadorApi {
 
   Future<Response> _status(Request request) async {
     final Map<String, dynamic> alcancePortal = await _alcancePortal();
-    final bool exporSupportIds = (_ambiente ??
+    final Map<String, int> diagnosticoSessao = _pool.diagnosticoSessaoPortal;
+    final bool exporSupportIds =
+        (_ambiente ??
             Platform.environment)['PORTAL_ASSINATURAS_SUPPORT_IDS_ATIVAS'] ==
         'true';
     return respostaJson(<String, dynamic>{
@@ -457,12 +456,22 @@ class ValidadorApi {
       'memoriaRssMb': (ProcessInfo.currentRss / (1024 * 1024)).round(),
       'rateLimit': <String, int>{'rejeicoes429': _rejeicoes429},
       'falhasPortal': <String, int>{'502': _falhas502, '503': _falhas503},
-      'diagnosticoSessaoPortal': _pool.diagnosticoSessaoPortal,
+      'diagnosticoSessaoPortal': diagnosticoSessao,
+      'resilienciaPortal': <String, Object>{
+        'retryConfiguracao': SessaoPortal.configuracaoRetry,
+        'retriesTransitoriosIniciados':
+            diagnosticoSessao['retriesTransitoriosIniciados'] ?? 0,
+        'retriesTransitoriosResolvidos':
+            diagnosticoSessao['retriesTransitoriosResolvidos'] ?? 0,
+        'retriesTransitoriosEsgotados':
+            diagnosticoSessao['retriesTransitoriosEsgotados'] ?? 0,
+      },
       if (exporSupportIds)
         'supportIdsRespostaPortal': _pool.supportIdsRespostaPortal,
-      'concorrenciaPortal': <String, int>{
+      'concorrenciaPortal': <String, Object>{
         ...SessaoPortal.diagnosticoConcorrencia,
         ..._pool.diagnosticoConcorrenciaPortal,
+        'logins': SessaoPortal.diagnosticoLogins,
       },
       'portalSulAmerica': alcancePortal,
       'timestamp': DateTime.now().toIso8601String(),
