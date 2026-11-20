@@ -103,6 +103,12 @@ List<Map<String, dynamic>> extrairEventosSse(String stream) {
   return eventos;
 }
 
+String? extrairErroResultadoConsulta(Map<String, dynamic>? resultado) {
+  if (resultado?['sucesso'] != false) return null;
+  final Object? erro = resultado?['erro'];
+  return erro is String && erro.isNotEmpty ? erro : 'consulta_falhou';
+}
+
 String codificarCsv(List<ResultadoMatriz> resultados) {
   const List<String> colunas = <String>[
     'usuario',

@@ -294,7 +294,7 @@ Future<void> _executarLote(
           sucesso: item?['sucesso'] as bool?,
           latenciaMs: null,
           statusHttp: 202,
-          erro: item?['sucesso'] == false ? 'consulta_falhou' : null,
+          erro: extrairErroResultadoConsulta(item),
           origem502: null,
         ),
       );
@@ -389,7 +389,9 @@ Future<void> _executarConsultaItem(
             ? (resposta.statusCode == 202
                 ? 'resultado_sse_ausente'
                 : 'http_${resposta.statusCode}')
-            : (sucesso ? null : 'consulta_falhou'),
+            : extrairErroResultadoConsulta(
+                itens is List && itens.isNotEmpty ? _mapa(itens.first) : null,
+              ),
         origem502: resposta.statusCode == 502
             ? resposta.headers.value(_headerOrigem502) ?? 'indeterminada'
             : null,

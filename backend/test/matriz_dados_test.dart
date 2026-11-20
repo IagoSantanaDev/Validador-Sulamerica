@@ -43,6 +43,24 @@ void main() {
     expect((eventos.last['data'] as Map)['status'], 'ok');
   });
 
+  test('preserva erro seguro do item sem fabricar falha em sucesso', () {
+    expect(
+      extrairErroResultadoConsulta(<String, dynamic>{
+        'sucesso': false,
+        'erro': 'Falha de rede ao acessar o portal SulAmerica.',
+      }),
+      'Falha de rede ao acessar o portal SulAmerica.',
+    );
+    expect(
+      extrairErroResultadoConsulta(<String, dynamic>{'sucesso': false}),
+      'consulta_falhou',
+    );
+    expect(
+      extrairErroResultadoConsulta(<String, dynamic>{'sucesso': true}),
+      isNull,
+    );
+  });
+
   test('CSV escapa aspas e não precisa serializar consulta ou token', () {
     final String csv = codificarCsv(<ResultadoMatriz>[
       const ResultadoMatriz(
