@@ -1,7 +1,7 @@
 # Contexto: estabilização do portal SulAmérica
 
-Atualizado em 2026-11-20; T6/T7 implementados, reteste de carga pendente.
-Documento para retomar o trabalho sem depender do histórico do chat.
+Atualizado em 2026-11-20; T6/T7 implementados, T9 executado localmente e no
+Render; 6 × 200 teve 100% de `sucesso` no harness, 12 × 200 foi parcial.
 
 ## Objetivo e critérios
 
@@ -55,8 +55,9 @@ decidir qual variável adicional se quer testar.
   `PORTAL_LOGIN_MAX_CONCORRENCIA` (faixa 1–16); métricas de ativos, pico e fila
   em `concorrenciaPortal.logins`. Limite de 4 sessões por CNPJ permanece igual.
 - Validação desta retomada: `dart analyze` e `flutter analyze` sem achados;
-  suítes completas com 166 testes backend e 164 Flutter passando. Testes usam
-  adapters falsos; carga local integrada ainda pendente.
+  suítes completas com 166 testes backend e 164 Flutter passando. Testes
+  automatizados usam adapters falsos; os retestes integrados estão registrados
+  abaixo.
 - Respostas de transporte com status 408/500/502/503/504 podem ser repetidas,
   assim como transporte sem resposta. HTTP 429 não é repetido. Qualquer
   resposta assinada como F5 não é repetida, inclusive quando vem anexada a um
@@ -76,34 +77,65 @@ decidir qual variável adicional se quer testar.
   `/api/status.lotes.parciais` conta as finalizações parciais.
 - Cliente: 503 é tipado, reaproveita política de 429 (uma repetição para sessão,
   até três para lote com chave idempotente), respeitando `Retry-After` até 60 s.
+- Reteste T9 em 2026-11-20, usando o XML local com 107 consultas distintas
+  (72 carteirinhas e 35 senhas), repetidas em ciclo para completar cada lote:
+  - Carga curta local, 6 × 10: 60/60 com `sucesso: true` em 17,3 s; zero
+    falhas.
+  - Local, 6 × 200: 1.200/1.200 com `sucesso: true` em 157,2 s; seis lotes
+    concluídos, nenhum parcial.
+  - Render, 6 × 200: 1.200/1.200 com `sucesso: true` em 193,6 s; seis lotes
+    concluídos, nenhum parcial. Pelo indicador do harness, o critério
+    prioritário de 100% em até 10 min (meta 5 min) passou nos dois ambientes.
+  - Local, 12 × 200: 2.215 com `sucesso: true`, 2 falhas e 183 itens sem
+    resultado (2.217 resultados recebidos), em 316,7 s; 1 lote concluído e 11
+    parciais.
+  - Render, 12 × 200: 1.804 com `sucesso: true`, 2 falhas e 594 itens sem
+    resultado (1.806 resultados recebidos), em 304,2 s; 12 lotes parciais. O
+    cenário aspiracional não atingiu 100%; o limite de despacho de cinco
+    minutos foi alcançado. As duas falhas reportadas em cada ambiente vieram
+    como falha de consulta no resultado SSE HTTP 202, sem causa específica no
+    harness.
+- Limitação do indicador de sucesso: o harness confere `sucesso`, mas não
+  valida os campos de domínio opcionais `elegivel` e `statusSenha`; esses campos
+  podem ser nulos e não são preservados no CSV. Assim, 100% acima significa
+  100% de respostas marcadas `sucesso: true`, não uma verificação independente
+  de todos os valores de domínio.
+- T5 observado em `/api/status`: limite 2 e pico de 2 logins ativos no backend
+  local e no Render; pico de espera por login zero. Após as cargas, ambos os
+  serviços responderam 200, com disjuntor fechado e sem lotes ativos/em fila.
+  Não houve HTTP 429/502 nos quatro retestes. O `/api/status` local terminou
+  com 8 falhas upstream 503 agregadas; no Render, zero.
+- Lacuna de observabilidade: `resilienciaPortal.retriesTransitorios*` permaneceu
+  zero nas duas execuções 12 × 200. Como o backend desativa o retry interno da
+  `SessaoPortal` e delega as tentativas ao agendador, esses contadores não
+  confirmam nem descartam retries do agendador. Não interpretar zero como
+  ausência de retry; instrumentar retries do agendador antes de usar esses
+  campos para medir T7.
 
 ## Fase 2: o que falta
 
 T6/T7 e a atualização inicial do contrato/documentação estão implementados.
 Ainda faltam:
 
-1. Validar T5 em execução local com `/api/status` e carga curta. O teto por CNPJ
-   continua em 4; E2 sequencial não justifica alterá-lo.
-2. T9: retestar 6 × 200 e 12 × 200 em local e Render após as mitigações; o
-   aceite de 100% ainda não foi atingido.
-3. T10/T11: remover Support IDs de `/api/status`, mantendo contadores agregados,
+1. Instrumentar separadamente retries do agendador em `/api/status`; os
+   contadores atuais de `SessaoPortal` não cobrem essa camada.
+2. T10/T11: remover Support IDs de `/api/status`, mantendo contadores agregados,
    e registrar conclusão/higiene do repositório.
 
 O resultado E2 não sustenta a escolha do ramo de sessão única por conta. É
-razoável prosseguir com limite de múltiplas sessões, mas ainda como mitigação
-controlada: usar defaults configuráveis, expor picos/esperas, fazer teste
-focalizado antes de nova E1 completa e não atribuir causa raiz sem sinais
-convergentes.
+razoável prosseguir com limite de múltiplas sessões como mitigação controlada:
+usar defaults configuráveis, expor picos/esperas e não atribuir causa raiz sem
+sinais convergentes.
 
 ## Próximos passos recomendados
 
-1. Validar breaker e contrato parcial com adapters falsos, depois reiniciar o
-   backend e confirmar o teto e as métricas em
-   `/api/status.concorrenciaPortal.logins`; teste com adapters falsos já cobre o
-   limite e a fila.
-2. Fazer uma carga local curta; se estável, rodar E1 6 × 200 completa local.
-   Comparar com a linha de base, sem repetir a carga Render já registrada até
-   definir a etapa de reteste.
+1. Adicionar métricas de retry no agendador, sem confundi-las com os retries
+   internos de `SessaoPortal`.
+2. Remover Support IDs de `/api/status` conforme T10/T11, preservando somente
+   contadores agregados.
+3. Considerar novo teste 12 × 200 somente após decidir se a meta aspiracional
+   continua sujeita ao limite de cinco minutos ou se o perfil de capacidade
+   deve mudar. O critério prioritário 6 × 200 passou localmente e no Render.
 
 ## Comandos úteis
 
