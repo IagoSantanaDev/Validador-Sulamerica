@@ -1,7 +1,7 @@
 # Contexto: estabilização do portal SulAmérica
 
-Atualizado em 2026-11-20. Documento para retomar o trabalho sem depender do
-histórico do chat.
+Atualizado em 2026-11-20; T6/T7 implementados, reteste de carga pendente.
+Documento para retomar o trabalho sem depender do histórico do chat.
 
 ## Objetivo e critérios
 
@@ -54,9 +54,9 @@ decidir qual variável adicional se quer testar.
 - T5: limite global de 2 logins simultâneos por padrão, configurável por
   `PORTAL_LOGIN_MAX_CONCORRENCIA` (faixa 1–16); métricas de ativos, pico e fila
   em `concorrenciaPortal.logins`. Limite de 4 sessões por CNPJ permanece igual.
-- Validação desta retomada: `dart analyze` sem achados; `dart test` com 152
-  testes passando. O teste de teto usa adapters falsos; carga local integrada
-  ainda pendente.
+- Validação desta retomada: `dart analyze` e `flutter analyze` sem achados;
+  suítes completas com 166 testes backend e 164 Flutter passando. Testes usam
+  adapters falsos; carga local integrada ainda pendente.
 - Respostas de transporte com status 408/500/502/503/504 podem ser repetidas,
   assim como transporte sem resposta. HTTP 429 não é repetido. Qualquer
   resposta assinada como F5 não é repetida, inclusive quando vem anexada a um
@@ -65,22 +65,28 @@ decidir qual variável adicional se quer testar.
   desativar somente a renovação automática de sessão nas sondas; retries de
   transporte continuam habilitados. Requer as variáveis locais
   `PORTAL_PRESTADOR_ID_<CNPJ>_{CODE,USER,SENHA}`.
+- T6 implementado: disjuntor global em memória abre após 5 falhas elegíveis em
+  60 s; cooldown de 60 s, sonda HTTP half-open, 503/Retry-After nas rotas de
+  sessão e lote, com replay idempotente preservado. `/api/status` expõe
+  `disjuntorPortal`.
+- T7 implementado: até quatro tentativas totais por item no agendador; retries
+  aguardam o disjuntor, lote para de iniciar itens aos 5 minutos e finaliza
+  depois das chamadas já em andamento. SSE declara `status: parcial` e lista
+  `pendentes` com motivo; frontend aplica resultados e oferece retry manual.
+  `/api/status.lotes.parciais` conta as finalizações parciais.
+- Cliente: 503 é tipado, reaproveita política de 429 (uma repetição para sessão,
+  até três para lote com chave idempotente), respeitando `Retry-After` até 60 s.
 
 ## Fase 2: o que falta
 
-A implementação atual cobre retries, observabilidade e T5, mas ainda não
-completa a fase 2 do plano. Faltam:
+T6/T7 e a atualização inicial do contrato/documentação estão implementados.
+Ainda faltam:
 
 1. Validar T5 em execução local com `/api/status` e carga curta. O teto por CNPJ
    continua em 4; E2 sequencial não justifica alterá-lo.
-2. T6: circuit breaker global, com estado e cooldown observáveis e resposta
-   `503`/`Retry-After` quando aberto.
-3. T7: retry por item no agendador, pausa do lote enquanto breaker estiver
-   aberto e limite duro de 10 minutos com resultados parciais explícitos.
-4. T8: atualizar contrato e documentação depois de congelar comportamento.
-5. T9: retestar 6 × 200 e 12 × 200 em local e Render após as mitigações; o
+2. T9: retestar 6 × 200 e 12 × 200 em local e Render após as mitigações; o
    aceite de 100% ainda não foi atingido.
-6. T10/T11: remover Support IDs de `/api/status`, mantendo contadores agregados,
+3. T10/T11: remover Support IDs de `/api/status`, mantendo contadores agregados,
    e registrar conclusão/higiene do repositório.
 
 O resultado E2 não sustenta a escolha do ramo de sessão única por conta. É
@@ -91,14 +97,13 @@ convergentes.
 
 ## Próximos passos recomendados
 
-1. Reiniciar o backend com a configuração desejada e confirmar o teto e as
-   métricas em `/api/status.concorrenciaPortal.logins`; teste com adapters
-   falsos já cobre o limite e a fila.
+1. Validar breaker e contrato parcial com adapters falsos, depois reiniciar o
+   backend e confirmar o teto e as métricas em
+   `/api/status.concorrenciaPortal.logins`; teste com adapters falsos já cobre o
+   limite e a fila.
 2. Fazer uma carga local curta; se estável, rodar E1 6 × 200 completa local.
    Comparar com a linha de base, sem repetir a carga Render já registrada até
    definir a etapa de reteste.
-3. Planejar T6/T7 em sequência após revisar os resultados; não iniciar
-   mitigação automática de breaker ou reenvio de itens simultaneamente.
 
 ## Comandos úteis
 

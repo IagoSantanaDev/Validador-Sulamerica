@@ -44,8 +44,9 @@ autenticada no pool.
 - `401`: identificador desconhecido ou credencial recusada.
 - `429`: limite de taxa ou capacidade; somente a rejeição por taxa pode trazer
   `Retry-After`.
-- `500`, `502` ou `503`: falha interna, resposta inesperada ou indisponibilidade
-  do portal, sem detalhe interno.
+- `503`: disjuntor do portal aberto ou sonda de recuperação ainda indisponível;
+  inclui `Retry-After`.
+- `500` ou `502`: falha interna ou resposta inesperada, sem detalhe interno.
 
 ### Criar lote
 
@@ -65,6 +66,9 @@ autenticada no pool.
 `/api/lotes/{id}/eventos`. Repetir a chave com o mesmo payload retorna a
 execução existente; payload diferente retorna `409`. Limite acima de 300 itens
 retorna `413`; capacidade esgotada retorna `429` com `Retry-After: 10`.
+Submissões novas retornam `503` com `Retry-After` enquanto o disjuntor estiver
+aberto ou ocupado pela sonda; um replay idempotente válido continua retornando
+a execução original.
 
 ### Acompanhar execução
 
@@ -79,6 +83,12 @@ aguardando 2, 4 e 8 segundos e retomando do último id recebido. O resultado nã
 `401` indica token inválido; `404` indica lote inexistente, descartado ou de
 outro token. Sem assinantes por 30 segundos, o lote é cancelado. Cancelar uma
 requisição local não garante que o portal interrompa uma operação já recebida.
+O resultado usa `status: "ok"` quando todas as consultas terminaram e
+`status: "parcial"` quando há itens pendentes. Resultados concluídos permanecem
+em `resultados`; `pendentes` informa `tipo`, `chave` e `motivo`. O limite de
+despacho é cinco minutos a partir do enfileiramento: ele impede iniciar novos
+itens, mas chamadas em andamento e seus retries podem terminar depois desse
+limite.
 
 ### Estado do serviço
 
@@ -95,6 +105,12 @@ mostra limites e picos do semáforo de requisições e do pool. O objeto
 descartadas após falha inicial de login são preservados. Métricas agregam em
 memória e zeram quando o processo reinicia. Não inclui corpo de resposta,
 cookies, tokens, identificadores nem dados de consulta.
+`disjuntorPortal` expõe estado, sequência de falhas elegíveis, janela, cooldown
+e `Retry-After`; `lotes.parciais` conta finalizações parciais. O circuito é
+global e em memória: abre após cinco falhas elegíveis consecutivas em 60
+segundos (transporte sem resposta ou HTTP 502/503/504), permanece aberto por 60
+segundos e exige uma sonda HTTP para fechar. HTTP 429, demais 4xx/5xx,
+respostas F5 e falhas de parse não incrementam o contador.
 
 ## Capacidade e execução
 
@@ -115,9 +131,12 @@ O agendador alterna entre identificadores e lotes, seleciona primeiro uma
 sessão autenticada menos ocupada e não abre sessões extras para cada lote.
 Resultados de consulta são tipados por chamada. Uma rejeição de sessão (401/403)
 pode provocar uma renovação compartilhada e uma repetição. Falhas de transporte
-e respostas HTTP 408, 500, 502, 503 ou 504 recebem até três retries com backoff
-exponencial e jitter; 429, 401/403 após renovação e respostas inesperadas não são
-repetidas automaticamente. Rejeições HTTP não são tratadas como falhas de rede.
+e respostas HTTP 408, 500, 502, 503 ou 504 recebem até quatro tentativas totais
+por item no agendador, com backoff exponencial e jitter. Os retries são
+coordenados com o disjuntor; chamadas diretas do harness E2 mantêm o retry
+interno de `SessaoPortal`. HTTP 429, 401/403 após renovação e respostas
+inesperadas não são repetidas automaticamente. Rejeições HTTP não são tratadas
+como falhas de rede.
 Configure `PORTAL_RETRY_MAX_TENTATIVAS` (padrão 3),
 `PORTAL_RETRY_BACKOFF_BASE_MS` (1000), `PORTAL_RETRY_BACKOFF_MAX_MS` (20000) e
 `PORTAL_RETRY_JITTER_PERCENT` (30) no ambiente do backend.
@@ -126,10 +145,10 @@ e os contadores de retries iniciados, resolvidos e esgotados.
 
 Em 401 na submissão ou no SSE, o frontend cria uma sessão uma vez; na submissão,
 mantém a mesma chave idempotente, e no SSE, o último id recebido. Na criação de
-sessão, 429 só é repetido uma vez se houver `Retry-After`. Para criação de lote,
-429 permite até três reenvios com a mesma chave e backoff de 1, 2 e 4 segundos;
-um `Retry-After` substitui a espera correspondente e é limitado a 30 segundos.
-Rejeições HTTP diferentes não são repetidas automaticamente. Falhas de rede
+sessão, 429 e 503 só são repetidos uma vez se houver `Retry-After`. Para criação
+de lote, 429 e 503 permitem até três reenvios com a mesma chave e backoff de 1, 2 e 4
+segundos; um `Retry-After` substitui a espera correspondente e é limitado a 60
+segundos. Rejeições HTTP diferentes não são repetidas automaticamente. Falhas de rede
 não têm SLA numérico definido: o harness registra duração p50 e p95 para
 caracterizar o comportamento medido.
 
