@@ -153,10 +153,11 @@ class ValidadorApi {
       return respostaErro(_mensagemFalhaLogin(500), 500);
     }
 
-    return respostaJson(<String, dynamic>{
+    final Map<String, dynamic> corpoResposta = <String, dynamic>{
       'token': sessaoLogica.token,
       'identificadorPrestador': identificador,
-    }, status: 201);
+    };
+    return respostaJson(corpoResposta, status: 201);
   }
 
   Future<Response> _criarLote(Request request) async {
