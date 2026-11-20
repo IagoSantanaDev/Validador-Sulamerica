@@ -252,6 +252,45 @@ void main() {
     },
   );
 
+  test('HTTP 503 transitorio e repetido ate a consulta responder', () async {
+    int consultas = 0;
+    final _AdapterTeste adapter = _AdapterTeste((RequestOptions request) async {
+      if (request.method == 'POST' &&
+          request.uri.queryParameters['lumPageId'] == _idLogin) {
+        return _resposta(
+          '',
+          302,
+          headers: <String, List<String>>{
+            'location': <String>['/prestador/'],
+          },
+        );
+      }
+      if (request.uri.path == '/prestador/') {
+        return _resposta('<html>logout</html>', 200);
+      }
+      if (request.method == 'POST' &&
+          request.uri.queryParameters['lumPageId'] == _idConsulta) {
+        consultas++;
+        if (consultas == 1) return _resposta('temporario', 503);
+        return _resposta('<html>elegivel</html>', 200);
+      }
+      return _resposta('<html>formulario</html>', 200);
+    });
+    final SessaoPortal sessao = SessaoPortal(
+      dio: Dio()..httpClientAdapter = adapter,
+      logger: Logger(output: const _LogMudo(), level: Level.off),
+    );
+    await _login(sessao);
+
+    final ResultadoConsultaPortal<String> resultado = await sessao
+        .consultarBeneficiario(carteirinhaCompleta: '12345678901234567890');
+
+    expect(consultas, 2);
+    expect(resultado.sucesso, isTrue);
+    expect(resultado.dados, contains('elegivel'));
+    await sessao.encerrar();
+  });
+
   test('consultas concorrentes compartilham renovação de sessão', () async {
     int logins = 0;
     int consultas = 0;

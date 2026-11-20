@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:cookie_jar/cookie_jar.dart';
 import 'package:dio/dio.dart';
@@ -116,6 +117,38 @@ class SessaoPortal {
   };
 
   static const List<int> _tamanhosSegmentosCarteirinha = [3, 5, 4, 4, 4];
+  static final int _maxRetriesFalhaTransitoria = _lerInteiroAmbiente(
+    'PORTAL_RETRY_MAX_TENTATIVAS',
+    3,
+    maximo: 10,
+  );
+  static final int _baseBackoffMs = _lerInteiroAmbiente(
+    'PORTAL_RETRY_BACKOFF_BASE_MS',
+    1000,
+    maximo: 60000,
+  );
+  static final int _maxBackoffMs = _lerInteiroAmbiente(
+    'PORTAL_RETRY_BACKOFF_MAX_MS',
+    20000,
+    minimo: 1,
+    maximo: 120000,
+  );
+  static final int _jitterPercent = _lerInteiroAmbiente(
+    'PORTAL_RETRY_JITTER_PERCENT',
+    30,
+    maximo: 100,
+  );
+  static final Random _aleatorioRetry = Random.secure();
+
+  static int _lerInteiroAmbiente(
+    String nome,
+    int padrao, {
+    int minimo = 0,
+    required int maximo,
+  }) {
+    final int? valor = int.tryParse(Platform.environment[nome] ?? '');
+    return (valor ?? padrao).clamp(minimo, maximo).toInt();
+  }
 
   final Dio _dio;
   final CookieJar _cookieJar;
@@ -529,12 +562,15 @@ class SessaoPortal {
           cancelToken: cancelToken,
         );
         if (pos.statusCode != 200) {
-          _registrarAssinaturaResposta(
+          final bool rejeicaoF5 = _registrarAssinaturaResposta(
             status: pos.statusCode,
             contentType: pos.headers['content-type']?.join(','),
             body: pos.data == null ? null : utf8.encode(pos.data!),
           );
-          return _falhaHttp<String>(pos.statusCode);
+          return _falhaHttp<String>(
+            pos.statusCode,
+            retryable: _statusTransitorio(pos.statusCode) && !rejeicaoF5,
+          );
         }
         return ResultadoConsultaPortal<String>.sucesso(
           dados: pos.data ?? '',
@@ -543,12 +579,15 @@ class SessaoPortal {
       }
 
       if (resposta.statusCode != 200) {
-        _registrarAssinaturaResposta(
+        final bool rejeicaoF5 = _registrarAssinaturaResposta(
           status: resposta.statusCode,
           contentType: resposta.headers['content-type']?.join(','),
           body: resposta.data == null ? null : utf8.encode(resposta.data!),
         );
-        return _falhaHttp<String>(resposta.statusCode);
+        return _falhaHttp<String>(
+          resposta.statusCode,
+          retryable: _statusTransitorio(resposta.statusCode) && !rejeicaoF5,
+        );
       }
       return ResultadoConsultaPortal<String>.sucesso(
         dados: resposta.data ?? '',
@@ -646,12 +685,15 @@ class SessaoPortal {
       }
 
       if (resposta.statusCode != 200) {
-        _registrarAssinaturaResposta(
+        final bool rejeicaoF5 = _registrarAssinaturaResposta(
           status: resposta.statusCode,
           contentType: resposta.headers['content-type']?.join(','),
           body: resposta.data,
         );
-        return _falhaHttp<Map<String, dynamic>>(resposta.statusCode);
+        return _falhaHttp<Map<String, dynamic>>(
+          resposta.statusCode,
+          retryable: _statusTransitorio(resposta.statusCode) && !rejeicaoF5,
+        );
       }
 
       final String corpo = _decodificarCorpo(resposta.data ?? []);
@@ -684,7 +726,7 @@ class SessaoPortal {
     }
   }
 
-  void _registrarAssinaturaResposta({
+  bool _registrarAssinaturaResposta({
     required int? status,
     required String? contentType,
     required List<int>? body,
@@ -713,18 +755,19 @@ class SessaoPortal {
     if (assinatura.supportId != null) {
       _incrementarDiagnostico('assinaturaComSupportId');
     }
+    return assinatura.f5Rejected;
   }
 
-  void _registrarAssinaturaDio(DioException erro) {
+  bool _registrarAssinaturaDio(DioException erro) {
     final Response<dynamic>? resposta = erro.response;
-    if (resposta == null) return;
+    if (resposta == null) return false;
     final Object? corpo = resposta.data;
     final List<int>? bytes = switch (corpo) {
       String texto => utf8.encode(texto),
       List<int> conteudo => conteudo,
       _ => null,
     };
-    _registrarAssinaturaResposta(
+    return _registrarAssinaturaResposta(
       status: resposta.statusCode,
       contentType: resposta.headers['content-type']?.join(','),
       body: bytes,
@@ -736,7 +779,7 @@ class SessaoPortal {
     CancelToken? cancelToken,
   ) async {
     bool repetiuSessao = false;
-    bool repetiuTransporte = false;
+    int retriesFalhaTransitoria = 0;
     int? geracaoAcompanhada;
     try {
       while (true) {
@@ -775,10 +818,12 @@ class SessaoPortal {
           }
           continue;
         }
-        if (resultado.categoria == CategoriaFalhaConsultaPortal.transporte &&
-            !repetiuTransporte) {
-          repetiuTransporte = true;
-          await Future<void>.delayed(const Duration(milliseconds: 500));
+        if (_ehFalhaTransitoria(resultado) &&
+            retriesFalhaTransitoria < _maxRetriesFalhaTransitoria) {
+          retriesFalhaTransitoria++;
+          await Future<void>.delayed(
+            _backoffFalhaTransitoria(retriesFalhaTransitoria),
+          );
           continue;
         }
         return resultado;
@@ -786,6 +831,32 @@ class SessaoPortal {
     } finally {
       if (geracaoAcompanhada != null) _sairConsulta(geracaoAcompanhada);
     }
+  }
+
+  bool _ehFalhaTransitoria<T>(ResultadoConsultaPortal<T> resultado) {
+    return resultado.categoria == CategoriaFalhaConsultaPortal.transporte ||
+        resultado.retryable;
+  }
+
+  bool _statusTransitorio(int? status) => switch (status) {
+        408 || 500 || 502 || 503 || 504 => true,
+        _ => false,
+      };
+
+  bool _assinaturaFalhaRetryable(int? status, bool rejeicaoF5) =>
+      _statusTransitorio(status) && !rejeicaoF5;
+
+  Duration _backoffFalhaTransitoria(int tentativa) {
+    final int base = min(
+      _maxBackoffMs,
+      _baseBackoffMs * (1 << (tentativa - 1)),
+    );
+    final double variacao = _jitterPercent / 100;
+    final double jitter =
+        1 - variacao + _aleatorioRetry.nextDouble() * variacao * 2;
+    return Duration(
+      milliseconds: min(_maxBackoffMs, (base * jitter).round()),
+    );
   }
 
   final Map<int, int> _consultasAtivasPorGeracao = <int, int>{};
@@ -908,12 +979,16 @@ class SessaoPortal {
     }
   }
 
-  ResultadoConsultaPortal<T> _falhaHttp<T>(int? status) {
+  ResultadoConsultaPortal<T> _falhaHttp<T>(
+    int? status, {
+    bool retryable = false,
+  }) {
     return ResultadoConsultaPortal<T>.falha(
       categoria: ehFalhaDeSessaoPortal(status)
           ? CategoriaFalhaConsultaPortal.sessao
           : CategoriaFalhaConsultaPortal.http,
       status: status,
+      retryable: retryable,
     );
   }
 
@@ -925,7 +1000,7 @@ class SessaoPortal {
       );
     }
     final int? status = erro.response?.statusCode;
-    _registrarAssinaturaDio(erro);
+    final bool rejeicaoF5 = _registrarAssinaturaDio(erro);
     return ResultadoConsultaPortal<T>.falha(
       categoria: ehFalhaDeSessaoPortal(status)
           ? CategoriaFalhaConsultaPortal.sessao
@@ -933,6 +1008,7 @@ class SessaoPortal {
               ? CategoriaFalhaConsultaPortal.transporte
               : CategoriaFalhaConsultaPortal.http,
       status: status,
+      retryable: _assinaturaFalhaRetryable(status, rejeicaoF5),
     );
   }
 

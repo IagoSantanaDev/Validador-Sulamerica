@@ -110,9 +110,13 @@ cookies, tokens, identificadores nem dados de consulta.
 O agendador alterna entre identificadores e lotes, seleciona primeiro uma
 sessão autenticada menos ocupada e não abre sessões extras para cada lote.
 Resultados de consulta são tipados por chamada. Uma rejeição de sessão (401/403)
-pode provocar uma renovação compartilhada e uma repetição; falhas de transporte
-ou timeout têm uma repetição própria. Rejeições HTTP diferentes de 401/403 não
-são tratadas como falhas de rede.
+pode provocar uma renovação compartilhada e uma repetição. Falhas de transporte
+e respostas HTTP 408, 500, 502, 503 ou 504 recebem até três retries com backoff
+exponencial e jitter; 429, 401/403 após renovação e respostas inesperadas não são
+repetidas automaticamente. Rejeições HTTP não são tratadas como falhas de rede.
+Configure `PORTAL_RETRY_MAX_TENTATIVAS` (padrão 3),
+`PORTAL_RETRY_BACKOFF_BASE_MS` (1000), `PORTAL_RETRY_BACKOFF_MAX_MS` (20000) e
+`PORTAL_RETRY_JITTER_PERCENT` (30) no ambiente do backend.
 
 Em 401 na submissão ou no SSE, o frontend cria uma sessão uma vez; na submissão,
 mantém a mesma chave idempotente, e no SSE, o último id recebido. Na criação de
