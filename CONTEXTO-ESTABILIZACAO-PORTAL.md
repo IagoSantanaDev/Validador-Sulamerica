@@ -1,6 +1,6 @@
 # Contexto: estabilização do portal SulAmérica
 
-Atualizado em 2026-11-20; T6/T7 implementados, T9 executado localmente e no
+Atualizado após T10/T11; T6/T7 implementados, T9 executado localmente e no
 Render; 6 × 200 teve 100% de `sucesso` no harness, 12 × 200 foi parcial.
 
 ## Objetivo e critérios
@@ -13,8 +13,8 @@ até 10 minutos (meta de 5 minutos). O cenário 12 × 200 é aspiracional.
 O plano de referência é `C:\Users\Administrator\Downloads\plano-estabilizacao-portal.md`.
 As decisões relevantes incluem: existem duas credenciais de portal, uma por
 CNPJ; backoff e limites devem ser configuráveis por ambiente; F5 é hipótese,
-nunca causa presumida; Support IDs ficam temporariamente disponíveis em
-`/api/status` atrás de flag e serão removidos no fechamento.
+nunca causa presumida; `/api/status` expõe somente métricas agregadas e não
+retém nem publica Support IDs individuais.
 
 ## Estado confirmado dos experimentos
 
@@ -42,7 +42,8 @@ decidir qual variável adicional se quer testar.
 ## Código já implementado
 
 - Assinaturas de respostas inesperadas do portal sem armazenar/logar o body.
-- Métricas agregadas e Support IDs opcionais em `/api/status`.
+- Métricas agregadas em `/api/status`, sem publicar ou reter Support IDs
+  individuais.
 - Header para distinguir 502 da API de 502 de proxy.
 - Harness `backend/tool/matriz_carga.dart` com E1/E2/E3, modo lote/item e CSV.
 - CSV da matriz agora preserva mensagens de erro sanitizadas por item.
@@ -51,6 +52,15 @@ decidir qual variável adicional se quer testar.
   `PORTAL_RETRY_BACKOFF_MAX_MS` (20000) e `PORTAL_RETRY_JITTER_PERCENT` (30).
 - `/api/status` informa configuração efetiva e contadores de retries iniciados,
   resolvidos e esgotados em `resilienciaPortal`.
+- `resilienciaPortal.retriesAgendador` conta separadamente os retries do
+  agendador: `iniciados` após o backoff e a permissão do disjuntor,
+  `resolvidos` quando uma tentativa posterior tem sucesso e `esgotados` quando
+  a última tentativa permitida termina ainda retryable. Cancelamentos durante
+  o backoff não contam como iniciados; uma cadeia encerrada por erro não
+  retryable não conta como esgotada.
+- T10/T11 concluídos: removidos da API, da flag de configuração e dos buffers
+  de sessão os valores individuais de Support ID; permanece somente o contador
+  agregado `assinaturaF5MarkerSupportId`.
 - T5: limite global de 2 logins simultâneos por padrão, configurável por
   `PORTAL_LOGIN_MAX_CONCORRENCIA` (faixa 1–16); métricas de ativos, pico e fila
   em `concorrenciaPortal.logins`. Limite de 4 sessões por CNPJ permanece igual.
@@ -105,37 +115,29 @@ decidir qual variável adicional se quer testar.
   serviços responderam 200, com disjuntor fechado e sem lotes ativos/em fila.
   Não houve HTTP 429/502 nos quatro retestes. O `/api/status` local terminou
   com 8 falhas upstream 503 agregadas; no Render, zero.
-- Lacuna de observabilidade: `resilienciaPortal.retriesTransitorios*` permaneceu
-  zero nas duas execuções 12 × 200. Como o backend desativa o retry interno da
-  `SessaoPortal` e delega as tentativas ao agendador, esses contadores não
-  confirmam nem descartam retries do agendador. Não interpretar zero como
-  ausência de retry; instrumentar retries do agendador antes de usar esses
-  campos para medir T7.
+- Naquelas execuções 12 × 200, `resilienciaPortal.retriesTransitorios*`
+  permaneceu zero. Como o backend desativa o retry interno da `SessaoPortal` e
+  delega as tentativas ao agendador, esses valores históricos não mediam a
+  camada do agendador. Ela agora possui os contadores independentes
+  `resilienciaPortal.retriesAgendador`.
 
-## Fase 2: o que falta
+## Estado da estabilização
 
-T6/T7 e a atualização inicial do contrato/documentação estão implementados.
-Ainda faltam:
-
-1. Instrumentar separadamente retries do agendador em `/api/status`; os
-   contadores atuais de `SessaoPortal` não cobrem essa camada.
-2. T10/T11: remover Support IDs de `/api/status`, mantendo contadores agregados,
-   e registrar conclusão/higiene do repositório.
+T6/T7, instrumentação dos retries do agendador e T10/T11 estão implementados.
+Os testes confirmam a contagem de retries resolvidos/esgotados, a ausência de
+valores individuais e a preservação da métrica agregada. O cenário aspiracional
+12 × 200 permanece parcial conforme os resultados acima.
 
 O resultado E2 não sustenta a escolha do ramo de sessão única por conta. É
 razoável prosseguir com limite de múltiplas sessões como mitigação controlada:
 usar defaults configuráveis, expor picos/esperas e não atribuir causa raiz sem
 sinais convergentes.
 
-## Próximos passos recomendados
+## Próximo passo recomendado
 
-1. Adicionar métricas de retry no agendador, sem confundi-las com os retries
-   internos de `SessaoPortal`.
-2. Remover Support IDs de `/api/status` conforme T10/T11, preservando somente
-   contadores agregados.
-3. Considerar novo teste 12 × 200 somente após decidir se a meta aspiracional
-   continua sujeita ao limite de cinco minutos ou se o perfil de capacidade
-   deve mudar. O critério prioritário 6 × 200 passou localmente e no Render.
+Considerar novo teste 12 × 200 somente após decidir se a meta aspiracional
+continua sujeita ao limite de cinco minutos ou se o perfil de capacidade deve
+mudar. O critério prioritário 6 × 200 passou localmente e no Render.
 
 ## Comandos úteis
 

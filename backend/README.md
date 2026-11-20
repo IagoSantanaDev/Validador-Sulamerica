@@ -94,7 +94,9 @@ limite.
 
 `GET /api/status` não exige token e fica fora dos limites de requisições ao
 portal. Devolve contadores agregados de sessões, lotes, memória RSS, rejeições
-429 e falhas upstream, além do resultado da sonda do portal. `diagnosticoSessaoPortal`
+429 e falhas upstream, além do resultado da sonda do portal. Não publica nem
+retém Support IDs individuais; mantém apenas o contador agregado
+`assinaturaF5MarkerSupportId`. `diagnosticoSessaoPortal`
 conta rejeições 401/403 antes e depois da renovação, renovações bem-sucedidas,
 falhas por motivo e exceções internas. Também registra status HTTP por etapa do
 login, redirect sem `Location`, login sem indicador de sessão, status da chamada
@@ -141,7 +143,12 @@ Configure `PORTAL_RETRY_MAX_TENTATIVAS` (padrão 3),
 `PORTAL_RETRY_BACKOFF_BASE_MS` (1000), `PORTAL_RETRY_BACKOFF_MAX_MS` (20000) e
 `PORTAL_RETRY_JITTER_PERCENT` (30) no ambiente do backend.
 `GET /api/status` publica os valores efetivos em `resilienciaPortal.retryConfiguracao`
-e os contadores de retries iniciados, resolvidos e esgotados.
+e, em `resilienciaPortal.retriesAgendador`, os contadores `iniciados`,
+`resolvidos` e `esgotados`. Um retry é contado como iniciado depois do backoff
+e da permissão do disjuntor; cancelamentos durante o backoff não são contados.
+`resolvidos` conta itens que tiveram sucesso após retry. `esgotados` conta
+somente itens cuja última tentativa permitida também falhou de forma retryable;
+uma cadeia que termina em falha não retryable não incrementa esse contador.
 
 Em 401 na submissão ou no SSE, o frontend cria uma sessão uma vez; na submissão,
 mantém a mesma chave idempotente, e no SSE, o último id recebido. Na criação de
