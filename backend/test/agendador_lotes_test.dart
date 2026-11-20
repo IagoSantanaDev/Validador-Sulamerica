@@ -297,10 +297,99 @@ void main() {
 
       expect(tentativas, 4);
       expect(esperas, hasLength(3));
+      expect(agendador.diagnosticoRetries, <String, int>{
+        'iniciados': 3,
+        'resolvidos': 0,
+        'esgotados': 1,
+      });
       expect(evento, contains('"status":"parcial"'));
       expect(evento, contains('"motivo":"tentativas_esgotadas"'));
     },
   );
+
+  test('contabiliza retry do agendador resolvido pelo item', () async {
+    final PoolSessoesPortal pool = PoolSessoesPortal(
+      fabricaSessao: (_) => _SessaoFake(),
+    );
+    await pool.garantirAutenticada('teste', _credenciais());
+    int tentativas = 0;
+    final AgendadorLotes agendador = AgendadorLotes(
+      pool: pool,
+      executarConsulta: (sessao, consulta, cancelToken) async {
+        tentativas++;
+        if (tentativas == 1) {
+          return const ResultadoConsultaAgendada(
+            dados: <String, dynamic>{'sucesso': false, 'erro': 'transitória'},
+            retryable: true,
+          );
+        }
+        return const ResultadoConsultaAgendada(
+          dados: <String, dynamic>{'sucesso': true},
+        );
+      },
+      aguardar: (_) async {},
+    );
+    final ExecucaoAgendada execucao = _agendar(
+      agendador,
+      'teste',
+      'retry-resolvido',
+    );
+    final Completer<String> resultadoSse = Completer<String>();
+    final subscription = execucao.execucao.assinar().listen((bytes) {
+      final String texto = utf8.decode(bytes);
+      if (texto.contains('event: resultado')) resultadoSse.complete(texto);
+    });
+    addTearDown(subscription.cancel);
+
+    final String evento = await resultadoSse.future;
+    await _aguardar(() => agendador.ativas == 0);
+
+    expect(tentativas, 2);
+    expect(agendador.diagnosticoRetries, <String, int>{
+      'iniciados': 1,
+      'resolvidos': 1,
+      'esgotados': 0,
+    });
+    expect(evento, contains('"status":"ok"'));
+  });
+
+  test('não conta retry cancelado durante o backoff como iniciado', () async {
+    final PoolSessoesPortal pool = PoolSessoesPortal(
+      fabricaSessao: (_) => _SessaoFake(),
+    );
+    await pool.garantirAutenticada('teste', _credenciais());
+    final Completer<void> backoffIniciado = Completer<void>();
+    final Completer<void> liberarBackoff = Completer<void>();
+    final AgendadorLotes agendador = AgendadorLotes(
+      pool: pool,
+      executarConsulta: (sessao, consulta, cancelToken) async =>
+          const ResultadoConsultaAgendada(
+            dados: <String, dynamic>{'sucesso': false, 'erro': 'transitória'},
+            retryable: true,
+          ),
+      aguardar: (_) async {
+        backoffIniciado.complete();
+        await liberarBackoff.future;
+      },
+    );
+    final ExecucaoAgendada execucao = _agendar(
+      agendador,
+      'teste',
+      'retry-cancelado',
+    );
+
+    await backoffIniciado.future;
+    execucao.execucao.cancelar();
+    await _aguardar(() => agendador.ativas == 0);
+    liberarBackoff.complete();
+
+    expect(agendador.diagnosticoRetries, <String, int>{
+      'iniciados': 0,
+      'resolvidos': 0,
+      'esgotados': 0,
+    });
+    execucao.execucao.descartar();
+  });
 
   test(
     'prazo corta novos itens e finaliza parcialmente após chamadas ativas',

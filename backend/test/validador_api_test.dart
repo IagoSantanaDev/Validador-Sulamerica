@@ -36,20 +36,24 @@ class _SessaoFake extends SessaoPortal {
     this.gate,
     this.loginResult,
     this.beneficiaryResult,
-    this.supportIds = const [],
+    this.supportIdMarkers = 0,
   }) : super(logger: Logger(level: Level.off));
 
   final Completer<void>? gate;
   final ResultadoLogin? loginResult;
   final ResultadoConsultaPortal<String>? beneficiaryResult;
-  final List<Map<String, dynamic>> supportIds;
+  final int supportIdMarkers;
   bool _autenticada = false;
   int logins = 0;
   int consultas = 0;
   final List<CancelToken?> tokensCancelamento = <CancelToken?>[];
 
   @override
-  List<Map<String, dynamic>> get supportIdsRespostaPortal => supportIds;
+  Map<String, int> get diagnosticoSessao => <String, int>{
+    ...super.diagnosticoSessao,
+    if (supportIdMarkers > 0)
+      'assinaturaF5MarkerSupportId': supportIdMarkers,
+  };
 
   @override
   bool get autenticada => _autenticada;
@@ -124,7 +128,7 @@ _ContextoApi _criarApi({
   ResultadoConsultaPortal<String>? beneficiaryResult,
   DisjuntorPortal? disjuntor,
   Map<String, String> ambiente = _ambiente,
-  List<Map<String, dynamic>> supportIds = const <Map<String, dynamic>>[],
+  int supportIdMarkers = 0,
 }) {
   final Completer<void> gate = Completer<void>();
   final List<_SessaoFake> sessoes = <_SessaoFake>[];
@@ -136,7 +140,7 @@ _ContextoApi _criarApi({
         gate: gate,
         loginResult: loginResult,
         beneficiaryResult: beneficiaryResult,
-        supportIds: supportIds,
+        supportIdMarkers: supportIdMarkers,
       );
       sessoes.add(sessao);
       return sessao;
@@ -759,6 +763,10 @@ void main() {
         expect(resiliencia['retriesTransitoriosResolvidos'], 0);
         expect(resiliencia['retriesTransitoriosEsgotados'], 0);
         expect(
+          resiliencia['retriesAgendador'],
+          <String, int>{'iniciados': 0, 'resolvidos': 0, 'esgotados': 0},
+        );
+        expect(
           dados['diagnosticoSessaoPortal'],
           containsPair('renovacoesFalhaCredenciaisInvalidas', 0),
         );
@@ -781,19 +789,13 @@ void main() {
       },
     );
 
-    test('status expõe Support IDs somente quando a flag está ativa', () async {
+    test('status nunca expõe Support IDs e preserva contadores agregados', () async {
       final _ContextoApi contexto = _criarApi(
         ambiente: <String, String>{
           ..._ambiente,
           'PORTAL_ASSINATURAS_SUPPORT_IDS_ATIVAS': 'true',
         },
-        supportIds: <Map<String, dynamic>>[
-          <String, dynamic>{
-            'supportId': 'ABC12345',
-            'status': 403,
-            'timestamp': '2026-11-19T00:00:00.000Z',
-          },
-        ],
+        supportIdMarkers: 1,
       );
       await _criarSessao(contexto.api);
       final Response resposta = await contexto.api.handler(
@@ -802,9 +804,10 @@ void main() {
       final Map dados = jsonDecode(await resposta.readAsString()) as Map;
 
       expect(resposta.statusCode, 200);
+      expect(dados.containsKey('supportIdsRespostaPortal'), isFalse);
       expect(
-        (dados['supportIdsRespostaPortal'] as List).single['supportId'],
-        'ABC12345',
+        dados['diagnosticoSessaoPortal'],
+        containsPair('assinaturaF5MarkerSupportId', 1),
       );
     });
   });

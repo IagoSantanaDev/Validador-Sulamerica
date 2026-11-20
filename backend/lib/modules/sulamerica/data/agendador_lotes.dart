@@ -85,6 +85,9 @@ class AgendadorLotes {
   int _requisicoesAtivas = 0;
   int _concluidos = 0;
   int _parciais = 0;
+  int _retriesIniciados = 0;
+  int _retriesResolvidos = 0;
+  int _retriesEsgotados = 0;
   bool _despachando = false;
   bool _despachoProgramado = false;
   Timer? _timerRetentativaCircuito;
@@ -98,6 +101,12 @@ class AgendadorLotes {
   int get concluidos => _concluidos;
 
   int get parciais => _parciais;
+
+  Map<String, int> get diagnosticoRetries => <String, int>{
+    'iniciados': _retriesIniciados,
+    'resolvidos': _retriesResolvidos,
+    'esgotados': _retriesEsgotados,
+  };
 
   ExecucaoLote? obterExecucao(String id, String tokenDono) {
     final _LoteAgendado? lote = _execucoes[id];
@@ -267,6 +276,7 @@ class AgendadorLotes {
         try {
           permissao = await _aguardarPermissao(lote);
           if (!lote.execucao.ativo) return;
+          if (tentativa > 1) _retriesIniciados++;
           emprestimo = await _pool.adquirir(
             identificador: lote.identificadorPrestador,
             credenciais: lote.credenciais,
@@ -317,7 +327,10 @@ class AgendadorLotes {
           continue;
         }
         if (conclusao.retryable) {
+          _retriesEsgotados++;
           lote.motivosPendentes[indice] = 'tentativas_esgotadas';
+        } else if (tentativa > 1 && conclusao.dados['sucesso'] == true) {
+          _retriesResolvidos++;
         }
         lote.resultados[indice] = conclusao.dados;
         lote.execucao.registrarConclusao();

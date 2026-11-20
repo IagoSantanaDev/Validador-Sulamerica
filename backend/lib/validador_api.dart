@@ -531,10 +531,6 @@ class ValidadorApi {
   Future<Response> _status(Request request) async {
     final Map<String, dynamic> alcancePortal = await _alcancePortal();
     final Map<String, int> diagnosticoSessao = _pool.diagnosticoSessaoPortal;
-    final bool exporSupportIds =
-        (_ambiente ??
-            Platform.environment)['PORTAL_ASSINATURAS_SUPPORT_IDS_ATIVAS'] ==
-        'true';
     return respostaJson(<String, dynamic>{
       'status': 'ok',
       'sessoesAtivas': _pool.sessoesAtivas,
@@ -557,9 +553,8 @@ class ValidadorApi {
             diagnosticoSessao['retriesTransitoriosResolvidos'] ?? 0,
         'retriesTransitoriosEsgotados':
             diagnosticoSessao['retriesTransitoriosEsgotados'] ?? 0,
+        'retriesAgendador': _agendador.diagnosticoRetries,
       },
-      if (exporSupportIds)
-        'supportIdsRespostaPortal': _pool.supportIdsRespostaPortal,
       'concorrenciaPortal': <String, Object>{
         ...SessaoPortal.diagnosticoConcorrencia,
         ..._pool.diagnosticoConcorrenciaPortal,
@@ -637,12 +632,11 @@ class ValidadorApi {
       final List<int> corpo = await _lerCorpoSonda(resposta)
           .timeout(const Duration(seconds: 10));
       final assinatura =
-          ColetorAssinaturasRespostaPortal(supportIdsHabilitados: false)
-              .coletar(
-                status: resposta.statusCode,
-                contentType: resposta.headers.contentType?.mimeType,
-                body: corpo,
-              );
+          ColetorAssinaturasRespostaPortal().coletar(
+            status: resposta.statusCode,
+            contentType: resposta.headers.contentType?.mimeType,
+            body: corpo,
+          );
       return ResultadoSondaDisjuntor(
         status: resposta.statusCode,
         rejeicaoF5: assinatura.f5Rejected,
