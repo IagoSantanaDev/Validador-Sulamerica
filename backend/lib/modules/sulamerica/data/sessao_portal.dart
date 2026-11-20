@@ -243,9 +243,6 @@ class SessaoPortal {
   static Duration esperaRetryTransitorio(int tentativa) =>
       _backoffFalhaTransitoria(tentativa);
 
-  List<Map<String, dynamic>> get supportIdsRespostaPortal =>
-      _assinaturas.supportIdsRecentes;
-
   Map<String, String> get _headersNavegador => {
     'User-Agent': _userAgent,
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
@@ -821,9 +818,6 @@ class SessaoPortal {
     }
     if (assinatura.hasSupportIdMarker) {
       _incrementarDiagnostico('assinaturaF5MarkerSupportId');
-    }
-    if (assinatura.supportId != null) {
-      _incrementarDiagnostico('assinaturaComSupportId');
     }
     return assinatura.f5Rejected;
   }

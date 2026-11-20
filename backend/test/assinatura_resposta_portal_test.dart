@@ -7,7 +7,7 @@ void main() {
   group('ColetorAssinaturasRespostaPortal', () {
     test('resume HTML rejeitado sem manter body', () {
       final ColetorAssinaturasRespostaPortal coletor =
-          ColetorAssinaturasRespostaPortal(supportIdsHabilitados: false);
+          ColetorAssinaturasRespostaPortal();
       const String body =
           '<html><title>Request rejected</title>Support ID: ABCD123456</html>';
 
@@ -25,37 +25,24 @@ void main() {
       expect(assinatura.f5Rejected, isTrue);
       expect(assinatura.hasRejectedMarker, isTrue);
       expect(assinatura.hasSupportIdMarker, isTrue);
-      expect(assinatura.supportId, isNull);
       expect(jsonEncode(json), isNot(contains(body)));
-      expect(coletor.supportIdsRecentes, isEmpty);
+      expect(jsonEncode(json), isNot(contains('ABCD123456')));
     });
 
-    test('support IDs opt-in e buffer mantém somente registros recentes', () {
+    test('assinatura não contém nem retém Support ID individual', () {
       final ColetorAssinaturasRespostaPortal coletor =
-          ColetorAssinaturasRespostaPortal(
-        supportIdsHabilitados: true,
-        tamanhoBuffer: 1,
-      );
+          ColetorAssinaturasRespostaPortal();
+      const String body = '<html>Support ID: WXYZ654321</html>';
 
-      coletor.coletar(
+      final AssinaturaRespostaPortal assinatura = coletor.coletar(
         status: 403,
         contentType: 'text/html',
-        body: utf8.encode('<html>Support ID: ABCD123456</html>'),
-      );
-      coletor.coletar(
-        status: 403,
-        contentType: 'text/html',
-        body: utf8.encode('<html>Support ID: WXYZ654321</html>'),
+        body: utf8.encode(body),
       );
 
-      final List<Map<String, dynamic>> recentes = coletor.supportIdsRecentes;
-      expect(recentes, hasLength(1));
-      expect(recentes.single['supportId'], 'WXYZ654321');
-      expect(recentes.single['status'], 403);
-      expect(
-        DateTime.tryParse(recentes.single['timestamp'] as String),
-        isNotNull,
-      );
+      expect(assinatura.hasSupportIdMarker, isTrue);
+      expect(assinatura.toJson(), isNot(contains('supportId')));
+      expect(jsonEncode(assinatura.toJson()), isNot(contains('WXYZ654321')));
     });
   });
 }

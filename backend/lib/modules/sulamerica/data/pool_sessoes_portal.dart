@@ -37,9 +37,6 @@ class PoolSessoesPortal {
   final int limitePorIdentificador;
   final Map<String, _PoolPrestador> _porIdentificador = {};
   final Map<String, int> _diagnosticoSessoesDescartadas = <String, int>{};
-  final List<Map<String, dynamic>> _supportIdsDescartados =
-      <Map<String, dynamic>>[];
-  static const int _limiteSupportIdsRecentes = 20;
   int _picoRequisicoesAtivas = 0;
 
   int get sessoesAtivas => _porIdentificador.values.fold<int>(
@@ -70,24 +67,6 @@ class PoolSessoesPortal {
       }
     }
     return total;
-  }
-
-  List<Map<String, dynamic>> get supportIdsRespostaPortal {
-    final List<Map<String, dynamic>> recentes =
-        List<Map<String, dynamic>>.of(_supportIdsDescartados);
-    for (final _PoolPrestador pool in _porIdentificador.values) {
-      for (final _SessaoGerenciada sessao in pool.sessoes) {
-        recentes.addAll(sessao.sessao.supportIdsRespostaPortal);
-      }
-    }
-    recentes.sort(
-      (Map<String, dynamic> a, Map<String, dynamic> b) =>
-          (a['timestamp'] as String).compareTo(b['timestamp'] as String),
-    );
-    final int inicio = recentes.length > _limiteSupportIdsRecentes
-        ? recentes.length - _limiteSupportIdsRecentes
-        : 0;
-    return recentes.skip(inicio).map(Map<String, dynamic>.of).toList();
   }
 
   Map<String, int> get diagnosticoConcorrenciaPortal => <String, int>{
@@ -140,7 +119,8 @@ class PoolSessoesPortal {
         final int ativas = _porIdentificador.values.fold<int>(
           0,
           (int total, _PoolPrestador pool) =>
-              total + pool.sessoes.fold<int>(
+              total +
+              pool.sessoes.fold<int>(
                 0,
                 (int subtotal, _SessaoGerenciada sessao) =>
                     subtotal + sessao.ativas,
@@ -202,13 +182,6 @@ class PoolSessoesPortal {
               contador.key,
               (int valor) => valor + contador.value,
               ifAbsent: () => contador.value,
-            );
-          }
-          _supportIdsDescartados.addAll(sessao.supportIdsRespostaPortal);
-          if (_supportIdsDescartados.length > _limiteSupportIdsRecentes) {
-            _supportIdsDescartados.removeRange(
-              0,
-              _supportIdsDescartados.length - _limiteSupportIdsRecentes,
             );
           }
           pool.sessoes.remove(gerenciada);
