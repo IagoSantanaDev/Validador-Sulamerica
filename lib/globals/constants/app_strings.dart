@@ -33,8 +33,13 @@ class AppStrings {
       'Tentando consultar os itens pendentes...';
   static const String consultasAguardandoRetentativa =
       'Aguardando nova tentativa automática para consultas sem resposta...';
+  static const String consultasPrazoExpirado =
+      'O lote atingiu o limite de cinco minutos. Os itens pendentes não foram '
+      'consultados e podem ser tentados manualmente.';
   static const String filaConsultaBackendCheia =
       'A fila de consultas está ocupada. Aguarde um momento e tente novamente.';
+  static const String servicoConsultaIndisponivel =
+      'O serviço de consultas está temporariamente indisponível. Tente novamente em instantes.';
   static const String erroConexaoConsultaBackend =
       'Não foi possível conectar ao serviço de consultas. Verifique sua conexão e tente novamente.';
   static const String erroConsultaBackendExpirada =

@@ -189,9 +189,35 @@ void main() {
       );
     });
 
-    test('5xx preserva o statusCode', () async {
+    test('503 preserva Retry-After como indisponibilidade temporária', () async {
       final resultado = await _servico(
-        _AdapterFake(statusCode: 503),
+        _AdapterFake(
+          statusCode: 503,
+          cabecalhos: {
+            'retry-after': ['45'],
+          },
+        ),
+      ).criarLote(
+        token: 'token-fake',
+        idempotencyKey: 'key-fake',
+        consultas: _consultas,
+      );
+
+      resultado.fold(
+        onSuccess: (_) => fail('Esperava falha'),
+        onFailure: (erro) {
+          expect(erro, isA<ServicoIndisponivelException>());
+          expect(
+            (erro as ServicoIndisponivelException).retryAfter,
+            const Duration(seconds: 45),
+          );
+        },
+      );
+    });
+
+    test('outros 5xx preservam statusCode genérico', () async {
+      final resultado = await _servico(
+        _AdapterFake(statusCode: 502),
       ).criarLote(
         token: 'token-fake',
         idempotencyKey: 'key-fake',
@@ -202,7 +228,7 @@ void main() {
         onSuccess: (_) => fail('Esperava falha'),
         onFailure: (erro) {
           expect(erro, isA<ErroServidorException>());
-          expect((erro as ErroServidorException).statusCode, 503);
+          expect((erro as ErroServidorException).statusCode, 502);
         },
       );
     });

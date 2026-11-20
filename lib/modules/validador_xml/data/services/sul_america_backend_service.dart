@@ -176,6 +176,12 @@ class SulAmericaBackendService {
     if (statusCode == 429) {
       return FilaCheiaException(retryAfter: retryAfter, mensagem: mensagem);
     }
+    if (statusCode == 503) {
+      return ServicoIndisponivelException(
+        retryAfter: retryAfter,
+        mensagem: mensagem,
+      );
+    }
     return ErroServidorException(
       statusCode: statusCode,
       mensagem: mensagem ?? 'O servidor retornou um erro (status $statusCode).',
