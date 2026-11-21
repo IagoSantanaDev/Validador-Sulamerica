@@ -198,6 +198,45 @@ void main() {
     segundaElegibilidade.liberar();
   });
 
+  test('limite configurado permite duas elegibilidades por sessão', () async {
+    final PoolSessoesPortal pool = PoolSessoesPortal(
+      fabricaSessao: (_) => _SessaoFake(),
+      limitePorIdentificador: 2,
+      limiteElegibilidadesPorSessao: 2,
+    );
+    await pool.garantirAutenticada('teste', _credenciais());
+
+    final List<EmprestimoSessaoPortal> primeiras = await Future.wait(
+      List<Future<EmprestimoSessaoPortal>>.generate(
+        2,
+        (_) => pool.adquirir(
+          identificador: 'teste',
+          credenciais: _credenciais(),
+          tipo: TipoConsultaPortal.elegibilidade,
+        ),
+      ),
+    );
+    final EmprestimoSessaoPortal terceira = await pool.adquirir(
+      identificador: 'teste',
+      credenciais: _credenciais(),
+      tipo: TipoConsultaPortal.elegibilidade,
+    );
+
+    expect(primeiras.map((lease) => lease.sessao).toSet(), hasLength(1));
+    expect(terceira.sessao, isNot(same(primeiras.first.sessao)));
+    expect(
+      pool.diagnosticoConcorrenciaPortal['limiteElegibilidadesPorSessao'],
+      2,
+    );
+
+    for (final EmprestimoSessaoPortal emprestimo in <EmprestimoSessaoPortal>[
+      ...primeiras,
+      terceira,
+    ]) {
+      emprestimo.liberar();
+    }
+  });
+
   test('lease libera a capacidade uma única vez', () async {
     final PoolSessoesPortal pool = PoolSessoesPortal(
       fabricaSessao: (_) => _SessaoFake(),

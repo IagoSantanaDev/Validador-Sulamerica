@@ -23,6 +23,7 @@ class PoolSessoesPortal {
     Logger? logger,
     SessaoPortal Function(Logger logger)? fabricaSessao,
     this.limitePorIdentificador = 4,
+    this.limiteElegibilidadesPorSessao = 1,
     bool repetirFalhasTransitorias = true,
   }) : _logger = logger ?? Logger(),
        _fabricaSessao =
@@ -30,11 +31,21 @@ class PoolSessoesPortal {
            ((Logger logger) => SessaoPortal(
              logger: logger,
              repetirFalhasTransitorias: repetirFalhasTransitorias,
-           ));
+           )) {
+    if (limiteElegibilidadesPorSessao < 1 ||
+        limiteElegibilidadesPorSessao > 2) {
+      throw ArgumentError.value(
+        limiteElegibilidadesPorSessao,
+        'limiteElegibilidadesPorSessao',
+        'Deve estar entre 1 e 2.',
+      );
+    }
+  }
 
   final Logger _logger;
   final SessaoPortal Function(Logger logger) _fabricaSessao;
   final int limitePorIdentificador;
+  final int limiteElegibilidadesPorSessao;
   final Map<String, _PoolPrestador> _porIdentificador = {};
   final Map<String, int> _diagnosticoSessoesDescartadas = <String, int>{};
   int _picoRequisicoesAtivas = 0;
@@ -72,6 +83,7 @@ class PoolSessoesPortal {
   Map<String, int> get diagnosticoConcorrenciaPortal => <String, int>{
     'picoRequisicoesEmprestadas': _picoRequisicoesAtivas,
     'limiteSessoesPorIdentificador': limitePorIdentificador,
+    'limiteElegibilidadesPorSessao': limiteElegibilidadesPorSessao,
   };
 
   Future<SessaoPortal> garantirAutenticada(
@@ -163,7 +175,10 @@ class PoolSessoesPortal {
     late final Future<void> criacao;
     criacao = () async {
       final SessaoPortal sessao = _fabricaSessao(_logger);
-      final _SessaoGerenciada gerenciada = _SessaoGerenciada(sessao);
+      final _SessaoGerenciada gerenciada = _SessaoGerenciada(
+        sessao,
+        limiteElegibilidadesPorSessao,
+      );
       pool.sessoes.add(gerenciada);
       bool autenticada = false;
       try {
@@ -232,16 +247,18 @@ class _PoolPrestador {
 }
 
 class _SessaoGerenciada {
-  _SessaoGerenciada(this.sessao);
+  _SessaoGerenciada(this.sessao, this.limiteElegibilidadesPorSessao);
 
   final SessaoPortal sessao;
+  final int limiteElegibilidadesPorSessao;
   int elegibilidadesAtivas = 0;
   int senhasAtivas = 0;
 
   int get ativas => elegibilidadesAtivas + senhasAtivas;
 
   bool disponivel(TipoConsultaPortal tipo) => switch (tipo) {
-    TipoConsultaPortal.elegibilidade => elegibilidadesAtivas == 0,
+    TipoConsultaPortal.elegibilidade =>
+      elegibilidadesAtivas < limiteElegibilidadesPorSessao,
     TipoConsultaPortal.senha => senhasAtivas < 3,
   };
 

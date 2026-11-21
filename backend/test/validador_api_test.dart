@@ -125,6 +125,7 @@ _ContextoApi _criarApi({
   int limiteGlobal = 500,
   int limiteExecucoes = 24,
   int limiteSessoesPorIdentificador = 4,
+  int limiteElegibilidadesPorSessao = 1,
   RepositorioSessoes? repositorio,
   ResultadoLogin? loginResult,
   ResultadoConsultaPortal<String>? beneficiaryResult,
@@ -153,6 +154,7 @@ _ContextoApi _criarApi({
     limiteRequisicoesPorChave: limitePorChave,
     limiteRequisicoesGlobal: limiteGlobal,
     limiteSessoesPorIdentificador: limiteSessoesPorIdentificador,
+    limiteElegibilidadesPorSessao: limiteElegibilidadesPorSessao,
     limiteExecucoes: limiteExecucoes,
   );
   return _ContextoApi(api: api, sessoes: sessoes, gate: gate);
@@ -165,17 +167,16 @@ Request _request(
   String? token,
   String? idempotencyKey,
   Map<String, String>? headers,
-}) =>
-    Request(
-      method,
-      Uri.parse('http://localhost$path'),
-      body: body == null ? null : jsonEncode(body),
-      headers: <String, String>{
-        if (token != null) 'authorization': 'Bearer $token',
-        if (idempotencyKey != null) 'idempotency-key': idempotencyKey,
-        ...?headers,
-      },
-    );
+}) => Request(
+  method,
+  Uri.parse('http://localhost$path'),
+  body: body == null ? null : jsonEncode(body),
+  headers: <String, String>{
+    if (token != null) 'authorization': 'Bearer $token',
+    if (idempotencyKey != null) 'idempotency-key': idempotencyKey,
+    ...?headers,
+  },
+);
 
 Future<String> _criarSessao(ValidadorApi api) async {
   final Response resposta = await api.handler(
@@ -842,6 +843,7 @@ void main() {
           concorrencia,
           containsPair('limiteSessoesPorIdentificador', 4),
         );
+        expect(concorrencia, containsPair('limiteElegibilidadesPorSessao', 1));
         final Map logins = concorrencia['logins'] as Map;
         expect(logins['limite'], inInclusiveRange(1, 16));
         expect(logins['ativasAgora'], isA<int>());
@@ -859,6 +861,7 @@ void main() {
         () async {
       final _ContextoApi contexto = _criarApi(
         limiteSessoesPorIdentificador: 5,
+        limiteElegibilidadesPorSessao: 2,
       );
       final Response resposta = await contexto.api.handler(
         Request('GET', Uri.parse('http://localhost/api/status')),
@@ -867,6 +870,7 @@ void main() {
       final Map concorrencia = dados['concorrenciaPortal'] as Map;
 
       expect(concorrencia, containsPair('limiteSessoesPorIdentificador', 5));
+      expect(concorrencia, containsPair('limiteElegibilidadesPorSessao', 2));
       expect(
         concorrencia,
         containsPair('limite', SessaoPortal.limiteRequisicoesGlobal),
