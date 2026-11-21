@@ -1,9 +1,9 @@
 # Contexto: estabilização do portal SulAmérica
 
 Atualizado em 2026-11-21: T6/T7 e T10/T11 implementados; 12 × 200 continua
-aspiracional e parcial. No reteste Render 6 × 200 com validação estrita de
-domínio, 1.199/1.200 respostas foram determinadas; o aceite prioritário segue
-aberto.
+aspiracional e parcial. A matriz Render 6 × 200 mais recente atingiu 100% de
+respostas e de resultados de domínio determinados. A confirmação local
+pós-TLS continua pendente.
 
 ## Objetivo e critérios
 
@@ -195,8 +195,14 @@ decidir qual variável adicional se quer testar.
   `sucesso: true`, elegibilidade determinada, em 1,5 s. Isso sugere uma falha
   transitória, mas não altera o resultado da matriz original nem fecha o
   critério de 100%.
+- Nova matriz completa Render, 6 × 200: 1.200/1.200 `sucesso: true`,
+  1.200/1.200 resultados de domínio determinados (864/864 elegibilidades e
+  336/336 senhas), zero falhas, HTTP 429 ou 502, em 184,2 s. As seis sessões
+  foram criadas com sucesso. O `/api/status` posterior respondeu `ok`, sem
+  lotes ativos/em fila, disjuntor fechado e falhas upstream 502/503 zeradas.
+  Essa execução confirma o critério para a matriz Render.
 - O reteste local pós-TLS não foi executado nesta rodada, por escolha do
-  usuário. Assim, ainda não há confirmação local para este aceite.
+  usuário. Portanto, o resultado local combinado ainda não está confirmado.
 
 ## Estado da estabilização
 
@@ -215,7 +221,8 @@ sinais convergentes.
 Considerar novo teste 12 × 200 somente após decidir se a meta aspiracional
 continua sujeita ao limite de cinco minutos ou se o perfil de capacidade deve
 mudar. O aceite prioritário 6 × 200 continua aberto: o último resultado estrito
-do Render teve uma falha e o reteste local pós-TLS foi pulado.
+do Render passou com 100%, mas o reteste local pós-TLS foi pulado. O aceite está
+confirmado para Render, não para ambos os ambientes.
 
 ## Comandos úteis
 
