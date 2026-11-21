@@ -124,6 +124,7 @@ _ContextoApi _criarApi({
   int limitePorChave = 100,
   int limiteGlobal = 500,
   int limiteExecucoes = 24,
+  int limiteSessoesPorIdentificador = 4,
   RepositorioSessoes? repositorio,
   ResultadoLogin? loginResult,
   ResultadoConsultaPortal<String>? beneficiaryResult,
@@ -151,6 +152,7 @@ _ContextoApi _criarApi({
     disjuntor: disjuntor,
     limiteRequisicoesPorChave: limitePorChave,
     limiteRequisicoesGlobal: limiteGlobal,
+    limiteSessoesPorIdentificador: limiteSessoesPorIdentificador,
     limiteExecucoes: limiteExecucoes,
   );
   return _ContextoApi(api: api, sessoes: sessoes, gate: gate);
@@ -845,6 +847,21 @@ void main() {
         expect(texto, isNot(contains('PORTAL_PRESTADOR')));
       },
     );
+
+    test('pool de sessão aceita limite configurado sem mudar limite global',
+        () async {
+      final _ContextoApi contexto = _criarApi(
+        limiteSessoesPorIdentificador: 5,
+      );
+      final Response resposta = await contexto.api.handler(
+        Request('GET', Uri.parse('http://localhost/api/status')),
+      );
+      final Map dados = jsonDecode(await resposta.readAsString()) as Map;
+      final Map concorrencia = dados['concorrenciaPortal'] as Map;
+
+      expect(concorrencia, containsPair('limiteSessoesPorIdentificador', 5));
+      expect(concorrencia, containsPair('limite', 16));
+    });
 
     test('status nunca expõe Support IDs e preserva contadores agregados',
         () async {
