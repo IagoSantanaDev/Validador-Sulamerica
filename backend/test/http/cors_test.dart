@@ -152,6 +152,10 @@ void main() {
         resposta.headers['access-control-allow-headers'],
         contains('Content-Type'),
       );
+      expect(
+        resposta.headers['access-control-allow-headers'],
+        contains('Cache-Control'),
+      );
       expect(resposta.headers['access-control-expose-headers'], 'Location');
       expect(resposta.headers['access-control-max-age'], '86400');
     });
