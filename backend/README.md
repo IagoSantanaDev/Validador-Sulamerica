@@ -22,6 +22,8 @@ Pages; ao implantar por outro serviço, configure a allowlist no ambiente de
 execução. CORS não autentica chamadas diretas.
 `PORTAL_MAX_SESSIONS_PER_IDENTIFIER` define sessões máximas do portal por
 identificador (padrão 4, faixa 1–8); alteração exige reiniciar o serviço.
+`PORTAL_REQUEST_MAX_CONCURRENCY` define concorrência global de chamadas ao
+portal e do agendador (padrão 16, faixa 1–20); ambos usam o mesmo limite.
 
 As credenciais são resolvidas exclusivamente no servidor por variáveis no
 formato `PORTAL_PRESTADOR_ID_<IDENTIFICADOR>_{CODE,USER,SENHA}`. Cadastre os
@@ -129,7 +131,9 @@ não incluem mensagem de exceção, URL, corpo ou identificadores.
 - Até 24 execuções na fila e em processamento; a 25ª é rejeitada.
 - Até 2 logins simultâneos no processo por padrão; configure
   `PORTAL_LOGIN_MAX_CONCORRENCIA` entre 1 e 16.
-- Até 16 requisições simultâneas ao portal.
+- Até 16 requisições simultâneas ao portal por padrão; configure
+  `PORTAL_REQUEST_MAX_CONCURRENCY` entre 1 e 20 para ajustar semáforo e
+  agendador juntos.
 - Elegibilidade serial por sessão; até 3 consultas de senha concorrentes por
   sessão.
 - Rate limit de 20/min por identificador em `/api/sessoes`, 20/min por token em
