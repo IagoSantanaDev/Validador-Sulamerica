@@ -192,6 +192,22 @@ void main() {
         'determinadas': 2,
         'indeterminadas': 2,
       });
+
+      final Map<String, Object> resumoItemIsolado = resumoRespostasDominio(
+        const <ConsultaMatriz>[
+          ConsultaMatriz(tipo: 'elegibilidade', chave: 'x'),
+          ConsultaMatriz(tipo: 'senha', chave: 'y'),
+        ],
+        const <ResultadoMatriz>[],
+        1,
+        1,
+        indiceInicial: 3,
+      );
+      expect(resumoItemIsolado['elegibilidade'], <String, int>{
+        'esperadas': 1,
+        'determinadas': 0,
+        'indeterminadas': 1,
+      });
     },
   );
 

@@ -35,12 +35,22 @@ Future<void> main(List<String> args) async {
       cenario: opcoes['cenario'] ?? 'matriz',
       modo: opcoes['modo'] ?? 'lote',
       usuarios: _inteiro(opcoes, 'usuarios', 6, 1, 20),
-      itens: _inteiro(opcoes, 'itens', 200, 1, 300),
+      itens: opcoes.containsKey('indice-item')
+          ? 1
+          : _inteiro(opcoes, 'itens', 200, 1, 300),
+      indiceItem: opcoes.containsKey('indice-item')
+          ? _inteiro(opcoes, 'indice-item', 1, 1, 300)
+          : null,
       ritmoSessao: opcoes['ritmo-sessao'] ?? 'rajada',
       intervaloItemMs: _inteiro(opcoes, 'intervalo-item-ms', 3000, 0, 60000),
       intervaloGlobalMs: _inteiro(opcoes, 'intervalo-global-ms', 500, 0, 60000),
     );
     _validar(config);
+    if (config.indiceItem != null && opcoes.containsKey('itens')) {
+      throw const FormatException(
+        '--indice-item define um único item e não aceita --itens.',
+      );
+    }
     final Uri base = Uri.parse(config.baseUrl);
     if (!base.hasScheme || !<String>{'http', 'https'}.contains(base.scheme)) {
       throw const FormatException('--base-url deve usar http ou https.');
@@ -93,6 +103,7 @@ class _ConfigMatriz {
     required this.modo,
     required this.usuarios,
     required this.itens,
+    required this.indiceItem,
     required this.ritmoSessao,
     required this.intervaloItemMs,
     required this.intervaloGlobalMs,
@@ -104,6 +115,7 @@ class _ConfigMatriz {
   final String modo;
   final int usuarios;
   final int itens;
+  final int? indiceItem;
   final String ritmoSessao;
   final int intervaloItemMs;
   final int intervaloGlobalMs;
@@ -368,13 +380,15 @@ Future<void> _executarItens(
   _Pacing pacing,
 ) async {
   for (int indice = 0; indice < config.itens; indice++) {
-    final ConsultaMatriz consulta = consultas[indice % consultas.length];
+    final int indiceSequencia = config.indiceItem ?? indice + 1;
+    final ConsultaMatriz consulta =
+        consultas[(indiceSequencia - 1) % consultas.length];
     await pacing.aguardar(sessao.token);
     await _executarConsultaItem(
       cliente,
       sessao,
       consulta,
-      indice + 1,
+      indiceSequencia,
       resultados,
     );
   }
@@ -581,7 +595,9 @@ Map<String, Object> resumoRespostasDominio(
   List<ConsultaMatriz> consultas,
   List<ResultadoMatriz> resultados,
   int usuarios,
-  int itensPorUsuario,
+  int itensPorUsuario, {
+  int indiceInicial = 1,
+}
 ) {
   final Map<String, int> esperadas = <String, int>{
     'elegibilidade': 0,
@@ -593,7 +609,8 @@ Map<String, Object> resumoRespostasDominio(
   };
   for (int usuario = 0; usuario < usuarios; usuario++) {
     for (int indice = 0; indice < itensPorUsuario; indice++) {
-      final String tipo = consultas[indice % consultas.length].tipo;
+      final String tipo =
+          consultas[(indiceInicial + indice - 1) % consultas.length].tipo;
       esperadas[tipo] = (esperadas[tipo] ?? 0) + 1;
     }
   }
@@ -656,6 +673,8 @@ void _imprimirResumo(
       'modo': config.cenario == 'e2' ? 'portal-direto' : config.modo,
       'usuarios': config.cenario == 'e2' ? null : config.usuarios,
       'itensPorUsuario': config.cenario == 'e2' ? null : config.itens,
+      if (config.indiceItem != null)
+        'indiceSequenciaTestado': config.indiceItem,
       'ritmoSessao': config.cenario == 'e2' ? 'sequencial' : config.ritmoSessao,
       if (config.cenario == 'e2') 'sessoesIndependentesTestadas': <int>[2, 4],
       'itensXmlUnicos': consultas.length,
@@ -683,6 +702,7 @@ void _imprimirResumo(
           metricas,
           config.usuarios,
           config.itens,
+          indiceInicial: config.indiceItem ?? 1,
         ),
       'duracaoMs': duracao.inMilliseconds,
       nomeCampoLatenciaResumo(config.cenario, config.modo): latencias.isEmpty
@@ -711,6 +731,12 @@ void _validar(_ConfigMatriz config) {
   if (!<String>{'rajada', 'escalonada'}.contains(config.ritmoSessao)) {
     throw const FormatException(
       '--ritmo-sessao deve ser rajada ou escalonada.',
+    );
+  }
+  if (config.indiceItem != null &&
+      (config.modo != 'item' || config.usuarios != 1)) {
+    throw const FormatException(
+      '--indice-item requer --modo item e --usuarios 1.',
     );
   }
 }
@@ -777,6 +803,7 @@ Uso: dart run tool/matriz_carga.dart --xml <arquivo.xml> [opcoes]
   --modo lote|item       lote padrao; item mede latencia end-to-end
   --usuarios <N>         padrao 6, maximo 20
   --itens <N>            padrao 200, maximo 300
+  --indice-item <N>      consulta isolada da sequência; requer modo item e 1 usuario
   --ritmo-sessao rajada|escalonada  Para E3; escalonada: 1 sessao/s
   --intervalo-item-ms <N> pacing/token no modo item; padrao 3000
   --intervalo-global-ms <N> pacing global no modo item; padrao 500
