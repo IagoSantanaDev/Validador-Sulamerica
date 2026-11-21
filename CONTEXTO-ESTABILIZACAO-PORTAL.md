@@ -164,8 +164,16 @@ decidir qual variável adicional se quer testar.
   concluídas, todas `sucesso: true`, zero falhas e 68 itens sem resultado ao
   alcançar o limite de cinco minutos. Foram observados seis
   `connectionTimeout`, todos repetidos e resolvidos; zero `http_semStatus`.
-- O Render ainda precisa receber a correção e ser retestado para confirmar que
-  a mesma causa ocorria lá e que a correção também resolve o caso hospedado.
+- Verificação após deploy, Render 12 × 200 com o mesmo XML: 1.722 respostas
+  concluídas, todas `sucesso: true`, zero falhas e 678 itens sem resultado ao
+  alcançar o limite de cinco minutos; os 12 lotes ficaram parciais. O `/api/status`
+  respondeu `ok`, sem lotes ativos/em fila, falhas de consulta, retries, HTTP
+  429/502/503 ou disjuntor aberto.
+- O reteste hospedado pós-correção não repetiu a mensagem genérica. Como a
+  execução Render anterior não preservou o tipo/stack da exceção, a causa exata
+  daquela ocorrência não pode ser atribuída diretamente ao mesmo stack; a
+  causa foi reproduzida e confirmada localmente, e o cenário Render pós-fix
+  passou sem falhas de consulta.
 
 ## Estado da estabilização
 
