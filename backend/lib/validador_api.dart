@@ -74,6 +74,7 @@ class ValidadorApi {
     _agendador = AgendadorLotes(
       pool: _pool,
       limiteExecucoes: limiteExecucoes,
+      limiteGlobal: SessaoPortal.limiteRequisicoesGlobal,
       executarConsulta: _executarConsultaPortal,
       mapearFalhaSessao: _mapearFalhaSessaoLote,
       validarConsulta: _validarFormatoConsulta,
@@ -562,6 +563,7 @@ class ValidadorApi {
       'concorrenciaPortal': <String, Object>{
         ...SessaoPortal.diagnosticoConcorrencia,
         ..._pool.diagnosticoConcorrenciaPortal,
+        'limiteAgendador': _agendador.limiteGlobal,
         'logins': SessaoPortal.diagnosticoLogins,
       },
       'portalSulAmerica': alcancePortal,

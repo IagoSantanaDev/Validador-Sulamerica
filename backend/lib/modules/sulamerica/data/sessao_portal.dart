@@ -121,6 +121,12 @@ class SessaoPortal {
     minimo: 1,
     maximo: 16,
   );
+  static final int _limiteRequisicoesGlobal = _lerInteiroAmbiente(
+    'PORTAL_REQUEST_MAX_CONCURRENCY',
+    16,
+    minimo: 1,
+    maximo: 20,
+  );
   static final int _maxRetriesFalhaTransitoria = _lerInteiroAmbiente(
     'PORTAL_RETRY_MAX_TENTATIVAS',
     3,
@@ -159,7 +165,7 @@ class SessaoPortal {
   final Logger _logger;
   final bool _repetirFalhasTransitorias;
   static final SemaforoRequisicoes _semaforoGlobal =
-      SemaforoRequisicoes(16);
+      SemaforoRequisicoes(_limiteRequisicoesGlobal);
   static final SemaforoRequisicoes _semaforoLogins =
       SemaforoRequisicoes(_limiteLoginsSimultaneos);
 
@@ -193,6 +199,8 @@ class SessaoPortal {
 
   static Map<String, int> get diagnosticoConcorrencia =>
       _semaforoGlobal.diagnostico;
+
+  static int get limiteRequisicoesGlobal => _limiteRequisicoesGlobal;
 
   static Map<String, int> get diagnosticoLogins =>
       _semaforoLogins.diagnostico;
