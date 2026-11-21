@@ -678,6 +678,13 @@ void _imprimirResumo(
       .whereType<int>()
       .toList()
     ..sort();
+  final List<int> latenciasLote = resultados
+      .where((ResultadoMatriz item) => item.tipo == 'lote_resumo')
+      .map((ResultadoMatriz item) => item.latenciaMs)
+      .whereType<int>()
+      .toList();
+  final bool resumoLote = config.modo == 'lote' &&
+      <String>{'matriz', 'e1'}.contains(config.cenario);
   stdout.writeln(
     jsonEncode(<String, Object?>{
       'cenario': config.cenario,
@@ -715,13 +722,9 @@ void _imprimirResumo(
           indiceInicial: config.indiceItem ?? 1,
         ),
       'duracaoMs': duracao.inMilliseconds,
-      nomeCampoLatenciaResumo(config.cenario, config.modo): latencias.isEmpty
-          ? null
-          : <String, int>{
-              'min': latencias.first,
-              'p50': latencias[latencias.length ~/ 2],
-              'max': latencias.last,
-            },
+      nomeCampoLatenciaResumo(config.cenario, config.modo): resumirLatencias(
+        resumoLote ? latenciasLote : latencias,
+      ),
       'csv': csvPath,
       if (config.cenario == 'e2')
         'limitacao':
@@ -734,7 +737,7 @@ void _imprimirResumo(
             'comparar CSVs com mesmos parametros, alterando somente --base-url.',
       if (config.modo == 'lote' && config.cenario == 'matriz')
         'limitacao':
-            'latencia por item indisponivel no contrato de lote; use --modo item.',
+            'latencia cliente por item indisponivel em lote; fases por item ficam no CSV; use --modo item para latencia end-to-end.',
     }),
   );
 }
