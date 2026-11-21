@@ -138,6 +138,15 @@ void main() {
     expect(csv, isNot(contains('12345678901234567890')));
   });
 
+  test('resume latências de lote ordenadas e aceita lista vazia', () {
+    expect(resumirLatencias(<int>[300, 100, 200]), <String, int>{
+      'min': 100,
+      'p50': 200,
+      'max': 300,
+    });
+    expect(resumirLatencias(const <int>[]), isNull);
+  });
+
   test(
     'resume respostas de domínio e conta consultas sem resposta como ausentes',
     () {

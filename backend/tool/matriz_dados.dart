@@ -172,4 +172,14 @@ String codificarCsv(List<ResultadoMatriz> resultados) {
   return csv.toString();
 }
 
+Map<String, int>? resumirLatencias(Iterable<int> valores) {
+  final List<int> ordenados = valores.toList()..sort();
+  if (ordenados.isEmpty) return null;
+  return <String, int>{
+    'min': ordenados.first,
+    'p50': ordenados[ordenados.length ~/ 2],
+    'max': ordenados.last,
+  };
+}
+
 String _csv(Object? valor) => '"${'$valor'.replaceAll('"', '""')}"';
