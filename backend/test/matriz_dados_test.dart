@@ -1,6 +1,7 @@
 import 'package:test/test.dart';
+
 import '../tool/matriz_carga.dart'
-    show filtrarMetricasResumo, nomeCampoLatenciaResumo;
+    show filtrarMetricasResumo, nomeCampoLatenciaResumo, resumoRespostasDominio;
 import '../tool/matriz_dados.dart';
 
 void main() {
@@ -25,10 +26,11 @@ void main() {
 
     expect(extrairIdentificadorPrestadorXml(xml), '27372066000169');
     expect(consultas, hasLength(3));
-    expect(
-      consultas.map((ConsultaMatriz item) => item.tipo),
-      <String>['elegibilidade', 'senha', 'senha'],
-    );
+    expect(consultas.map((ConsultaMatriz item) => item.tipo), <String>[
+      'elegibilidade',
+      'senha',
+      'senha',
+    ]);
     expect(consultas.first.chave, '00000000000000000001');
   });
 
@@ -61,6 +63,51 @@ void main() {
     );
   });
 
+  test('exige resultado de domínio determinado por tipo de consulta', () {
+    expect(
+      respostaDominioDeterminada('elegibilidade', <String, dynamic>{
+        'sucesso': true,
+        'elegivel': true,
+      }),
+      isTrue,
+    );
+    expect(
+      respostaDominioDeterminada('elegibilidade', <String, dynamic>{
+        'sucesso': true,
+        'elegivel': false,
+      }),
+      isTrue,
+    );
+    expect(
+      respostaDominioDeterminada('elegibilidade', <String, dynamic>{
+        'sucesso': true,
+        'elegivel': null,
+      }),
+      isFalse,
+    );
+    expect(
+      respostaDominioDeterminada('senha', <String, dynamic>{
+        'sucesso': true,
+        'statusSenha': 'Autorizado',
+      }),
+      isTrue,
+    );
+    expect(
+      respostaDominioDeterminada('senha', <String, dynamic>{
+        'sucesso': true,
+        'statusSenha': '  ',
+      }),
+      isFalse,
+    );
+    expect(
+      respostaDominioDeterminada('senha', <String, dynamic>{
+        'sucesso': false,
+        'statusSenha': 'Autorizado',
+      }),
+      isFalse,
+    );
+  });
+
   test('CSV escapa aspas e não precisa serializar consulta ou token', () {
     final String csv = codificarCsv(<ResultadoMatriz>[
       const ResultadoMatriz(
@@ -72,13 +119,81 @@ void main() {
         statusHttp: 502,
         erro: 'bad "gateway"',
         origem502: 'indeterminada',
+        dominioDeterminado: false,
       ),
     ]);
 
     expect(csv, contains('usuario,indice,tipo'));
+    expect(csv, contains('dominio_determinado'));
     expect(csv, contains('"bad ""gateway"""'));
+    expect(csv, contains('"false"'));
     expect(csv, isNot(contains('token')));
   });
+
+  test(
+    'resume respostas de domínio e conta consultas sem resposta como ausentes',
+    () {
+      final Map<String, Object> resumo = resumoRespostasDominio(
+        const <ConsultaMatriz>[
+          ConsultaMatriz(tipo: 'elegibilidade', chave: 'x'),
+          ConsultaMatriz(tipo: 'senha', chave: 'y'),
+        ],
+        const <ResultadoMatriz>[
+          ResultadoMatriz(
+            usuario: 1,
+            indice: 1,
+            tipo: 'elegibilidade',
+            sucesso: true,
+            latenciaMs: null,
+            statusHttp: 202,
+            erro: null,
+            origem502: null,
+            dominioDeterminado: true,
+          ),
+          ResultadoMatriz(
+            usuario: 1,
+            indice: 2,
+            tipo: 'senha',
+            sucesso: true,
+            latenciaMs: null,
+            statusHttp: 202,
+            erro: null,
+            origem502: null,
+            dominioDeterminado: false,
+          ),
+          ResultadoMatriz(
+            usuario: 1,
+            indice: 3,
+            tipo: 'elegibilidade',
+            sucesso: true,
+            latenciaMs: null,
+            statusHttp: 202,
+            erro: null,
+            origem502: null,
+            dominioDeterminado: true,
+          ),
+        ],
+        1,
+        4,
+      );
+
+      expect(resumo['elegibilidade'], <String, int>{
+        'esperadas': 2,
+        'determinadas': 2,
+        'indeterminadas': 0,
+      });
+      expect(resumo['senha'], <String, int>{
+        'esperadas': 2,
+        'determinadas': 0,
+        'indeterminadas': 2,
+      });
+      expect(resumo['total'], <String, int>{
+        'esperadas': 4,
+        'determinadas': 2,
+        'indeterminadas': 2,
+      });
+    },
+  );
 
   test('resumo E3 inclui sessões e E2 exclui sessões das métricas', () {
     const List<ResultadoMatriz> resultados = <ResultadoMatriz>[

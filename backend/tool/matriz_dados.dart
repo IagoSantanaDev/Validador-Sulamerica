@@ -9,9 +9,9 @@ class ConsultaMatriz {
   final String chave;
 
   Map<String, String> toJson() => <String, String>{
-        'tipo': tipo,
-        'chave': chave,
-      };
+    'tipo': tipo,
+    'chave': chave,
+  };
 }
 
 class ResultadoMatriz {
@@ -24,6 +24,7 @@ class ResultadoMatriz {
     required this.statusHttp,
     required this.erro,
     required this.origem502,
+    this.dominioDeterminado,
   });
 
   final int usuario;
@@ -34,32 +35,40 @@ class ResultadoMatriz {
   final int? statusHttp;
   final String? erro;
   final String? origem502;
+  final bool? dominioDeterminado;
 
   Map<String, Object?> toCsvRow() => <String, Object?>{
-        'usuario': usuario,
-        'indice': indice,
-        'tipo': tipo,
-        'sucesso': sucesso ?? '',
-        'latencia_ms': latenciaMs ?? '',
-        'status_http': statusHttp ?? '',
-        'erro': erro ?? '',
-        'origem_502': origem502 ?? '',
-      };
+    'usuario': usuario,
+    'indice': indice,
+    'tipo': tipo,
+    'sucesso': sucesso ?? '',
+    'latencia_ms': latenciaMs ?? '',
+    'status_http': statusHttp ?? '',
+    'erro': erro ?? '',
+    'origem_502': origem502 ?? '',
+    'dominio_determinado': dominioDeterminado ?? '',
+  };
 }
 
 List<ConsultaMatriz> extrairConsultasXml(String conteudoXml) {
   final XmlDocument documento = XmlDocument.parse(conteudoXml);
   final Set<String> carteiras = <String>{};
   final Set<String> senhas = <String>{};
-  for (final XmlElement guia
-      in documento.findAllElements('guiaSP-SADT', namespaceUri: '*')) {
-    for (final XmlElement item
-        in guia.findAllElements('numeroCarteira', namespaceUri: '*')) {
+  for (final XmlElement guia in documento.findAllElements(
+    'guiaSP-SADT',
+    namespaceUri: '*',
+  )) {
+    for (final XmlElement item in guia.findAllElements(
+      'numeroCarteira',
+      namespaceUri: '*',
+    )) {
       final String chave = item.innerText.trim();
       if (RegExp(r'^\d{20}$').hasMatch(chave)) carteiras.add(chave);
     }
-    for (final XmlElement item
-        in guia.findAllElements('senha', namespaceUri: '*')) {
+    for (final XmlElement item in guia.findAllElements(
+      'senha',
+      namespaceUri: '*',
+    )) {
       final String chave = item.innerText.trim();
       if (RegExp(r'^5\d{9}$').hasMatch(chave)) senhas.add(chave);
     }
@@ -74,10 +83,14 @@ List<ConsultaMatriz> extrairConsultasXml(String conteudoXml) {
 
 String extrairIdentificadorPrestadorXml(String conteudoXml) {
   final XmlDocument documento = XmlDocument.parse(conteudoXml);
-  for (final XmlElement prestador in documento
-      .findAllElements('identificacaoPrestador', namespaceUri: '*')) {
-    for (final XmlElement cnpj
-        in prestador.findAllElements('CNPJ', namespaceUri: '*')) {
+  for (final XmlElement prestador in documento.findAllElements(
+    'identificacaoPrestador',
+    namespaceUri: '*',
+  )) {
+    for (final XmlElement cnpj in prestador.findAllElements(
+      'CNPJ',
+      namespaceUri: '*',
+    )) {
       final String valor = cnpj.innerText.trim();
       if (RegExp(r'^\d{14}$').hasMatch(valor)) return valor;
     }
@@ -109,6 +122,16 @@ String? extrairErroResultadoConsulta(Map<String, dynamic>? resultado) {
   return erro is String && erro.isNotEmpty ? erro : 'consulta_falhou';
 }
 
+bool respostaDominioDeterminada(String tipo, Map<String, dynamic>? resultado) {
+  if (resultado?['sucesso'] != true) return false;
+  if (tipo == 'elegibilidade') return resultado?['elegivel'] is bool;
+  if (tipo == 'senha') {
+    final Object? status = resultado?['statusSenha'];
+    return status is String && status.trim().isNotEmpty;
+  }
+  return false;
+}
+
 String codificarCsv(List<ResultadoMatriz> resultados) {
   const List<String> colunas = <String>[
     'usuario',
@@ -119,6 +142,7 @@ String codificarCsv(List<ResultadoMatriz> resultados) {
     'status_http',
     'erro',
     'origem_502',
+    'dominio_determinado',
   ];
   final StringBuffer csv = StringBuffer('${colunas.join(',')}\r\n');
   for (final ResultadoMatriz resultado in resultados) {
