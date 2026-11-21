@@ -9,9 +9,9 @@ class ConsultaMatriz {
   final String chave;
 
   Map<String, String> toJson() => <String, String>{
-    'tipo': tipo,
-    'chave': chave,
-  };
+        'tipo': tipo,
+        'chave': chave,
+      };
 }
 
 class ResultadoMatriz {
@@ -25,6 +25,11 @@ class ResultadoMatriz {
     required this.erro,
     required this.origem502,
     this.dominioDeterminado,
+    this.tempoFilaMs,
+    this.tempoSessaoMs,
+    this.tempoPortalMs,
+    this.tempoRetryMs,
+    this.tempoExecucaoMs,
   });
 
   final int usuario;
@@ -36,18 +41,28 @@ class ResultadoMatriz {
   final String? erro;
   final String? origem502;
   final bool? dominioDeterminado;
+  final int? tempoFilaMs;
+  final int? tempoSessaoMs;
+  final int? tempoPortalMs;
+  final int? tempoRetryMs;
+  final int? tempoExecucaoMs;
 
   Map<String, Object?> toCsvRow() => <String, Object?>{
-    'usuario': usuario,
-    'indice': indice,
-    'tipo': tipo,
-    'sucesso': sucesso ?? '',
-    'latencia_ms': latenciaMs ?? '',
-    'status_http': statusHttp ?? '',
-    'erro': erro ?? '',
-    'origem_502': origem502 ?? '',
-    'dominio_determinado': dominioDeterminado ?? '',
-  };
+        'usuario': usuario,
+        'indice': indice,
+        'tipo': tipo,
+        'sucesso': sucesso ?? '',
+        'latencia_ms': latenciaMs ?? '',
+        'status_http': statusHttp ?? '',
+        'erro': erro ?? '',
+        'origem_502': origem502 ?? '',
+        'dominio_determinado': dominioDeterminado ?? '',
+        'tempo_fila_ms': tempoFilaMs ?? '',
+        'tempo_sessao_ms': tempoSessaoMs ?? '',
+        'tempo_portal_ms': tempoPortalMs ?? '',
+        'tempo_retry_ms': tempoRetryMs ?? '',
+        'tempo_execucao_ms': tempoExecucaoMs ?? '',
+      };
 }
 
 List<ConsultaMatriz> extrairConsultasXml(String conteudoXml) {
@@ -143,6 +158,11 @@ String codificarCsv(List<ResultadoMatriz> resultados) {
     'erro',
     'origem_502',
     'dominio_determinado',
+    'tempo_fila_ms',
+    'tempo_sessao_ms',
+    'tempo_portal_ms',
+    'tempo_retry_ms',
+    'tempo_execucao_ms',
   ];
   final StringBuffer csv = StringBuffer('${colunas.join(',')}\r\n');
   for (final ResultadoMatriz resultado in resultados) {

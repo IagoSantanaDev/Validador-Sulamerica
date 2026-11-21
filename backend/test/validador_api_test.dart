@@ -15,7 +15,8 @@ const Map<String, String> _ambiente = <String, String>{
   'PORTAL_PRESTADOR_ID_TESTE_CODE': '000000000000',
   'PORTAL_PRESTADOR_ID_TESTE_USER': 'usuario-teste',
   'PORTAL_PRESTADOR_ID_TESTE_SENHA': 'senha-teste',
-  'CORS_ORIGIN': 'https://app.example,https://validador-sulamerica.pages.dev,https://iagosantanadev.github.io',
+  'CORS_ORIGIN':
+      'https://app.example,https://validador-sulamerica.pages.dev,https://iagosantanadev.github.io',
 };
 
 class _LogMudo implements LogOutput {
@@ -50,10 +51,10 @@ class _SessaoFake extends SessaoPortal {
 
   @override
   Map<String, int> get diagnosticoSessao => <String, int>{
-    ...super.diagnosticoSessao,
-    if (supportIdMarkers > 0)
-      'assinaturaF5MarkerSupportId': supportIdMarkers,
-  };
+        ...super.diagnosticoSessao,
+        if (supportIdMarkers > 0)
+          'assinaturaF5MarkerSupportId': supportIdMarkers,
+      };
 
   @override
   bool get autenticada => _autenticada;
@@ -162,16 +163,17 @@ Request _request(
   String? token,
   String? idempotencyKey,
   Map<String, String>? headers,
-}) => Request(
-  method,
-  Uri.parse('http://localhost$path'),
-  body: body == null ? null : jsonEncode(body),
-  headers: <String, String>{
-    if (token != null) 'authorization': 'Bearer $token',
-    if (idempotencyKey != null) 'idempotency-key': idempotencyKey,
-    ...?headers,
-  },
-);
+}) =>
+    Request(
+      method,
+      Uri.parse('http://localhost$path'),
+      body: body == null ? null : jsonEncode(body),
+      headers: <String, String>{
+        if (token != null) 'authorization': 'Bearer $token',
+        if (idempotencyKey != null) 'idempotency-key': idempotencyKey,
+        ...?headers,
+      },
+    );
 
 Future<String> _criarSessao(ValidadorApi api) async {
   final Response resposta = await api.handler(
@@ -196,17 +198,18 @@ Future<Response> _criarLote(
   String token,
   String key, {
   List<Map<String, dynamic>>? consultas,
-}) async => await api.handler(
-  _request(
-    'POST',
-    '/api/lotes',
-    token: token,
-    idempotencyKey: key,
-    body: <String, Object>{
-      'consultas': consultas ?? <Map<String, dynamic>>[_consulta()],
-    },
-  ),
-);
+}) async =>
+    await api.handler(
+      _request(
+        'POST',
+        '/api/lotes',
+        token: token,
+        idempotencyKey: key,
+        body: <String, Object>{
+          'consultas': consultas ?? <Map<String, dynamic>>[_consulta()],
+        },
+      ),
+    );
 
 void main() {
   group('POST /api/sessoes', () {
@@ -221,7 +224,8 @@ void main() {
       },
     );
 
-    test('retorna 503 com Retry-After enquanto o circuito está aberto', () async {
+    test('retorna 503 com Retry-After enquanto o circuito está aberto',
+        () async {
       DateTime agora = DateTime.utc(2026);
       int sondas = 0;
       final DisjuntorPortal disjuntor = DisjuntorPortal(
@@ -287,8 +291,7 @@ void main() {
       'reutilização de sessão autenticada não limpa falhas do disjuntor',
       () async {
         final DisjuntorPortal disjuntor = DisjuntorPortal(
-          sondarPortal: () async =>
-              const ResultadoSondaDisjuntor(status: 200),
+          sondarPortal: () async => const ResultadoSondaDisjuntor(status: 200),
         );
         final _ContextoApi contexto = _criarApi(disjuntor: disjuntor);
         await _criarSessao(contexto.api);
@@ -416,8 +419,7 @@ void main() {
       'rejeita novo lote com 503 e Retry-After quando o circuito abre',
       () async {
         final DisjuntorPortal disjuntor = DisjuntorPortal(
-          sondarPortal: () async =>
-              const ResultadoSondaDisjuntor(status: 200),
+          sondarPortal: () async => const ResultadoSondaDisjuntor(status: 200),
         );
         final _ContextoApi contexto = _criarApi(disjuntor: disjuntor);
         final String token = await _criarSessao(contexto.api);
@@ -436,10 +438,10 @@ void main() {
       },
     );
 
-    test('replay idempotente continua disponível com o circuito aberto', () async {
+    test('replay idempotente continua disponível com o circuito aberto',
+        () async {
       final DisjuntorPortal disjuntor = DisjuntorPortal(
-        sondarPortal: () async =>
-            const ResultadoSondaDisjuntor(status: 200),
+        sondarPortal: () async => const ResultadoSondaDisjuntor(status: 200),
       );
       final _ContextoApi contexto = _criarApi(disjuntor: disjuntor);
       final String token = await _criarSessao(contexto.api);
@@ -645,11 +647,22 @@ void main() {
       final Map<String, dynamic> payload =
           jsonDecode(dadosResultado) as Map<String, dynamic>;
       final List<dynamic> resultados = payload['resultados'] as List<dynamic>;
-      final String erro =
-          (resultados.single as Map<String, dynamic>)['erro'] as String;
+      final Map<String, dynamic> resultado =
+          resultados.single as Map<String, dynamic>;
+      final String erro = resultado['erro'] as String;
 
       expect(erro, 'Falha na consulta ao portal SulAmerica (HTTP 429).');
       expect(erro, isNot(contains('12345678901234567890')));
+      for (final String campo in <String>[
+        'tempoFilaMs',
+        'tempoSessaoMs',
+        'tempoPortalMs',
+        'tempoRetryMs',
+        'tempoExecucaoMs',
+      ]) {
+        expect(resultado[campo], isA<int>());
+        expect(resultado[campo], greaterThanOrEqualTo(0));
+      }
       await _aguardar(() async => await _ativos(contexto.api) == 0);
     });
 
@@ -741,15 +754,12 @@ void main() {
       );
       final StringBuffer dados = StringBuffer();
       final Completer<void> segundaFechada = Completer<void>();
-      segunda
-          .read()
-          .transform(utf8.decoder)
-          .listen(
-            dados.write,
-            onDone: () {
-              if (!segundaFechada.isCompleted) segundaFechada.complete();
-            },
-          );
+      segunda.read().transform(utf8.decoder).listen(
+        dados.write,
+        onDone: () {
+          if (!segundaFechada.isCompleted) segundaFechada.complete();
+        },
+      );
       await primeiraFechada.future.timeout(const Duration(seconds: 1));
       expect(segunda.statusCode, 200);
       expect(segunda.headers['content-type'], contains('text/event-stream'));
@@ -836,7 +846,8 @@ void main() {
       },
     );
 
-    test('status nunca expõe Support IDs e preserva contadores agregados', () async {
+    test('status nunca expõe Support IDs e preserva contadores agregados',
+        () async {
       final _ContextoApi contexto = _criarApi(
         ambiente: <String, String>{
           ..._ambiente,
