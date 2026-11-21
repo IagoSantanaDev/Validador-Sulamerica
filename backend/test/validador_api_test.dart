@@ -830,7 +830,14 @@ void main() {
           containsPair('renovacoesFalhaCredenciaisInvalidas', 0),
         );
         final Map concorrencia = dados['concorrenciaPortal'] as Map;
-        expect(concorrencia, containsPair('limite', 16));
+        expect(
+          concorrencia,
+          containsPair('limite', SessaoPortal.limiteRequisicoesGlobal),
+        );
+        expect(
+          concorrencia,
+          containsPair('limiteAgendador', SessaoPortal.limiteRequisicoesGlobal),
+        );
         expect(
           concorrencia,
           containsPair('limiteSessoesPorIdentificador', 4),
@@ -860,7 +867,14 @@ void main() {
       final Map concorrencia = dados['concorrenciaPortal'] as Map;
 
       expect(concorrencia, containsPair('limiteSessoesPorIdentificador', 5));
-      expect(concorrencia, containsPair('limite', 16));
+      expect(
+        concorrencia,
+        containsPair('limite', SessaoPortal.limiteRequisicoesGlobal),
+      );
+      expect(
+        concorrencia,
+        containsPair('limiteAgendador', SessaoPortal.limiteRequisicoesGlobal),
+      );
     });
 
     test('status nunca expõe Support IDs e preserva contadores agregados',
