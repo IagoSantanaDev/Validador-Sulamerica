@@ -58,11 +58,11 @@ class AgendadorLotes {
     DateTime Function()? agora,
     Future<void> Function(Duration)? aguardar,
     Random? aleatorio,
-  }) : _pool = pool,
-       _executarConsulta = executarConsulta,
-       _agora = agora ?? DateTime.now,
-       _aguardar = aguardar ?? Future<void>.delayed,
-       _aleatorio = aleatorio ?? Random.secure();
+  })  : _pool = pool,
+        _executarConsulta = executarConsulta,
+        _agora = agora ?? DateTime.now,
+        _aguardar = aguardar ?? Future<void>.delayed,
+        _aleatorio = aleatorio ?? Random.secure();
 
   final PoolSessoesPortal _pool;
   final ExecutarConsultaLote _executarConsulta;
@@ -103,10 +103,10 @@ class AgendadorLotes {
   int get parciais => _parciais;
 
   Map<String, int> get diagnosticoRetries => <String, int>{
-    'iniciados': _retriesIniciados,
-    'resolvidos': _retriesResolvidos,
-    'esgotados': _retriesEsgotados,
-  };
+        'iniciados': _retriesIniciados,
+        'resolvidos': _retriesResolvidos,
+        'esgotados': _retriesEsgotados,
+      };
 
   ExecucaoLote? obterExecucao(String id, String tokenDono) {
     final _LoteAgendado? lote = _execucoes[id];
@@ -251,6 +251,24 @@ class AgendadorLotes {
   }
 
   Future<void> _executarItem(_LoteAgendado lote, int indice) async {
+    final Stopwatch tempoExecucao = Stopwatch()..start();
+    final int tempoFilaMs = max(
+      0,
+      _agora().difference(lote.enfileiradoEm).inMilliseconds,
+    );
+    int tempoSessaoMs = 0;
+    int tempoPortalMs = 0;
+    int tempoRetryMs = 0;
+    Map<String, dynamic> incluirTempos(Map<String, dynamic> dados) =>
+        <String, dynamic>{
+          ...dados,
+          'tempoFilaMs': tempoFilaMs,
+          'tempoSessaoMs': tempoSessaoMs,
+          'tempoPortalMs': tempoPortalMs,
+          'tempoRetryMs': tempoRetryMs,
+          'tempoExecucaoMs': tempoExecucao.elapsedMilliseconds,
+        };
+
     try {
       final Map<String, dynamic> consulta = lote.consultas[indice];
       final Map<String, dynamic>? falhaFormato = validarConsulta?.call(
@@ -260,7 +278,7 @@ class AgendadorLotes {
         if (lote.execucao.estado == EstadoExecucaoLote.naFila) {
           lote.execucao.iniciar();
         }
-        lote.resultados[indice] = falhaFormato;
+        lote.resultados[indice] = incluirTempos(falhaFormato);
         lote.execucao.registrarConclusao();
         return;
       }
@@ -277,12 +295,17 @@ class AgendadorLotes {
           permissao = await _aguardarPermissao(lote);
           if (!lote.execucao.ativo) return;
           if (tentativa > 1) _retriesIniciados++;
-          emprestimo = await _pool.adquirir(
-            identificador: lote.identificadorPrestador,
-            credenciais: lote.credenciais,
-            tipo: tipo,
-            cancelToken: lote.cancelToken,
-          );
+          final Stopwatch tempoAquisicao = Stopwatch()..start();
+          try {
+            emprestimo = await _pool.adquirir(
+              identificador: lote.identificadorPrestador,
+              credenciais: lote.credenciais,
+              tipo: tipo,
+              cancelToken: lote.cancelToken,
+            );
+          } finally {
+            tempoSessaoMs += tempoAquisicao.elapsedMilliseconds;
+          }
           if (!lote.execucao.ativo) {
             permissao?.concluir(ResultadoDisjuntorPortal.neutra);
             return;
@@ -290,11 +313,16 @@ class AgendadorLotes {
           if (lote.execucao.estado == EstadoExecucaoLote.naFila) {
             lote.execucao.iniciar();
           }
-          resultado = await _executarConsulta(
-            emprestimo.sessao,
-            consulta,
-            lote.cancelToken,
-          );
+          final Stopwatch tempoConsulta = Stopwatch()..start();
+          try {
+            resultado = await _executarConsulta(
+              emprestimo.sessao,
+              consulta,
+              lote.cancelToken,
+            );
+          } finally {
+            tempoPortalMs += tempoConsulta.elapsedMilliseconds;
+          }
           permissao?.concluir(_classificarResultado(resultado));
         } on FalhaPoolSessoesException catch (erro) {
           permissao?.concluir(
@@ -302,8 +330,7 @@ class AgendadorLotes {
                 ? ResultadoDisjuntorPortal.falhaElegivel
                 : ResultadoDisjuntorPortal.neutra,
           );
-          resultado =
-              mapearFalhaSessao?.call(consulta, erro.resultado) ??
+          resultado = mapearFalhaSessao?.call(consulta, erro.resultado) ??
               ResultadoConsultaAgendada(
                 dados: <String, dynamic>{
                   ...consulta,
@@ -320,10 +347,15 @@ class AgendadorLotes {
         if (!lote.execucao.ativo) return;
         final ResultadoConsultaAgendada conclusao = resultado;
         if (conclusao.retryable && tentativa < maxTentativas) {
-          await _aguardarCancelavel(
-            lote,
-            SessaoPortal.esperaRetryTransitorio(tentativa),
-          );
+          final Stopwatch tempoEsperaRetry = Stopwatch()..start();
+          try {
+            await _aguardarCancelavel(
+              lote,
+              SessaoPortal.esperaRetryTransitorio(tentativa),
+            );
+          } finally {
+            tempoRetryMs += tempoEsperaRetry.elapsedMilliseconds;
+          }
           continue;
         }
         if (conclusao.retryable) {
@@ -332,7 +364,7 @@ class AgendadorLotes {
         } else if (tentativa > 1 && conclusao.dados['sucesso'] == true) {
           _retriesResolvidos++;
         }
-        lote.resultados[indice] = conclusao.dados;
+        lote.resultados[indice] = incluirTempos(conclusao.dados);
         lote.execucao.registrarConclusao();
         return;
       }
@@ -364,8 +396,8 @@ class AgendadorLotes {
       if (lote.cancelToken.isCancelled) {
         throw const OperacaoPortalCanceladaException();
       }
-      final PermissaoDisjuntorPortal? permissao = await disjuntor
-          .tentarAdquirir();
+      final PermissaoDisjuntorPortal? permissao =
+          await disjuntor.tentarAdquirir();
       if (permissao != null) return permissao;
       await _aguardarCancelavel(
         lote,

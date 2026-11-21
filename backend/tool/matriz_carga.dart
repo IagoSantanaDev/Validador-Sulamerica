@@ -130,51 +130,50 @@ class _SessaoApi {
 
 class _ClienteMatriz {
   _ClienteMatriz(String baseUrl)
-    : _dio = Dio(
-        BaseOptions(
-          baseUrl: baseUrl,
-          connectTimeout: const Duration(seconds: 20),
-          receiveTimeout: const Duration(minutes: 3),
-          sendTimeout: const Duration(seconds: 30),
-          validateStatus: (int? status) => status != null,
-        ),
-      );
+      : _dio = Dio(
+          BaseOptions(
+            baseUrl: baseUrl,
+            connectTimeout: const Duration(seconds: 20),
+            receiveTimeout: const Duration(minutes: 3),
+            sendTimeout: const Duration(seconds: 30),
+            validateStatus: (int? status) => status != null,
+          ),
+        );
 
   final Dio _dio;
 
   Future<void> fechar() async => _dio.close(force: true);
 
   Future<Response<dynamic>> criarSessao(String identificador) => _dio.post(
-    '/api/sessoes',
-    data: <String, String>{'identificadorPrestador': identificador},
-  );
+        '/api/sessoes',
+        data: <String, String>{'identificadorPrestador': identificador},
+      );
 
   Future<Response<dynamic>> criarLote(
     _SessaoApi sessao,
     List<ConsultaMatriz> consultas,
-  ) => _dio.post(
-    '/api/lotes',
-    data: <String, Object>{
-      'consultas': consultas
-          .map((ConsultaMatriz item) => item.toJson())
-          .toList(),
-    },
-    options: Options(
-      headers: <String, String>{
-        'authorization': 'Bearer ${sessao.token}',
-        'idempotency-key': _novaChaveIdempotencia(),
-      },
-    ),
-  );
+  ) =>
+      _dio.post(
+        '/api/lotes',
+        data: <String, Object>{
+          'consultas':
+              consultas.map((ConsultaMatriz item) => item.toJson()).toList(),
+        },
+        options: Options(
+          headers: <String, String>{
+            'authorization': 'Bearer ${sessao.token}',
+            'idempotency-key': _novaChaveIdempotencia(),
+          },
+        ),
+      );
 
   Future<List<Map<String, dynamic>>> eventos(
     _SessaoApi sessao,
     String location,
   ) async {
     final Uri uri = Uri.parse(location);
-    final String url = uri.hasScheme
-        ? location
-        : '${_dio.options.baseUrl}$location';
+    final String url =
+        uri.hasScheme ? location : '${_dio.options.baseUrl}$location';
     final Response<ResponseBody> resposta = await _dio.get<ResponseBody>(
       url,
       options: Options(
@@ -340,6 +339,11 @@ Future<void> _executarLote(
             itens[indice].tipo,
             item,
           ),
+          tempoFilaMs: _campoInteiro(item, 'tempoFilaMs'),
+          tempoSessaoMs: _campoInteiro(item, 'tempoSessaoMs'),
+          tempoPortalMs: _campoInteiro(item, 'tempoPortalMs'),
+          tempoRetryMs: _campoInteiro(item, 'tempoRetryMs'),
+          tempoExecucaoMs: _campoInteiro(item, 'tempoExecucaoMs'),
         ),
       );
     }
@@ -410,8 +414,8 @@ Future<void> _executarConsultaItem(
     final String? location = resposta.headers.value('location');
     final List<Map<String, dynamic>> eventos =
         resposta.statusCode == 202 && location != null
-        ? await cliente.eventos(sessao, location)
-        : <Map<String, dynamic>>[];
+            ? await cliente.eventos(sessao, location)
+            : <Map<String, dynamic>>[];
     final Map<String, dynamic>? fim = eventos.reversed
         .where((Map<String, dynamic> item) => item['event'] == 'resultado')
         .map(
@@ -419,12 +423,10 @@ Future<void> _executarConsultaItem(
         )
         .firstOrNull;
     final Object? itens = fim?['resultados'];
-    final Map<String, dynamic>? item = itens is List && itens.isNotEmpty
-        ? _mapa(itens.first)
-        : null;
-    final bool? sucesso = itens is List && itens.isNotEmpty
-        ? (item?['sucesso'] as bool?)
-        : null;
+    final Map<String, dynamic>? item =
+        itens is List && itens.isNotEmpty ? _mapa(itens.first) : null;
+    final bool? sucesso =
+        itens is List && itens.isNotEmpty ? (item?['sucesso'] as bool?) : null;
     relogio.stop();
     resultados.add(
       ResultadoMatriz(
@@ -436,13 +438,18 @@ Future<void> _executarConsultaItem(
         statusHttp: resposta.statusCode,
         erro: sucesso == null
             ? (resposta.statusCode == 202
-                  ? 'resultado_sse_ausente'
-                  : 'http_${resposta.statusCode}')
+                ? 'resultado_sse_ausente'
+                : 'http_${resposta.statusCode}')
             : extrairErroResultadoConsulta(item),
         origem502: resposta.statusCode == 502
             ? resposta.headers.value(_headerOrigem502) ?? 'indeterminada'
             : null,
         dominioDeterminado: respostaDominioDeterminada(consulta.tipo, item),
+        tempoFilaMs: _campoInteiro(item, 'tempoFilaMs'),
+        tempoSessaoMs: _campoInteiro(item, 'tempoSessaoMs'),
+        tempoPortalMs: _campoInteiro(item, 'tempoPortalMs'),
+        tempoRetryMs: _campoInteiro(item, 'tempoRetryMs'),
+        tempoExecucaoMs: _campoInteiro(item, 'tempoExecucaoMs'),
       ),
     );
   } on DioException catch (erro) {
@@ -558,38 +565,45 @@ ResultadoMatriz _falha(
   String tipo,
   int? status,
   String? origem502,
-) => ResultadoMatriz(
-  usuario: usuario,
-  indice: 0,
-  tipo: tipo,
-  sucesso: false,
-  latenciaMs: null,
-  statusHttp: status,
-  erro: switch (status) {
-    401 => 'nao_autorizado',
-    413 => 'limite_excedido',
-    429 => 'rate_limit_api',
-    502 => 'bad_gateway',
-    503 => 'servico_indisponivel',
-    null => 'falha_transporte',
-    _ => 'http_$status',
-  },
-  origem502: status == 502 ? origem502 ?? 'indeterminada' : null,
-);
+) =>
+    ResultadoMatriz(
+      usuario: usuario,
+      indice: 0,
+      tipo: tipo,
+      sucesso: false,
+      latenciaMs: null,
+      statusHttp: status,
+      erro: switch (status) {
+        401 => 'nao_autorizado',
+        413 => 'limite_excedido',
+        429 => 'rate_limit_api',
+        502 => 'bad_gateway',
+        503 => 'servico_indisponivel',
+        null => 'falha_transporte',
+        _ => 'http_$status',
+      },
+      origem502: status == 502 ? origem502 ?? 'indeterminada' : null,
+    );
 
 Map<String, dynamic>? _mapa(Object? valor) =>
     valor is Map<String, dynamic> ? valor : null;
 
+int? _campoInteiro(Map<String, dynamic>? mapa, String campo) {
+  final Object? valor = mapa?[campo];
+  return valor is int ? valor : null;
+}
+
 List<ResultadoMatriz> filtrarMetricasResumo(
   String cenario,
   List<ResultadoMatriz> resultados,
-) => resultados
-    .where(
-      (ResultadoMatriz item) =>
-          item.tipo != 'lote_resumo' &&
-          (cenario == 'e3' || !item.tipo.startsWith('sessao')),
-    )
-    .toList();
+) =>
+    resultados
+        .where(
+          (ResultadoMatriz item) =>
+              item.tipo != 'lote_resumo' &&
+              (cenario == 'e3' || !item.tipo.startsWith('sessao')),
+        )
+        .toList();
 
 Map<String, Object> resumoRespostasDominio(
   List<ConsultaMatriz> consultas,
@@ -597,8 +611,7 @@ Map<String, Object> resumoRespostasDominio(
   int usuarios,
   int itensPorUsuario, {
   int indiceInicial = 1,
-}
-) {
+}) {
   final Map<String, int> esperadas = <String, int>{
     'elegibilidade': 0,
     'senha': 0,
@@ -660,12 +673,11 @@ void _imprimirResumo(
     config.cenario,
     resultados,
   );
-  final List<int> latencias =
-      metricas
-          .map((ResultadoMatriz item) => item.latenciaMs)
-          .whereType<int>()
-          .toList()
-        ..sort();
+  final List<int> latencias = metricas
+      .map((ResultadoMatriz item) => item.latenciaMs)
+      .whereType<int>()
+      .toList()
+    ..sort();
   stdout.writeln(
     jsonEncode(<String, Object?>{
       'cenario': config.cenario,
@@ -681,12 +693,10 @@ void _imprimirResumo(
       'elegibilidadeXml': consultas
           .where((ConsultaMatriz item) => item.tipo == 'elegibilidade')
           .length,
-      'senhaXml': consultas
-          .where((ConsultaMatriz item) => item.tipo == 'senha')
-          .length,
-      'sucessos': metricas
-          .where((ResultadoMatriz item) => item.sucesso == true)
-          .length,
+      'senhaXml':
+          consultas.where((ConsultaMatriz item) => item.tipo == 'senha').length,
+      'sucessos':
+          metricas.where((ResultadoMatriz item) => item.sucesso == true).length,
       'falhas': metricas
           .where((ResultadoMatriz item) => item.sucesso == false)
           .length,
@@ -713,10 +723,18 @@ void _imprimirResumo(
               'max': latencias.last,
             },
       'csv': csvPath,
-      if (config.cenario == 'e2') 'limitacao': 'sessões independentes; consulta não renova automaticamente 401/403.',
-      if (config.cenario == 'e3') 'limitacao': 'E3 mede POST /api/sessoes; pool pode reutilizar ou coalescer login.',
-      if (config.cenario == 'e1') 'limitacao': 'comparar CSVs com mesmos parametros, alterando somente --base-url.',
-      if (config.modo == 'lote' && config.cenario == 'matriz') 'limitacao': 'latencia por item indisponivel no contrato de lote; use --modo item.',
+      if (config.cenario == 'e2')
+        'limitacao':
+            'sessões independentes; consulta não renova automaticamente 401/403.',
+      if (config.cenario == 'e3')
+        'limitacao':
+            'E3 mede POST /api/sessoes; pool pode reutilizar ou coalescer login.',
+      if (config.cenario == 'e1')
+        'limitacao':
+            'comparar CSVs com mesmos parametros, alterando somente --base-url.',
+      if (config.modo == 'lote' && config.cenario == 'matriz')
+        'limitacao':
+            'latencia por item indisponivel no contrato de lote; use --modo item.',
     }),
   );
 }

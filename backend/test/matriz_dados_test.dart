@@ -120,14 +120,22 @@ void main() {
         erro: 'bad "gateway"',
         origem502: 'indeterminada',
         dominioDeterminado: false,
+        tempoFilaMs: 8,
+        tempoSessaoMs: 12,
+        tempoPortalMs: 24,
+        tempoRetryMs: 0,
+        tempoExecucaoMs: 40,
       ),
     ]);
 
     expect(csv, contains('usuario,indice,tipo'));
     expect(csv, contains('dominio_determinado'));
+    expect(csv, contains('tempo_fila_ms,tempo_sessao_ms,tempo_portal_ms'));
+    expect(csv, contains('"8","12","24","0","40"'));
     expect(csv, contains('"bad ""gateway"""'));
     expect(csv, contains('"false"'));
     expect(csv, isNot(contains('token')));
+    expect(csv, isNot(contains('12345678901234567890')));
   });
 
   test(
