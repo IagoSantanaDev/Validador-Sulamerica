@@ -308,6 +308,60 @@ void main() {
     await sessao.encerrar();
   });
 
+  test('diagnostica DioException sem status e informa seu tipo', () async {
+    final _AdapterTeste adapter = _AdapterTeste((RequestOptions request) async {
+      if (request.method == 'POST' &&
+          request.uri.queryParameters['lumPageId'] == _idLogin) {
+        return _resposta(
+          '',
+          302,
+          headers: <String, List<String>>{
+            'location': <String>['/prestador/'],
+          },
+        );
+      }
+      if (request.uri.path == '/prestador/') {
+        return _resposta('<html>logout</html>', 200);
+      }
+      if (request.method == 'POST' &&
+          request.uri.queryParameters['lumPageId'] == _idConsulta) {
+        throw DioException(
+          requestOptions: request,
+          type: DioExceptionType.unknown,
+          error: StateError('detalhe interno nao publico'),
+        );
+      }
+      return _resposta('<html>formulario</html>', 200);
+    });
+    final SessaoPortal sessao = SessaoPortal(
+      dio: Dio()..httpClientAdapter = adapter,
+      logger: Logger(output: const _LogMudo(), level: Level.off),
+      repetirFalhasTransitorias: false,
+    );
+    await _login(sessao);
+
+    final ResultadoConsultaPortal<String> resultado = await sessao
+        .consultarBeneficiario(carteirinhaCompleta: '12345678901234567890');
+
+    expect(resultado.sucesso, isFalse);
+    expect(resultado.status, isNull);
+    expect(resultado.categoria, CategoriaFalhaConsultaPortal.http);
+    expect(sessao.diagnosticoSessao, containsPair('consultaDiounknown', 1));
+    expect(
+      sessao.diagnosticoSessao,
+      containsPair('consultaDioHttpSemStatus', 1),
+    );
+    expect(
+      sessao.diagnosticoSessao['consultaDioErroStateError'],
+      1,
+    );
+    expect(
+      jsonEncode(sessao.diagnosticoSessao),
+      isNot(contains('detalhe interno nao publico')),
+    );
+    await sessao.encerrar();
+  });
+
   test('consulta diagnóstica retorna 401 sem renovar a sessão', () async {
     int logins = 0;
     int consultas = 0;

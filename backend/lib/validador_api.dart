@@ -96,6 +96,7 @@ class ValidadorApi {
   int _rejeicoes429 = 0;
   int _falhas502 = 0;
   int _falhas503 = 0;
+  final Map<String, int> _falhasConsulta = <String, int>{};
   Map<String, dynamic>? _alcanceCacheado;
   DateTime? _alcanceColetadoEm;
   Future<Map<String, dynamic>>? _sondaEmAndamento;
@@ -544,6 +545,7 @@ class ValidadorApi {
       'rateLimit': <String, int>{'rejeicoes429': _rejeicoes429},
       'disjuntorPortal': _disjuntor.diagnostico,
       'falhasPortal': <String, int>{'502': _falhas502, '503': _falhas503},
+      'falhasConsulta': Map<String, int>.of(_falhasConsulta),
       'diagnosticoSessaoPortal': diagnosticoSessao,
       'resilienciaPortal': <String, Object>{
         'retryConfiguracao': SessaoPortal.configuracaoRetry,
@@ -712,6 +714,13 @@ class ValidadorApi {
   }
 
   void _contarFalhaConsulta<T>(ResultadoConsultaPortal<T> resultado) {
+    final String categoria = resultado.categoria?.name ?? 'semCategoria';
+    final String status = resultado.status?.toString() ?? 'semStatus';
+    _falhasConsulta.update(
+      '${categoria}_$status',
+      (int valor) => valor + 1,
+      ifAbsent: () => 1,
+    );
     if (resultado.categoria == CategoriaFalhaConsultaPortal.transporte) {
       _falhas503++;
       return;

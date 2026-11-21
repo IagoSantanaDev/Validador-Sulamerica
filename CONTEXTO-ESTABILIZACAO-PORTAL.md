@@ -127,8 +127,9 @@ decidir qual variável adicional se quer testar.
   - Local, 12 × 200: 2.311 sucessos, 4 falhas e 85 itens sem resultado;
     duração 302,0 s; 1 lote concluído e 11 parciais.
   - As falhas recebidas foram reportadas pelo harness como “Falha na consulta
-    ao portal SulAmerica”, sem status HTTP associado; a causa permanece
-    indeterminada. Nenhum cenário registrou HTTP 429 ou 502.
+    ao portal SulAmerica”. O `status_http=202` no CSV é o status da API/SSE do
+    lote, não o status HTTP da chamada upstream ao portal. O CSV daquele reteste
+    foi removido após a execução, portanto não permitia determinar a causa.
   - Após os testes, `/api/status` respondeu `ok` em ambos os ambientes, sem
     lotes ativos ou em fila e com o disjuntor fechado. O local reportou 9
     retries do agendador iniciados e resolvidos, nenhum esgotado, e zero
@@ -139,6 +140,32 @@ decidir qual variável adicional se quer testar.
   delega as tentativas ao agendador, esses valores históricos não mediam a
   camada do agendador. Ela agora possui os contadores independentes
   `resilienciaPortal.retriesAgendador`.
+
+## Investigação do erro genérico (2026-11-20)
+
+- A mensagem vem do mapeamento de
+  `CategoriaFalhaConsultaPortal.http` com `status == null`; ela não significa
+  que o portal tenha retornado HTTP 202. O 202 é apenas o aceite do lote/SSE.
+- Reproduzindo localmente o 12 × 200 com o mesmo XML antes da correção, três
+  itens que exibiram essa mensagem foram classificados como
+  `DioExceptionType.unknown`, com causa `StateError`. O stack trace apontou
+  `_SecureSocket.peerCertificate` → `_HttpClientResponse.certificate` →
+  `Dio IOHttpClientAdapter._fetch` (`dio 5.11.0`, linha 196).
+- Causa: o `validateCertificate` customizado do adapter só comparava o hostname,
+  mas o Dio ainda avaliava `responseStream.certificate` para chamar o callback.
+  Sob carga, o socket TLS já fechado fazia esse getter lançar `StateError`;
+  a sessão classificava isso como `http` sem status e não repetia como timeout.
+- Correção local: removido o callback redundante, mantendo a validação padrão de
+  CA e hostname do `HttpClient`; redirects agora só são seguidos se permanecerem
+  em HTTPS no host SulAmérica esperado. `GET /api/status` também agrega a
+  categoria/status final e o tipo/causa das exceções Dio sem mensagem, URL,
+  corpo ou dados dos itens.
+- Verificação após a correção, local 12 × 200 com o mesmo XML: 2.332 respostas
+  concluídas, todas `sucesso: true`, zero falhas e 68 itens sem resultado ao
+  alcançar o limite de cinco minutos. Foram observados seis
+  `connectionTimeout`, todos repetidos e resolvidos; zero `http_semStatus`.
+- O Render ainda precisa receber a correção e ser retestado para confirmar que
+  a mesma causa ocorria lá e que a correção também resolve o caso hospedado.
 
 ## Estado da estabilização
 

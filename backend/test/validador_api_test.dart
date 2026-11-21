@@ -653,6 +653,52 @@ void main() {
       await _aguardar(() async => await _ativos(contexto.api) == 0);
     });
 
+    test('status agrega falha HTTP terminal sem status', () async {
+      final _ContextoApi contexto = _criarApi(
+        beneficiaryResult: const ResultadoConsultaPortal<String>.falha(
+          categoria: CategoriaFalhaConsultaPortal.http,
+          status: null,
+        ),
+      );
+      final String token = await _criarSessao(contexto.api);
+      final Response lote = await _criarLote(
+        contexto.api,
+        token,
+        'http-sem-status',
+      );
+      final String id =
+          (jsonDecode(await lote.readAsString()) as Map)['id'] as String;
+      final Response eventos = await contexto.api.handler(
+        _request('GET', '/api/lotes/$id/eventos', token: token),
+      );
+      final Future<String> corpo = eventos.readAsString();
+      contexto.gate.complete();
+      final String sse = await corpo.timeout(const Duration(seconds: 2));
+      final String blocoResultado = sse
+          .split(RegExp(r'\r?\n\r?\n'))
+          .firstWhere((String bloco) => bloco.contains('event: resultado'));
+      final String dadosResultado = blocoResultado
+          .split(RegExp(r'\r?\n'))
+          .firstWhere((String linha) => linha.startsWith('data:'))
+          .substring(5)
+          .trimLeft();
+      final Map<String, dynamic> payload =
+          jsonDecode(dadosResultado) as Map<String, dynamic>;
+      final List<dynamic> resultados = payload['resultados'] as List<dynamic>;
+
+      expect(
+        (resultados.single as Map<String, dynamic>)['erro'],
+        'Falha na consulta ao portal SulAmerica.',
+      );
+      await _aguardar(() async => await _ativos(contexto.api) == 0);
+      final Response status = await contexto.api.handler(
+        Request('GET', Uri.parse('http://localhost/api/status')),
+      );
+      final Map dadosStatus = jsonDecode(await status.readAsString()) as Map;
+
+      expect(dadosStatus['falhasConsulta'], containsPair('http_semStatus', 1));
+    });
+
     test('outro token não pode abrir eventos do lote', () async {
       final _ContextoApi contexto = _criarApi();
       final String dono = await _criarSessao(contexto.api);
@@ -750,6 +796,7 @@ void main() {
         expect(dados['rateLimit'], containsPair('rejeicoes429', 0));
         expect(dados['falhasPortal'], containsPair('502', 0));
         expect(dados['falhasPortal'], containsPair('503', 0));
+        expect(dados['falhasConsulta'], isEmpty);
         expect(
           dados['diagnosticoSessaoPortal'],
           containsPair('rejeicoes401', 0),

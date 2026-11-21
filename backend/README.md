@@ -113,6 +113,11 @@ global e em memória: abre após cinco falhas elegíveis consecutivas em 60
 segundos (transporte sem resposta ou HTTP 502/503/504), permanece aberto por 60
 segundos e exige uma sonda HTTP para fechar. HTTP 429, demais 4xx/5xx,
 respostas F5 e falhas de parse não incrementam o contador.
+`falhasConsulta` agrega apenas falhas terminais de itens por categoria e status.
+Em `diagnosticoSessaoPortal`, contadores `consultaDio...` registram o tipo de
+`DioException`, seu tipo de causa interna e o status (ou a ausência dele) para
+cada tentativa; `consultaHttp...` registra respostas HTTP não-200. Esses dados
+não incluem mensagem de exceção, URL, corpo ou identificadores.
 
 ## Capacidade e execução
 

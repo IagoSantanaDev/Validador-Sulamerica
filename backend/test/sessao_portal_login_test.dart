@@ -11,6 +11,7 @@ class _AdapterFake implements HttpClientAdapter {
   _AdapterFake(this.respostas);
 
   final Map<String, ResponseBody> respostas;
+  final List<Uri> requisicoes = <Uri>[];
 
   @override
   Future<ResponseBody> fetch(
@@ -18,6 +19,7 @@ class _AdapterFake implements HttpClientAdapter {
     Stream<Uint8List>? requestStream,
     Future<void>? cancelFuture,
   ) async {
+    requisicoes.add(options.uri);
     return respostas['${options.method} ${options.uri.path}'] ??
         ResponseBody.fromString('sem resposta', 404);
   }
@@ -153,6 +155,40 @@ void main() {
       expect(resultado.motivo, isNot(MotivoFalhaLogin.falhaRede));
       expect(sessao.diagnosticoSessao['loginPostHttp302'], 1);
       expect(sessao.diagnosticoSessao['loginRedirectSemLocation'], 1);
+      await sessao.encerrar();
+    });
+
+    test('redirect para outro host e rejeitado antes da requisicao', () async {
+      final _AdapterFake adapter = _AdapterFake(<String, ResponseBody>{
+        'GET /main.jsp': ResponseBody.fromString(
+          '<html>formulario</html>',
+          200,
+        ),
+        'POST /main.jsp': ResponseBody.fromString(
+          '',
+          302,
+          headers: <String, List<String>>{
+            'location': <String>['https://example.invalid/fora'],
+          },
+        ),
+      });
+      final SessaoPortal sessao = SessaoPortal(
+        dio: Dio()..httpClientAdapter = adapter,
+      );
+
+      final ResultadoLogin resultado = await sessao.login(
+        code: 'codigo',
+        user: 'usuario',
+        senha: 'senha',
+      );
+
+      expect(resultado.motivo, MotivoFalhaLogin.respostaInesperada);
+      expect(adapter.requisicoes, hasLength(2));
+      expect(
+        adapter.requisicoes.any((Uri uri) => uri.host == 'example.invalid'),
+        isFalse,
+      );
+      expect(sessao.diagnosticoSessao['redirectDestinoInvalido'], 1);
       await sessao.encerrar();
     });
 

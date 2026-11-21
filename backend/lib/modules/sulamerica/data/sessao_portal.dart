@@ -61,33 +61,18 @@ class SessaoPortal {
       followRedirects: false,
     );
 
-    // O cliente padrao do Dart continua validando a cadeia e o hostname.
+    // O HttpClient padrao valida TLS; redirects tem allowlist de host separada.
     if (dio == null) {
       _dio.httpClientAdapter = IOHttpClientAdapter(
         createHttpClient: () => HttpClient()
           ..maxConnectionsPerHost = 8
           ..idleTimeout = const Duration(seconds: 10),
-        validateCertificate: validarCertificado,
       );
     }
     _dio.interceptors.add(CookieManager(_cookieJar));
   }
 
   static const String hostPortal = 'saude.sulamericaseguros.com.br';
-
-  /// Confirma que o certificado apresentado foi emitido para o host do portal.
-  ///
-  /// A validacao de CA e de hostname ja foi feita pelo `HttpClient` antes deste
-  /// callback (ver doc do dio: ele so e invocado apos a cadeia ser aceita).
-  /// Este metodo nao repete essa checagem; ele registra no log um certificado
-  /// de outro host, que indicaria redirecionamento ou interceptacao.
-  bool validarCertificado(X509Certificate? certificate, String host, int port) {
-    if (host != hostPortal) {
-      _logger.e('TLS: host inesperado $host (esperado $hostPortal).');
-      return false;
-    }
-    return true;
-  }
 
   static const String _userAgent =
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
@@ -553,10 +538,15 @@ class SessaoPortal {
   String? _urlDeRedirect(Response<String> resposta) {
     final List<String>? valores = resposta.headers['location'];
     if (valores == null || valores.isEmpty) return null;
-    final String destino = valores.first;
-    return Uri.parse(destino).hasScheme
-        ? destino
-        : 'https://$hostPortal$destino';
+    final Uri base = Uri.parse('https://$hostPortal/');
+    final Uri destino = base.resolve(valores.first);
+    if (destino.scheme != 'https' ||
+        destino.host != hostPortal ||
+        destino.userInfo.isNotEmpty) {
+      _incrementarDiagnostico('redirectDestinoInvalido');
+      throw const FormatException('Destino de redirect inesperado.');
+    }
+    return destino.toString();
   }
 
   Future<ResultadoConsultaPortal<String>> consultarBeneficiario({
@@ -1062,6 +1052,7 @@ class SessaoPortal {
     bool retryable = false,
     bool rejeicaoF5 = false,
   }) {
+    _registrarStatus('consultaHttp', status);
     return ResultadoConsultaPortal<T>.falha(
       categoria: ehFalhaDeSessaoPortal(status)
           ? CategoriaFalhaConsultaPortal.sessao
@@ -1081,6 +1072,12 @@ class SessaoPortal {
       );
     }
     final int? status = erro.response?.statusCode;
+    _incrementarDiagnostico('consultaDio${erro.type.name}');
+    _registrarStatus('consultaDioHttp', status);
+    final Object? causa = erro.error;
+    if (causa != null) {
+      _incrementarDiagnostico('consultaDioErro${causa.runtimeType}');
+    }
     final bool rejeicaoF5 = _registrarAssinaturaDio(erro);
     final bool transporte = _ehFalhaTransporte(erro);
     final CategoriaFalhaConsultaPortal categoria =
