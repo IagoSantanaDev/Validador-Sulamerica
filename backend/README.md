@@ -20,6 +20,8 @@ O servidor usa `HOST` (padrão `0.0.0.0`) e `PORT` (padrão `8080`).
 o `render.yaml` configura os frontends públicos no GitHub Pages e Cloudflare
 Pages; ao implantar por outro serviço, configure a allowlist no ambiente de
 execução. CORS não autentica chamadas diretas.
+`PORTAL_MAX_SESSIONS_PER_IDENTIFIER` define sessões máximas do portal por
+identificador (padrão 4, faixa 1–8); alteração exige reiniciar o serviço.
 
 As credenciais são resolvidas exclusivamente no servidor por variáveis no
 formato `PORTAL_PRESTADOR_ID_<IDENTIFICADOR>_{CODE,USER,SENHA}`. Cadastre os
@@ -122,7 +124,8 @@ não incluem mensagem de exceção, URL, corpo ou identificadores.
 ## Capacidade e execução
 
 - Uma instância, com estado apenas em memória; reinício encerra sessões e lotes.
-- Até 4 sessões do portal por identificador e no máximo 8 no processo.
+- Até 4 sessões do portal por identificador por padrão, limite configurável por
+  `PORTAL_MAX_SESSIONS_PER_IDENTIFIER`; máximo documentado de 8 no processo.
 - Até 24 execuções na fila e em processamento; a 25ª é rejeitada.
 - Até 2 logins simultâneos no processo por padrão; configure
   `PORTAL_LOGIN_MAX_CONCORRENCIA` entre 1 e 16.
