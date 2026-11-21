@@ -1,7 +1,9 @@
 # Contexto: estabilização do portal SulAmérica
 
-Atualizado após T10/T11; T6/T7 implementados, T9 executado localmente e no
-Render; 6 × 200 teve 100% de `sucesso` no harness, 12 × 200 foi parcial.
+Atualizado em 2026-11-21: T6/T7 e T10/T11 implementados; 12 × 200 continua
+aspiracional e parcial. No reteste Render 6 × 200 com validação estrita de
+domínio, 1.199/1.200 respostas foram determinadas; o aceite prioritário segue
+aberto.
 
 ## Objetivo e critérios
 
@@ -105,11 +107,9 @@ decidir qual variável adicional se quer testar.
     minutos foi alcançado. As duas falhas reportadas em cada ambiente vieram
     como falha de consulta no resultado SSE HTTP 202, sem causa específica no
     harness.
-- Limitação do indicador de sucesso: o harness confere `sucesso`, mas não
-  valida os campos de domínio opcionais `elegivel` e `statusSenha`; esses campos
-  podem ser nulos e não são preservados no CSV. Assim, 100% acima significa
-  100% de respostas marcadas `sucesso: true`, não uma verificação independente
-  de todos os valores de domínio.
+- Limitação dos retestes anteriores: o harness conferia `sucesso`, mas não
+  validava os campos de domínio `elegivel` e `statusSenha`. Portanto, os 100%
+  históricos significam somente respostas marcadas `sucesso: true`.
 - T5 observado em `/api/status`: limite 2 e pico de 2 logins ativos no backend
   local e no Render; pico de espera por login zero. Após as cargas, ambos os
   serviços responderam 200, com disjuntor fechado e sem lotes ativos/em fila.
@@ -175,6 +175,29 @@ decidir qual variável adicional se quer testar.
   causa foi reproduzida e confirmada localmente, e o cenário Render pós-fix
   passou sem falhas de consulta.
 
+## Reteste Render 6 × 200 com validação de domínio (2026-11-21)
+
+- O harness passou a registrar somente se o resultado de domínio é determinado,
+  sem armazenar `elegivel`, `statusSenha` ou chaves de consulta. Para
+  elegibilidade, `true` e `false` booleanos contam como determinados; para
+  senha, `statusSenha` precisa ser uma string não vazia após `trim`.
+- Render, 6 × 200: 1.199 `sucesso: true`, 1 falha e 1.199/1.200 resultados de
+  domínio determinados em 186,5 s. Elegibilidade: 863/864 determinados;
+  senha: 336/336. A falha ocorreu no usuário 2, item 141, tipo elegibilidade,
+  com mensagem genérica “Falha na consulta ao portal SulAmerica”; o `202` é
+  da API/SSE, não do portal. Não foi possível atribuir causa upstream: o
+  `/api/status` posterior estava saudável e ocioso, com disjuntor fechado e
+  sem contadores agregados de falha 502/503.
+- Um reteste Render imediatamente anterior, ainda sem coleta dos campos de
+  domínio, teve 1.200/1.200 `sucesso: true` em 197,9 s. Ele não substitui a
+  medição estrita acima, que encontrou uma falha.
+- Repetição isolada da posição 141 da sequência XML no Render: 1/1
+  `sucesso: true`, elegibilidade determinada, em 1,5 s. Isso sugere uma falha
+  transitória, mas não altera o resultado da matriz original nem fecha o
+  critério de 100%.
+- O reteste local pós-TLS não foi executado nesta rodada, por escolha do
+  usuário. Assim, ainda não há confirmação local para este aceite.
+
 ## Estado da estabilização
 
 T6/T7, instrumentação dos retries do agendador e T10/T11 estão implementados.
@@ -191,7 +214,8 @@ sinais convergentes.
 
 Considerar novo teste 12 × 200 somente após decidir se a meta aspiracional
 continua sujeita ao limite de cinco minutos ou se o perfil de capacidade deve
-mudar. O critério prioritário 6 × 200 passou localmente e no Render.
+mudar. O aceite prioritário 6 × 200 continua aberto: o último resultado estrito
+do Render teve uma falha e o reteste local pós-TLS foi pulado.
 
 ## Comandos úteis
 
