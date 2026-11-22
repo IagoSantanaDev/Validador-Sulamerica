@@ -15,13 +15,12 @@ Future<void> main() async {
   final String host = Platform.environment['HOST'] ?? '0.0.0.0';
   final int porta = int.tryParse(Platform.environment['PORT'] ?? '') ?? 8080;
   final int limiteSessoesPorIdentificador = _lerLimiteSessoesPorIdentificador();
-  final int limiteElegibilidadesPorSessao =
-      _lerLimiteElegibilidadesPorSessao();
+  final int limiteItensPorSessao = _lerLimiteItensPorSessao();
 
   final ValidadorApi api = ValidadorApi(
     logger: logger,
     limiteSessoesPorIdentificador: limiteSessoesPorIdentificador,
-    limiteElegibilidadesPorSessao: limiteElegibilidadesPorSessao,
+    limiteItensPorSessao: limiteItensPorSessao,
   );
 
   final server = await io.serve(api.handler, host, porta);
@@ -47,15 +46,15 @@ int _lerLimiteSessoesPorIdentificador() {
   return limite;
 }
 
-int _lerLimiteElegibilidadesPorSessao() {
-  const String nome = 'PORTAL_MAX_ELEGIBILITIES_PER_SESSION';
+int _lerLimiteItensPorSessao() {
+  const String nome = 'PORTAL_MAX_ITEMS_PER_SESSION';
   final String? configurado = Platform.environment[nome];
-  if (configurado == null || configurado.trim().isEmpty) return 1;
+  if (configurado == null || configurado.trim().isEmpty) return 2;
 
   final int? limite = int.tryParse(configurado);
-  if (limite == null || limite < 1 || limite > 2) {
+  if (limite == null || limite < 1 || limite > 5) {
     throw const FormatException(
-      'PORTAL_MAX_ELEGIBILITIES_PER_SESSION deve estar entre 1 e 2.',
+      'PORTAL_MAX_ITEMS_PER_SESSION deve estar entre 1 e 5.',
     );
   }
   return limite;
