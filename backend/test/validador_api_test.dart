@@ -15,8 +15,7 @@ const Map<String, String> _ambiente = <String, String>{
   'PORTAL_PRESTADOR_ID_TESTE_CODE': '000000000000',
   'PORTAL_PRESTADOR_ID_TESTE_USER': 'usuario-teste',
   'PORTAL_PRESTADOR_ID_TESTE_SENHA': 'senha-teste',
-  'CORS_ORIGIN':
-      'https://app.example,https://validador-sulamerica.pages.dev,https://iagosantanadev.github.io',
+  'CORS_ORIGIN': 'https://app.example,https://validador-sulamerica.pages.dev,https://iagosantanadev.github.io',
 };
 
 class _LogMudo implements LogOutput {
@@ -51,10 +50,9 @@ class _SessaoFake extends SessaoPortal {
 
   @override
   Map<String, int> get diagnosticoSessao => <String, int>{
-        ...super.diagnosticoSessao,
-        if (supportIdMarkers > 0)
-          'assinaturaF5MarkerSupportId': supportIdMarkers,
-      };
+    ...super.diagnosticoSessao,
+    if (supportIdMarkers > 0) 'assinaturaF5MarkerSupportId': supportIdMarkers,
+  };
 
   @override
   bool get autenticada => _autenticada;
@@ -125,7 +123,7 @@ _ContextoApi _criarApi({
   int limiteGlobal = 500,
   int limiteExecucoes = 24,
   int limiteSessoesPorIdentificador = 4,
-  int limiteElegibilidadesPorSessao = 1,
+  int limiteItensPorSessao = 2,
   RepositorioSessoes? repositorio,
   ResultadoLogin? loginResult,
   ResultadoConsultaPortal<String>? beneficiaryResult,
@@ -154,7 +152,7 @@ _ContextoApi _criarApi({
     limiteRequisicoesPorChave: limitePorChave,
     limiteRequisicoesGlobal: limiteGlobal,
     limiteSessoesPorIdentificador: limiteSessoesPorIdentificador,
-    limiteElegibilidadesPorSessao: limiteElegibilidadesPorSessao,
+    limiteItensPorSessao: limiteItensPorSessao,
     limiteExecucoes: limiteExecucoes,
   );
   return _ContextoApi(api: api, sessoes: sessoes, gate: gate);
@@ -201,18 +199,17 @@ Future<Response> _criarLote(
   String token,
   String key, {
   List<Map<String, dynamic>>? consultas,
-}) async =>
-    await api.handler(
-      _request(
-        'POST',
-        '/api/lotes',
-        token: token,
-        idempotencyKey: key,
-        body: <String, Object>{
-          'consultas': consultas ?? <Map<String, dynamic>>[_consulta()],
-        },
-      ),
-    );
+}) async => await api.handler(
+  _request(
+    'POST',
+    '/api/lotes',
+    token: token,
+    idempotencyKey: key,
+    body: <String, Object>{
+      'consultas': consultas ?? <Map<String, dynamic>>[_consulta()],
+    },
+  ),
+);
 
 void main() {
   group('POST /api/sessoes', () {
@@ -227,45 +224,47 @@ void main() {
       },
     );
 
-    test('retorna 503 com Retry-After enquanto o circuito está aberto',
-        () async {
-      DateTime agora = DateTime.utc(2026);
-      int sondas = 0;
-      final DisjuntorPortal disjuntor = DisjuntorPortal(
-        sondarPortal: () async {
-          sondas++;
-          return const ResultadoSondaDisjuntor(status: 200);
-        },
-        agora: () => agora,
-      );
-      for (int i = 0; i < 5; i++) {
-        disjuntor.registrar(ResultadoDisjuntorPortal.falhaElegivel);
-      }
-      final _ContextoApi contexto = _criarApi(disjuntor: disjuntor);
+    test(
+      'retorna 503 com Retry-After enquanto o circuito está aberto',
+      () async {
+        DateTime agora = DateTime.utc(2026);
+        int sondas = 0;
+        final DisjuntorPortal disjuntor = DisjuntorPortal(
+          sondarPortal: () async {
+            sondas++;
+            return const ResultadoSondaDisjuntor(status: 200);
+          },
+          agora: () => agora,
+        );
+        for (int i = 0; i < 5; i++) {
+          disjuntor.registrar(ResultadoDisjuntorPortal.falhaElegivel);
+        }
+        final _ContextoApi contexto = _criarApi(disjuntor: disjuntor);
 
-      final Response aberta = await contexto.api.handler(
-        _request(
-          'POST',
-          '/api/sessoes',
-          body: const <String, String>{'identificadorPrestador': 'teste'},
-        ),
-      );
-      expect(aberta.statusCode, 503);
-      expect(aberta.headers['retry-after'], '60');
-      expect(contexto.sessoes, isEmpty);
+        final Response aberta = await contexto.api.handler(
+          _request(
+            'POST',
+            '/api/sessoes',
+            body: const <String, String>{'identificadorPrestador': 'teste'},
+          ),
+        );
+        expect(aberta.statusCode, 503);
+        expect(aberta.headers['retry-after'], '60');
+        expect(contexto.sessoes, isEmpty);
 
-      agora = agora.add(const Duration(seconds: 60));
-      final Response recuperada = await contexto.api.handler(
-        _request(
-          'POST',
-          '/api/sessoes',
-          body: const <String, String>{'identificadorPrestador': 'teste'},
-        ),
-      );
-      expect(recuperada.statusCode, 201);
-      expect(sondas, 1);
-      expect(disjuntor.estado, EstadoDisjuntorPortal.fechado);
-    });
+        agora = agora.add(const Duration(seconds: 60));
+        final Response recuperada = await contexto.api.handler(
+          _request(
+            'POST',
+            '/api/sessoes',
+            body: const <String, String>{'identificadorPrestador': 'teste'},
+          ),
+        );
+        expect(recuperada.statusCode, 201);
+        expect(sondas, 1);
+        expect(disjuntor.estado, EstadoDisjuntorPortal.fechado);
+      },
+    );
 
     test(
       'valida identificador e responde 401 quando não há credenciais',
@@ -441,35 +440,37 @@ void main() {
       },
     );
 
-    test('replay idempotente continua disponível com o circuito aberto',
-        () async {
-      final DisjuntorPortal disjuntor = DisjuntorPortal(
-        sondarPortal: () async => const ResultadoSondaDisjuntor(status: 200),
-      );
-      final _ContextoApi contexto = _criarApi(disjuntor: disjuntor);
-      final String token = await _criarSessao(contexto.api);
-      final Response original = await _criarLote(
-        contexto.api,
-        token,
-        'chave-replay',
-      );
-      final String id =
-          (jsonDecode(await original.readAsString()) as Map)['id'] as String;
-      for (int i = 0; i < 5; i++) {
-        disjuntor.registrar(ResultadoDisjuntorPortal.falhaElegivel);
-      }
+    test(
+      'replay idempotente continua disponível com o circuito aberto',
+      () async {
+        final DisjuntorPortal disjuntor = DisjuntorPortal(
+          sondarPortal: () async => const ResultadoSondaDisjuntor(status: 200),
+        );
+        final _ContextoApi contexto = _criarApi(disjuntor: disjuntor);
+        final String token = await _criarSessao(contexto.api);
+        final Response original = await _criarLote(
+          contexto.api,
+          token,
+          'chave-replay',
+        );
+        final String id =
+            (jsonDecode(await original.readAsString()) as Map)['id'] as String;
+        for (int i = 0; i < 5; i++) {
+          disjuntor.registrar(ResultadoDisjuntorPortal.falhaElegivel);
+        }
 
-      final Response repetida = await _criarLote(
-        contexto.api,
-        token,
-        'chave-replay',
-      );
-      final Map<String, dynamic> corpo =
-          jsonDecode(await repetida.readAsString()) as Map<String, dynamic>;
-      expect(repetida.statusCode, 202);
-      expect(corpo['id'], id);
-      contexto.gate.complete();
-    });
+        final Response repetida = await _criarLote(
+          contexto.api,
+          token,
+          'chave-replay',
+        );
+        final Map<String, dynamic> corpo =
+            jsonDecode(await repetida.readAsString()) as Map<String, dynamic>;
+        expect(repetida.statusCode, 202);
+        expect(corpo['id'], id);
+        contexto.gate.complete();
+      },
+    );
 
     test('valida o payload antes de exigir Bearer', () async {
       final _ContextoApi contexto = _criarApi();
@@ -757,12 +758,15 @@ void main() {
       );
       final StringBuffer dados = StringBuffer();
       final Completer<void> segundaFechada = Completer<void>();
-      segunda.read().transform(utf8.decoder).listen(
-        dados.write,
-        onDone: () {
-          if (!segundaFechada.isCompleted) segundaFechada.complete();
-        },
-      );
+      segunda
+          .read()
+          .transform(utf8.decoder)
+          .listen(
+            dados.write,
+            onDone: () {
+              if (!segundaFechada.isCompleted) segundaFechada.complete();
+            },
+          );
       await primeiraFechada.future.timeout(const Duration(seconds: 1));
       expect(segunda.statusCode, 200);
       expect(segunda.headers['content-type'], contains('text/event-stream'));
@@ -801,10 +805,7 @@ void main() {
         expect(dados['sessoesAtivas'], 1);
         expect(dados['lotes'], containsPair('ativos', 0));
         expect(dados['lotes'], containsPair('parciais', 0));
-        expect(
-          dados['disjuntorPortal'],
-          containsPair('estado', 'fechado'),
-        );
+        expect(dados['disjuntorPortal'], containsPair('estado', 'fechado'));
         expect(dados['memoriaRssMb'], isA<int>());
         expect(dados['rateLimit'], containsPair('rejeicoes429', 0));
         expect(dados['falhasPortal'], containsPair('502', 0));
@@ -822,10 +823,11 @@ void main() {
         expect(resiliencia['retriesTransitoriosIniciados'], 0);
         expect(resiliencia['retriesTransitoriosResolvidos'], 0);
         expect(resiliencia['retriesTransitoriosEsgotados'], 0);
-        expect(
-          resiliencia['retriesAgendador'],
-          <String, int>{'iniciados': 0, 'resolvidos': 0, 'esgotados': 0},
-        );
+        expect(resiliencia['retriesAgendador'], <String, int>{
+          'iniciados': 0,
+          'resolvidos': 0,
+          'esgotados': 0,
+        });
         expect(
           dados['diagnosticoSessaoPortal'],
           containsPair('renovacoesFalhaCredenciaisInvalidas', 0),
@@ -839,11 +841,8 @@ void main() {
           concorrencia,
           containsPair('limiteAgendador', SessaoPortal.limiteRequisicoesGlobal),
         );
-        expect(
-          concorrencia,
-          containsPair('limiteSessoesPorIdentificador', 4),
-        );
-        expect(concorrencia, containsPair('limiteElegibilidadesPorSessao', 1));
+        expect(concorrencia, containsPair('limiteSessoesPorIdentificador', 4));
+        expect(concorrencia, containsPair('limiteItensPorSessao', 2));
         final Map logins = concorrencia['logins'] as Map;
         expect(logins['limite'], inInclusiveRange(1, 16));
         expect(logins['ativasAgora'], isA<int>());
@@ -857,52 +856,56 @@ void main() {
       },
     );
 
-    test('pool de sessão aceita limite configurado sem mudar limite global',
-        () async {
-      final _ContextoApi contexto = _criarApi(
-        limiteSessoesPorIdentificador: 5,
-        limiteElegibilidadesPorSessao: 2,
-      );
-      final Response resposta = await contexto.api.handler(
-        Request('GET', Uri.parse('http://localhost/api/status')),
-      );
-      final Map dados = jsonDecode(await resposta.readAsString()) as Map;
-      final Map concorrencia = dados['concorrenciaPortal'] as Map;
+    test(
+      'pool de sessão aceita limite configurado sem mudar limite global',
+      () async {
+        final _ContextoApi contexto = _criarApi(
+          limiteSessoesPorIdentificador: 5,
+          limiteItensPorSessao: 5,
+        );
+        final Response resposta = await contexto.api.handler(
+          Request('GET', Uri.parse('http://localhost/api/status')),
+        );
+        final Map dados = jsonDecode(await resposta.readAsString()) as Map;
+        final Map concorrencia = dados['concorrenciaPortal'] as Map;
 
-      expect(concorrencia, containsPair('limiteSessoesPorIdentificador', 5));
-      expect(concorrencia, containsPair('limiteElegibilidadesPorSessao', 2));
-      expect(
-        concorrencia,
-        containsPair('limite', SessaoPortal.limiteRequisicoesGlobal),
-      );
-      expect(
-        concorrencia,
-        containsPair('limiteAgendador', SessaoPortal.limiteRequisicoesGlobal),
-      );
-    });
+        expect(concorrencia, containsPair('limiteSessoesPorIdentificador', 5));
+        expect(concorrencia, containsPair('limiteItensPorSessao', 5));
+        expect(
+          concorrencia,
+          containsPair('limite', SessaoPortal.limiteRequisicoesGlobal),
+        );
+        expect(
+          concorrencia,
+          containsPair('limiteAgendador', SessaoPortal.limiteRequisicoesGlobal),
+        );
+      },
+    );
 
-    test('status nunca expõe Support IDs e preserva contadores agregados',
-        () async {
-      final _ContextoApi contexto = _criarApi(
-        ambiente: <String, String>{
-          ..._ambiente,
-          'PORTAL_ASSINATURAS_SUPPORT_IDS_ATIVAS': 'true',
-        },
-        supportIdMarkers: 1,
-      );
-      await _criarSessao(contexto.api);
-      final Response resposta = await contexto.api.handler(
-        Request('GET', Uri.parse('http://localhost/api/status')),
-      );
-      final Map dados = jsonDecode(await resposta.readAsString()) as Map;
+    test(
+      'status nunca expõe Support IDs e preserva contadores agregados',
+      () async {
+        final _ContextoApi contexto = _criarApi(
+          ambiente: <String, String>{
+            ..._ambiente,
+            'PORTAL_ASSINATURAS_SUPPORT_IDS_ATIVAS': 'true',
+          },
+          supportIdMarkers: 1,
+        );
+        await _criarSessao(contexto.api);
+        final Response resposta = await contexto.api.handler(
+          Request('GET', Uri.parse('http://localhost/api/status')),
+        );
+        final Map dados = jsonDecode(await resposta.readAsString()) as Map;
 
-      expect(resposta.statusCode, 200);
-      expect(dados.containsKey('supportIdsRespostaPortal'), isFalse);
-      expect(
-        dados['diagnosticoSessaoPortal'],
-        containsPair('assinaturaF5MarkerSupportId', 1),
-      );
-    });
+        expect(resposta.statusCode, 200);
+        expect(dados.containsKey('supportIdsRespostaPortal'), isFalse);
+        expect(
+          dados['diagnosticoSessaoPortal'],
+          containsPair('assinaturaF5MarkerSupportId', 1),
+        );
+      },
+    );
   });
 
   group('limites e CORS', () {
