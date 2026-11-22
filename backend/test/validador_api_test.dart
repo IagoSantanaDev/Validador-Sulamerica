@@ -123,7 +123,6 @@ _ContextoApi _criarApi({
   int limiteGlobal = 500,
   int limiteExecucoes = 24,
   int limiteSessoesPorIdentificador = 4,
-  int limiteItensPorSessao = 2,
   RepositorioSessoes? repositorio,
   ResultadoLogin? loginResult,
   ResultadoConsultaPortal<String>? beneficiaryResult,
@@ -152,7 +151,6 @@ _ContextoApi _criarApi({
     limiteRequisicoesPorChave: limitePorChave,
     limiteRequisicoesGlobal: limiteGlobal,
     limiteSessoesPorIdentificador: limiteSessoesPorIdentificador,
-    limiteItensPorSessao: limiteItensPorSessao,
     limiteExecucoes: limiteExecucoes,
   );
   return _ContextoApi(api: api, sessoes: sessoes, gate: gate);
@@ -842,7 +840,6 @@ void main() {
           containsPair('limiteAgendador', SessaoPortal.limiteRequisicoesGlobal),
         );
         expect(concorrencia, containsPair('limiteSessoesPorIdentificador', 4));
-        expect(concorrencia, containsPair('limiteItensPorSessao', 2));
         final Map logins = concorrencia['logins'] as Map;
         expect(logins['limite'], inInclusiveRange(1, 16));
         expect(logins['ativasAgora'], isA<int>());
@@ -861,7 +858,6 @@ void main() {
       () async {
         final _ContextoApi contexto = _criarApi(
           limiteSessoesPorIdentificador: 5,
-          limiteItensPorSessao: 5,
         );
         final Response resposta = await contexto.api.handler(
           Request('GET', Uri.parse('http://localhost/api/status')),
@@ -870,7 +866,6 @@ void main() {
         final Map concorrencia = dados['concorrenciaPortal'] as Map;
 
         expect(concorrencia, containsPair('limiteSessoesPorIdentificador', 5));
-        expect(concorrencia, containsPair('limiteItensPorSessao', 5));
         expect(
           concorrencia,
           containsPair('limite', SessaoPortal.limiteRequisicoesGlobal),

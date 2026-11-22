@@ -40,7 +40,6 @@ class ValidadorApi {
     int limiteRequisicoesPorChave = 20,
     int limiteRequisicoesGlobal = 120,
     int limiteSessoesPorIdentificador = 4,
-    int limiteItensPorSessao = 2,
     int limiteExecucoes = 24,
   }) : _logger = logger ?? Logger(),
        _ambiente = ambiente,
@@ -58,7 +57,6 @@ class ValidadorApi {
       logger: _logger,
       fabricaSessao: fabricaSessao,
       limitePorIdentificador: limiteSessoesPorIdentificador,
-      limiteItensPorSessao: limiteItensPorSessao,
       repetirFalhasTransitorias: false,
     );
     final Future<int> Function()? sondaPortalPersonalizada = sondaPortal;

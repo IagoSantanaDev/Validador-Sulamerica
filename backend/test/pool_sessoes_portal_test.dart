@@ -109,7 +109,6 @@ void main() {
     () async {
       final List<_SessaoFake> criadas = <_SessaoFake>[];
       final PoolSessoesPortal pool = PoolSessoesPortal(
-        limiteItensPorSessao: 3,
         fabricaSessao: (_) {
           final _SessaoFake sessao = _SessaoFake();
           criadas.add(sessao);
@@ -155,85 +154,52 @@ void main() {
     },
   );
 
-  test(
-    'limite total por sessão é compartilhado por elegibilidade e senha',
-    () async {
-      final List<_SessaoFake> criadas = <_SessaoFake>[];
-      final PoolSessoesPortal pool = PoolSessoesPortal(
-        fabricaSessao: (_) {
-          final _SessaoFake sessao = _SessaoFake();
-          criadas.add(sessao);
-          return sessao;
-        },
-      );
-      await pool.garantirAutenticada('teste', _credenciais());
-
-      final List<EmprestimoSessaoPortal> primeiras = await Future.wait(
-        <TipoConsultaPortal>[
-          TipoConsultaPortal.senha,
-          TipoConsultaPortal.elegibilidade,
-        ].map(
-          (TipoConsultaPortal tipo) => pool.adquirir(
-            identificador: 'teste',
-            credenciais: _credenciais(),
-            tipo: tipo,
-          ),
-        ),
-      );
-      expect(primeiras.map((lease) => lease.sessao).toSet(), hasLength(1));
-
-      final EmprestimoSessaoPortal terceira = await pool.adquirir(
-        identificador: 'teste',
-        credenciais: _credenciais(),
-        tipo: TipoConsultaPortal.senha,
-      );
-      expect(terceira.sessao, isNot(same(primeiras.first.sessao)));
-
-      for (final EmprestimoSessaoPortal emprestimo in <EmprestimoSessaoPortal>[
-        ...primeiras,
-        terceira,
-      ]) {
-        emprestimo.liberar();
-      }
-    },
-  );
-
-  test('limite configurado aceita até cinco itens totais por sessão', () async {
+  test('elegibilidades serializam e senhas aceitam até três por sessão',
+      () async {
+    final List<_SessaoFake> criadas = <_SessaoFake>[];
     final PoolSessoesPortal pool = PoolSessoesPortal(
-      fabricaSessao: (_) => _SessaoFake(),
-      limitePorIdentificador: 2,
-      limiteItensPorSessao: 5,
+      fabricaSessao: (_) {
+        final _SessaoFake sessao = _SessaoFake();
+        criadas.add(sessao);
+        return sessao;
+      },
     );
     await pool.garantirAutenticada('teste', _credenciais());
 
-    final List<EmprestimoSessaoPortal> primeiras = await Future.wait(
+    final List<EmprestimoSessaoPortal> senhas = await Future.wait(
       List<Future<EmprestimoSessaoPortal>>.generate(
-        5,
-        (int index) => pool.adquirir(
+        3,
+        (_) => pool.adquirir(
           identificador: 'teste',
           credenciais: _credenciais(),
-          tipo: index.isEven
-              ? TipoConsultaPortal.elegibilidade
-              : TipoConsultaPortal.senha,
+          tipo: TipoConsultaPortal.senha,
         ),
       ),
     );
-    final EmprestimoSessaoPortal terceira = await pool.adquirir(
+    expect(senhas.map((lease) => lease.sessao).toSet(), hasLength(1));
+
+    final Future<EmprestimoSessaoPortal> elegibilidade = pool.adquirir(
       identificador: 'teste',
       credenciais: _credenciais(),
-      tipo: TipoConsultaPortal.senha,
+      tipo: TipoConsultaPortal.elegibilidade,
     );
+    final EmprestimoSessaoPortal elegibilidadeAdquirida =
+        await elegibilidade;
+    expect(elegibilidadeAdquirida.sessao, same(senhas.first.sessao));
 
-    expect(primeiras.map((lease) => lease.sessao).toSet(), hasLength(1));
-    expect(terceira.sessao, isNot(same(primeiras.first.sessao)));
-    expect(pool.diagnosticoConcorrenciaPortal['limiteItensPorSessao'], 5);
+    final EmprestimoSessaoPortal segundaElegibilidade =
+        await pool.adquirir(
+          identificador: 'teste',
+          credenciais: _credenciais(),
+          tipo: TipoConsultaPortal.elegibilidade,
+        );
+    expect(segundaElegibilidade.sessao, isNot(same(senhas.first.sessao)));
 
-    for (final EmprestimoSessaoPortal emprestimo in <EmprestimoSessaoPortal>[
-      ...primeiras,
-      terceira,
-    ]) {
-      emprestimo.liberar();
+    for (final EmprestimoSessaoPortal senha in senhas) {
+      senha.liberar();
     }
+    elegibilidadeAdquirida.liberar();
+    segundaElegibilidade.liberar();
   });
 
   test('lease libera a capacidade uma única vez', () async {

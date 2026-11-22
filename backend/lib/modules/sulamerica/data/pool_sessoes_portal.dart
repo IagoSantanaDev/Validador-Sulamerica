@@ -23,7 +23,6 @@ class PoolSessoesPortal {
     Logger? logger,
     SessaoPortal Function(Logger logger)? fabricaSessao,
     this.limitePorIdentificador = 4,
-    this.limiteItensPorSessao = 2,
     bool repetirFalhasTransitorias = true,
   }) : _logger = logger ?? Logger(),
        _fabricaSessao =
@@ -31,20 +30,11 @@ class PoolSessoesPortal {
            ((Logger logger) => SessaoPortal(
              logger: logger,
              repetirFalhasTransitorias: repetirFalhasTransitorias,
-           )) {
-    if (limiteItensPorSessao < 1 || limiteItensPorSessao > 5) {
-      throw ArgumentError.value(
-        limiteItensPorSessao,
-        'limiteItensPorSessao',
-        'Deve estar entre 1 e 5.',
-      );
-    }
-  }
+           ));
 
   final Logger _logger;
   final SessaoPortal Function(Logger logger) _fabricaSessao;
   final int limitePorIdentificador;
-  final int limiteItensPorSessao;
   final Map<String, _PoolPrestador> _porIdentificador = {};
   final Map<String, int> _diagnosticoSessoesDescartadas = <String, int>{};
   int _picoRequisicoesAtivas = 0;
@@ -82,7 +72,6 @@ class PoolSessoesPortal {
   Map<String, int> get diagnosticoConcorrenciaPortal => <String, int>{
     'picoRequisicoesEmprestadas': _picoRequisicoesAtivas,
     'limiteSessoesPorIdentificador': limitePorIdentificador,
-    'limiteItensPorSessao': limiteItensPorSessao,
   };
 
   Future<SessaoPortal> garantirAutenticada(
@@ -174,10 +163,7 @@ class PoolSessoesPortal {
     late final Future<void> criacao;
     criacao = () async {
       final SessaoPortal sessao = _fabricaSessao(_logger);
-      final _SessaoGerenciada gerenciada = _SessaoGerenciada(
-        sessao,
-        limiteItensPorSessao,
-      );
+      final _SessaoGerenciada gerenciada = _SessaoGerenciada(sessao);
       pool.sessoes.add(gerenciada);
       bool autenticada = false;
       try {
@@ -246,16 +232,18 @@ class _PoolPrestador {
 }
 
 class _SessaoGerenciada {
-  _SessaoGerenciada(this.sessao, this.limiteItensPorSessao);
+  _SessaoGerenciada(this.sessao);
 
   final SessaoPortal sessao;
-  final int limiteItensPorSessao;
   int elegibilidadesAtivas = 0;
   int senhasAtivas = 0;
 
   int get ativas => elegibilidadesAtivas + senhasAtivas;
 
-  bool disponivel(TipoConsultaPortal tipo) => ativas < limiteItensPorSessao;
+  bool disponivel(TipoConsultaPortal tipo) => switch (tipo) {
+    TipoConsultaPortal.elegibilidade => elegibilidadesAtivas == 0,
+    TipoConsultaPortal.senha => senhasAtivas < 3,
+  };
 
   void reservar(TipoConsultaPortal tipo) {
     switch (tipo) {
