@@ -22,8 +22,10 @@ Pages; ao implantar por outro serviço, configure a allowlist no ambiente de
 execução. CORS não autentica chamadas diretas.
 `PORTAL_MAX_SESSIONS_PER_IDENTIFIER` define sessões máximas do portal por
 identificador (padrão 4, faixa 1–8); alteração exige reiniciar o serviço.
-`PORTAL_MAX_ELEGIBILITIES_PER_SESSION` define elegibilidades simultâneas por
-sessão (padrão 1, faixa 1–2). Mantenha 1 salvo validação autorizada do portal.
+`PORTAL_MAX_ITEMS_PER_SESSION` define o total de consultas simultâneas por
+sessão, somando elegibilidade e senha (padrão 2, faixa 1–5). Com pool 5, o
+limite combinado é até 25 itens por identificador, sujeito ao limite global.
+Use valores acima de 2 somente após validação autorizada do portal.
 `PORTAL_REQUEST_MAX_CONCURRENCY` define concorrência global de chamadas ao
 portal e do agendador (padrão 16, faixa 1–20); ambos usam o mesmo limite.
 
@@ -136,9 +138,9 @@ não incluem mensagem de exceção, URL, corpo ou identificadores.
 - Até 16 requisições simultâneas ao portal por padrão; configure
   `PORTAL_REQUEST_MAX_CONCURRENCY` entre 1 e 20 para ajustar semáforo e
   agendador juntos.
-- Elegibilidade serial por sessão por padrão; configuração permite até 2
-  simultâneas somente após validação autorizada. Até 3 consultas de senha
-  concorrentes por sessão.
+- Até 2 consultas simultâneas por sessão por padrão, somando elegibilidade e
+  senha; configure `PORTAL_MAX_ITEMS_PER_SESSION` de 1 a 5 após validação
+  autorizada do portal.
 - Rate limit de 20/min por identificador em `/api/sessoes`, 20/min por token em
   `/api/lotes` e backstop de 120/min. Status e SSE não consomem esse limite.
 - No máximo 200 tokens válidos. O TTL ocioso é de 12 horas após atividade
