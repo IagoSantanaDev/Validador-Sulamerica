@@ -11,7 +11,9 @@ import 'package:validador_backend/http/json.dart';
 import 'package:validador_backend/http/rate_limit.dart';
 import 'package:validador_backend/http/sse.dart';
 import 'package:validador_backend/modules/sulamerica/data/agendador_lotes.dart';
+import 'package:validador_backend/modules/sulamerica/data/assinatura_resposta_portal.dart';
 import 'package:validador_backend/modules/sulamerica/data/credenciais_portal.dart';
+import 'package:validador_backend/modules/sulamerica/data/disjuntor_portal.dart';
 import 'package:validador_backend/modules/sulamerica/data/execucao_lote.dart';
 import 'package:validador_backend/modules/sulamerica/data/pool_sessoes_portal.dart';
 import 'package:validador_backend/modules/sulamerica/data/repositorio_sessoes.dart';
@@ -29,30 +31,54 @@ class ValidadorApi {
     Map<String, String>? ambiente,
     SessaoPortal Function(Logger logger)? fabricaSessao,
     Future<int> Function()? sondaPortal,
+    Future<ResultadoSondaDisjuntor> Function()? sondaDisjuntor,
     Duration janelaCacheAlcance = const Duration(seconds: 10),
     RepositorioSessoes? repositorio,
     RateLimit? rateLimit,
+    DisjuntorPortal? disjuntor,
     int limiteSessoesLogicas = 200,
     int limiteRequisicoesPorChave = 20,
     int limiteRequisicoesGlobal = 120,
+    int limiteSessoesPorIdentificador = 4,
     int limiteExecucoes = 24,
-  })  : _logger = logger ?? Logger(),
-        _ambiente = ambiente,
-        _janelaCacheAlcance = janelaCacheAlcance,
-        _sondaPortal = sondaPortal ?? _sondarPortalPadrao,
-        _repositorio =
-            repositorio ?? RepositorioSessoes(limite: limiteSessoesLogicas),
-        _rateLimit = rateLimit ??
-            RateLimit(
-              limitePorChave: limiteRequisicoesPorChave,
-              limiteGlobal: limiteRequisicoesGlobal,
-            ) {
-    _pool = PoolSessoesPortal(logger: _logger, fabricaSessao: fabricaSessao);
+  }) : _logger = logger ?? Logger(),
+       _ambiente = ambiente,
+       _janelaCacheAlcance = janelaCacheAlcance,
+       _sondaPortal = sondaPortal ?? _sondarPortalPadrao,
+       _repositorio =
+           repositorio ?? RepositorioSessoes(limite: limiteSessoesLogicas),
+       _rateLimit =
+           rateLimit ??
+           RateLimit(
+             limitePorChave: limiteRequisicoesPorChave,
+             limiteGlobal: limiteRequisicoesGlobal,
+           ) {
+    _pool = PoolSessoesPortal(
+      logger: _logger,
+      fabricaSessao: fabricaSessao,
+      limitePorIdentificador: limiteSessoesPorIdentificador,
+      repetirFalhasTransitorias: false,
+    );
+    final Future<int> Function()? sondaPortalPersonalizada = sondaPortal;
+    _disjuntor =
+        disjuntor ??
+        DisjuntorPortal(
+          sondarPortal:
+              sondaDisjuntor ??
+              (sondaPortalPersonalizada == null
+                  ? _sondarPortalDisjuntorPadrao
+                  : () async => ResultadoSondaDisjuntor(
+                      status: await sondaPortalPersonalizada(),
+                    )),
+        );
     _agendador = AgendadorLotes(
       pool: _pool,
       limiteExecucoes: limiteExecucoes,
+      limiteGlobal: SessaoPortal.limiteRequisicoesGlobal,
       executarConsulta: _executarConsultaPortal,
+      mapearFalhaSessao: _mapearFalhaSessaoLote,
       validarConsulta: _validarFormatoConsulta,
+      disjuntor: _disjuntor,
     );
   }
 
@@ -64,6 +90,7 @@ class ValidadorApi {
   final RateLimit _rateLimit;
   late final PoolSessoesPortal _pool;
   late final AgendadorLotes _agendador;
+  late final DisjuntorPortal _disjuntor;
 
   static const int _maxItensPorLote = 300;
   static const int _maxBytesCorpo = 1 << 20;
@@ -72,6 +99,7 @@ class ValidadorApi {
   int _rejeicoes429 = 0;
   int _falhas502 = 0;
   int _falhas503 = 0;
+  final Map<String, int> _falhasConsulta = <String, int>{};
   Map<String, dynamic>? _alcanceCacheado;
   DateTime? _alcanceColetadoEm;
   Future<Map<String, dynamic>>? _sondaEmAndamento;
@@ -90,12 +118,14 @@ class ValidadorApi {
         cors(
           origens:
               (_ambiente ?? Platform.environment)['CORS_ORIGIN']?.split(',') ??
-                  const <String>[],
+              const <String>[],
         ),
       )
       .addHandler(_rotas.call);
 
   Handler get handler => _handler;
+
+  int get lotesAtivos => _agendador.ativas;
 
   Future<Response> _criarSessao(Request request) async {
     final Map<String, dynamic>? corpo;
@@ -130,35 +160,62 @@ class ValidadorApi {
       );
     }
 
+    final PermissaoDisjuntorPortal? permissao = await _disjuntor
+        .tentarAdquirir();
+    if (permissao == null) return _respostaDisjuntorAberto();
+
     late final SessaoLogica sessaoLogica;
     try {
       sessaoLogica = _repositorio.criar(identificador);
     } on RepositorioSessoesCheioException {
+      permissao.concluir(ResultadoDisjuntorPortal.neutra);
       _rejeicoes429++;
       return respostaErro('Limite de sessoes ativas atingido.', 429);
     }
 
     try {
+      final bool sessaoJaAutenticada = _pool.possuiSessaoAutenticada(
+        identificador,
+      );
       await _pool.garantirAutenticada(identificador, credenciais);
+      permissao.concluir(
+        sessaoJaAutenticada
+            ? ResultadoDisjuntorPortal.neutra
+            : ResultadoDisjuntorPortal.sucesso,
+      );
     } on FalhaPoolSessoesException catch (erro) {
+      permissao.concluir(
+        erro.resultado.falhaElegivelCircuito
+            ? ResultadoDisjuntorPortal.falhaElegivel
+            : ResultadoDisjuntorPortal.neutra,
+      );
       _repositorio.remover(sessaoLogica.token);
       final int status = _statusFalhaLogin(erro.resultado);
       _contarFalhaUpstream(status);
       _logger.w('Criacao de sessao rejeitada: falha no login do portal.');
-      return respostaErro(_mensagemFalhaLogin(status), status);
+      return respostaErro(
+        _mensagemFalhaLogin(status),
+        status,
+        headers: status == 503
+            ? cabecalhosRetryAfter(
+                _disjuntor.retryAfterSegundos == 0
+                    ? 1
+                    : _disjuntor.retryAfterSegundos,
+              )
+            : null,
+      );
     } on Exception {
+      permissao.concluir(ResultadoDisjuntorPortal.neutra);
       _repositorio.remover(sessaoLogica.token);
       _logger.e('Falha interna ao criar sessao logica.');
       return respostaErro(_mensagemFalhaLogin(500), 500);
     }
 
-    return respostaJson(
-      <String, dynamic>{
-        'token': sessaoLogica.token,
-        'identificadorPrestador': identificador,
-      },
-      status: 201,
-    );
+    final Map<String, dynamic> corpoResposta = <String, dynamic>{
+      'token': sessaoLogica.token,
+      'identificadorPrestador': identificador,
+    };
+    return respostaJson(corpoResposta, status: 201);
   }
 
   Future<Response> _criarLote(Request request) async {
@@ -223,6 +280,11 @@ class ValidadorApi {
       return _respostaLote(anterior.id!, execucao, consultas.length);
     }
 
+    final PermissaoDisjuntorPortal? permissao = await _disjuntor
+        .tentarAdquirir();
+    if (permissao == null) return _respostaDisjuntorAberto();
+    permissao.concluir(ResultadoDisjuntorPortal.neutra);
+
     final CredenciaisPortal? credenciais = CredenciaisPortal.resolver(
       sessaoLogica.identificadorPrestador,
       ambiente: _ambiente,
@@ -270,6 +332,7 @@ class ValidadorApi {
       EstadoExecucaoLote.naFila => 'na_fila',
       EstadoExecucaoLote.processando => 'processando',
       EstadoExecucaoLote.concluido => 'concluido',
+      EstadoExecucaoLote.parcial => 'parcial',
       EstadoExecucaoLote.falhou => 'falhou',
       EstadoExecucaoLote.cancelado => 'cancelado',
     };
@@ -288,7 +351,8 @@ class ValidadorApi {
     final ExecucaoLote? execucao = _agendador.obterExecucao(id, token);
     if (execucao == null) return respostaErro('Lote nao encontrado.', 404);
 
-    final String? desdeTexto = request.url.queryParameters['desde'] ??
+    final String? desdeTexto =
+        request.url.queryParameters['desde'] ??
         request.headers['last-event-id'];
     final int? desde = desdeTexto == null ? null : int.tryParse(desdeTexto);
     if (desdeTexto != null && (desde == null || desde < 0)) {
@@ -316,7 +380,7 @@ class ValidadorApi {
     );
   }
 
-  Future<Map<String, dynamic>> _executarConsultaPortal(
+  Future<ResultadoConsultaAgendada> _executarConsultaPortal(
     SessaoPortal sessao,
     Map<String, dynamic> consulta,
     CancelToken cancelToken,
@@ -325,59 +389,94 @@ class ValidadorApi {
     final String chave = consulta['chave'] as String;
     if (tipo == 'elegibilidade') {
       if (!_carteiraValida(chave)) {
-        return _falhaItem(
-          consulta,
-          'Carteira deve conter exatamente 20 digitos.',
+        return ResultadoConsultaAgendada(
+          dados: _falhaItem(
+            consulta,
+            'Carteira deve conter exatamente 20 digitos.',
+          ),
         );
       }
-      final ResultadoConsultaPortal<String> resposta =
-          await sessao.consultarBeneficiario(
-        carteirinhaCompleta: chave,
-        cancelToken: cancelToken,
-      );
+      final ResultadoConsultaPortal<String> resposta = await sessao
+          .consultarBeneficiario(
+            carteirinhaCompleta: chave,
+            cancelToken: cancelToken,
+          );
       if (!resposta.sucesso) {
         _contarFalhaConsulta(resposta);
-        return _falhaItem(consulta, _mensagemFalhaConsulta(resposta.categoria));
+        return ResultadoConsultaAgendada(
+          dados: _falhaItem(
+            consulta,
+            _mensagemFalhaConsulta(resposta.categoria, resposta.status),
+          ),
+          retryable: resposta.retryable,
+          falhaElegivelCircuito: resposta.falhaElegivelCircuito,
+        );
       }
       final String html = resposta.dados!;
       final bool? elegivel = extrairElegivel(html);
       if (elegivel == null) {
         _logger.w('Elegibilidade sem indicador no portal.');
       }
-      return <String, dynamic>{
-        ...consulta,
-        'sucesso': true,
-        'elegivel': elegivel,
-        'rotuloElegibilidade': extrairRotuloElegibilidade(html),
-      };
+      return ResultadoConsultaAgendada(
+        dados: <String, dynamic>{
+          ...consulta,
+          'sucesso': true,
+          'elegivel': elegivel,
+          'rotuloElegibilidade': extrairRotuloElegibilidade(html),
+        },
+      );
     }
 
     if (tipo == 'senha') {
       if (!_senhaValida(chave)) {
-        return _falhaItem(
-          consulta,
-          'Senha invalida: deve ter exatamente 10 digitos comecando com 5.',
+        return ResultadoConsultaAgendada(
+          dados: _falhaItem(
+            consulta,
+            'Senha invalida: deve ter exatamente 10 digitos comecando com 5.',
+          ),
         );
       }
       final ResultadoConsultaPortal<Map<String, dynamic>> resposta =
           await sessao.consultarSenha(senha: chave, cancelToken: cancelToken);
       if (!resposta.sucesso) {
         _contarFalhaConsulta(resposta);
-        return _falhaItem(consulta, _mensagemFalhaConsulta(resposta.categoria));
+        return ResultadoConsultaAgendada(
+          dados: _falhaItem(
+            consulta,
+            _mensagemFalhaConsulta(resposta.categoria, resposta.status),
+          ),
+          retryable: resposta.retryable,
+          falhaElegivelCircuito: resposta.falhaElegivelCircuito,
+        );
       }
-      return <String, dynamic>{
-        ...consulta,
-        'sucesso': true,
-        'statusSenha': _extrairStatusSenha(resposta.dados!),
-      };
+      return ResultadoConsultaAgendada(
+        dados: <String, dynamic>{
+          ...consulta,
+          'sucesso': true,
+          'statusSenha': _extrairStatusSenha(resposta.dados!),
+        },
+      );
     }
 
-    return _falhaItem(consulta, 'Tipo de consulta desconhecido.');
+    return ResultadoConsultaAgendada(
+      dados: _falhaItem(consulta, 'Tipo de consulta desconhecido.'),
+    );
   }
 
-  Map<String, dynamic>? _validarFormatoConsulta(
+  ResultadoConsultaAgendada _mapearFalhaSessaoLote(
     Map<String, dynamic> consulta,
+    ResultadoLogin login,
   ) {
+    final int status = _statusFalhaLogin(login);
+    _contarFalhaUpstream(status);
+    return ResultadoConsultaAgendada(
+      dados: _falhaItem(consulta, _mensagemFalhaLogin(status)),
+      retryable: login.falhaElegivelCircuito,
+      falhaElegivelCircuito: login.falhaElegivelCircuito,
+    );
+  }
+
+  Map<String, dynamic>? _validarFormatoConsulta(Map<String, dynamic> consulta) {
     final String tipo = consulta['tipo'] as String;
     final String chave = consulta['chave'] as String;
     if (tipo == 'elegibilidade') {
@@ -404,28 +503,31 @@ class ValidadorApi {
   Map<String, dynamic> _falhaItem(
     Map<String, dynamic> consulta,
     String mensagem,
-  ) =>
-      <String, dynamic>{...consulta, 'sucesso': false, 'erro': mensagem};
+  ) => <String, dynamic>{...consulta, 'sucesso': false, 'erro': mensagem};
 
-  String _mensagemFalhaConsulta(CategoriaFalhaConsultaPortal? categoria) =>
-      switch (categoria) {
-        CategoriaFalhaConsultaPortal.sessao => 'Sessao do portal indisponivel.',
-        CategoriaFalhaConsultaPortal.transporte =>
-          'Falha de rede ao acessar o portal SulAmerica.',
-        CategoriaFalhaConsultaPortal.cancelada => 'Consulta cancelada.',
-        CategoriaFalhaConsultaPortal.http =>
-          'Falha na consulta ao portal SulAmerica.',
-        CategoriaFalhaConsultaPortal.respostaInesperada ||
-        null =>
-          'Resposta inesperada do portal SulAmerica.',
-      };
+  String _mensagemFalhaConsulta(
+    CategoriaFalhaConsultaPortal? categoria,
+    int? status,
+  ) => switch (categoria) {
+    CategoriaFalhaConsultaPortal.sessao => 'Sessao do portal indisponivel.',
+    CategoriaFalhaConsultaPortal.transporte =>
+      'Falha de rede ao acessar o portal SulAmerica.',
+    CategoriaFalhaConsultaPortal.cancelada => 'Consulta cancelada.',
+    CategoriaFalhaConsultaPortal.http =>
+      status == null
+          ? 'Falha na consulta ao portal SulAmerica.'
+          : 'Falha na consulta ao portal SulAmerica (HTTP $status).',
+    CategoriaFalhaConsultaPortal.respostaInesperada ||
+    null => 'Resposta inesperada do portal SulAmerica.',
+  };
 
   String? _extrairStatusSenha(Map<String, dynamic> dados) {
     final dynamic registros = dados['registros'];
     if (registros is! List || registros.isEmpty) return null;
     for (final dynamic registro in registros) {
-      final dynamic status =
-          registro is Map ? registro['status_solicitacao'] : null;
+      final dynamic status = registro is Map
+          ? registro['status_solicitacao']
+          : null;
       final dynamic descricao = status is Map ? status['descricao'] : null;
       if (descricao is String && descricao.isNotEmpty) return descricao;
     }
@@ -436,15 +538,6 @@ class ValidadorApi {
     final Map<String, dynamic> alcancePortal = await _alcancePortal();
     return respostaJson(<String, dynamic>{
       'status': 'ok',
-      'sessoesAtivas': _pool.sessoesAtivas,
-      'lotes': <String, int>{
-        'ativos': _agendador.ativas,
-        'naFila': _agendador.naFila,
-        'concluidos': _agendador.concluidos,
-      },
-      'memoriaRssMb': (ProcessInfo.currentRss / (1024 * 1024)).round(),
-      'rateLimit': <String, int>{'rejeicoes429': _rejeicoes429},
-      'falhasPortal': <String, int>{'502': _falhas502, '503': _falhas503},
       'portalSulAmerica': alcancePortal,
       'timestamp': DateTime.now().toIso8601String(),
     });
@@ -496,18 +589,63 @@ class ValidadorApi {
           .getUrl(Uri.parse('https://saude.sulamericaseguros.com.br/'))
           .timeout(const Duration(seconds: 10));
       final HttpClientResponse resposta = await requisicao.close().timeout(
-            const Duration(seconds: 10),
-          );
+        const Duration(seconds: 10),
+      );
       return resposta.statusCode;
     } finally {
       http.close(force: true);
     }
   }
 
-  Response _erroCorpoGrande() => respostaErro(
-        'Corpo excede o limite de ${_maxBytesCorpo ~/ (1 << 20)} MB.',
-        413,
+  static Future<ResultadoSondaDisjuntor> _sondarPortalDisjuntorPadrao() async {
+    final HttpClient http = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 10);
+    try {
+      final HttpClientRequest requisicao = await http
+          .getUrl(Uri.parse('https://saude.sulamericaseguros.com.br/'))
+          .timeout(const Duration(seconds: 10));
+      final HttpClientResponse resposta = await requisicao.close().timeout(
+        const Duration(seconds: 10),
       );
+      final List<int> corpo = await _lerCorpoSonda(resposta)
+          .timeout(const Duration(seconds: 10));
+      final assinatura =
+          ColetorAssinaturasRespostaPortal().coletar(
+            status: resposta.statusCode,
+            contentType: resposta.headers.contentType?.mimeType,
+            body: corpo,
+          );
+      return ResultadoSondaDisjuntor(
+        status: resposta.statusCode,
+        rejeicaoF5: assinatura.f5Rejected,
+      );
+    } on Exception {
+      return const ResultadoSondaDisjuntor(status: null, falhaTransporte: true);
+    } finally {
+      http.close(force: true);
+    }
+  }
+
+  static Future<List<int>> _lerCorpoSonda(HttpClientResponse resposta) async {
+    const int limiteBytes = 65536;
+    final List<int> corpo = <int>[];
+    await for (final List<int> parte in resposta) {
+      corpo.addAll(parte.take(limiteBytes - corpo.length));
+      if (corpo.length >= limiteBytes) break;
+    }
+    return corpo;
+  }
+
+  Response _erroCorpoGrande() => respostaErro(
+    'Corpo excede o limite de ${_maxBytesCorpo ~/ (1 << 20)} MB.',
+    413,
+  );
+
+  Response _respostaDisjuntorAberto() => respostaErro(
+    'Portal SulAmerica temporariamente indisponivel.',
+    503,
+    headers: cabecalhosRetryAfter(_disjuntor.retryAfterSegundos),
+  );
 
   List<Map<String, dynamic>>? _validarConsultas(Object? valor) {
     if (valor is! List || valor.isEmpty) return null;
@@ -533,18 +671,18 @@ class ValidadorApi {
       respostaErro('Rota nao encontrada.', 404);
 
   int _statusFalhaLogin(ResultadoLogin resultado) => switch (resultado.motivo) {
-        MotivoFalhaLogin.credenciaisInvalidas => 401,
-        MotivoFalhaLogin.falhaRede => 503,
-        MotivoFalhaLogin.respostaInesperada => 502,
-        MotivoFalhaLogin.falhaInterna || null => 500,
-      };
+    MotivoFalhaLogin.credenciaisInvalidas => 401,
+    MotivoFalhaLogin.falhaRede => 503,
+    MotivoFalhaLogin.respostaInesperada => 502,
+    MotivoFalhaLogin.falhaInterna || null => 500,
+  };
 
   String _mensagemFalhaLogin(int status) => switch (status) {
-        401 => 'Credenciais invalidas para o portal SulAmerica.',
-        502 => 'O portal SulAmerica respondeu de forma inesperada.',
-        503 => 'Falha de rede ao acessar o portal SulAmerica.',
-        _ => 'Falha interna do backend.',
-      };
+    401 => 'Credenciais invalidas para o portal SulAmerica.',
+    502 => 'O portal SulAmerica respondeu de forma inesperada.',
+    503 => 'Falha de rede ao acessar o portal SulAmerica.',
+    _ => 'Falha interna do backend.',
+  };
 
   void _contarFalhaUpstream(int? status) {
     if (status == 502) _falhas502++;
@@ -552,6 +690,13 @@ class ValidadorApi {
   }
 
   void _contarFalhaConsulta<T>(ResultadoConsultaPortal<T> resultado) {
+    final String categoria = resultado.categoria?.name ?? 'semCategoria';
+    final String status = resultado.status?.toString() ?? 'semStatus';
+    _falhasConsulta.update(
+      '${categoria}_$status',
+      (int valor) => valor + 1,
+      ifAbsent: () => 1,
+    );
     if (resultado.categoria == CategoriaFalhaConsultaPortal.transporte) {
       _falhas503++;
       return;
@@ -566,15 +711,15 @@ class ValidadorApi {
       senha.length == 10 && senha.startsWith('5');
 
   Middleware _exporRetryAfterCors() => (Handler inner) {
-        return (Request request) async {
-          final Response resposta = await inner(request);
-          return resposta.change(
-            headers: const <String, String>{
-              'access-control-expose-headers': 'Location, Retry-After',
-            },
-          );
-        };
-      };
+    return (Request request) async {
+      final Response resposta = await inner(request);
+      return resposta.change(
+        headers: const <String, String>{
+          'access-control-expose-headers': 'Location, Retry-After',
+        },
+      );
+    };
+  };
 }
 
 class _StreamAtivo {

@@ -23,28 +23,65 @@ class PoolSessoesPortal {
     Logger? logger,
     SessaoPortal Function(Logger logger)? fabricaSessao,
     this.limitePorIdentificador = 4,
-  })  : _logger = logger ?? Logger(),
-        _fabricaSessao = fabricaSessao ?? _fabricaPadrao;
-
-  static SessaoPortal _fabricaPadrao(Logger logger) =>
-      SessaoPortal(logger: logger);
+    bool repetirFalhasTransitorias = true,
+  }) : _logger = logger ?? Logger(),
+       _fabricaSessao =
+           fabricaSessao ??
+           ((Logger logger) => SessaoPortal(
+             logger: logger,
+             repetirFalhasTransitorias: repetirFalhasTransitorias,
+           ));
 
   final Logger _logger;
   final SessaoPortal Function(Logger logger) _fabricaSessao;
   final int limitePorIdentificador;
   final Map<String, _PoolPrestador> _porIdentificador = {};
+  final Map<String, int> _diagnosticoSessoesDescartadas = <String, int>{};
+  int _picoRequisicoesAtivas = 0;
 
   int get sessoesAtivas => _porIdentificador.values.fold<int>(
-        0,
-        (int total, _PoolPrestador pool) => total + pool.sessoes.length,
-      );
+    0,
+    (int total, _PoolPrestador pool) => total + pool.sessoes.length,
+  );
+
+  bool possuiSessaoAutenticada(String identificador) =>
+      _porIdentificador[identificador]?.sessoes.any(
+        (_SessaoGerenciada sessao) => sessao.sessao.autenticada,
+      ) ??
+      false;
+
+  Map<String, int> get diagnosticoSessaoPortal {
+    final Map<String, int> total = Map<String, int>.of(
+      _diagnosticoSessoesDescartadas,
+    );
+    for (final _PoolPrestador pool in _porIdentificador.values) {
+      for (final _SessaoGerenciada sessao in pool.sessoes) {
+        for (final MapEntry<String, int> contador
+            in sessao.sessao.diagnosticoSessao.entries) {
+          total.update(
+            contador.key,
+            (int valor) => valor + contador.value,
+            ifAbsent: () => contador.value,
+          );
+        }
+      }
+    }
+    return total;
+  }
+
+  Map<String, int> get diagnosticoConcorrenciaPortal => <String, int>{
+    'picoRequisicoesEmprestadas': _picoRequisicoesAtivas,
+    'limiteSessoesPorIdentificador': limitePorIdentificador,
+  };
 
   Future<SessaoPortal> garantirAutenticada(
     String identificador,
     CredenciaisPortal credenciais,
   ) async {
-    final _PoolPrestador pool =
-        _porIdentificador.putIfAbsent(identificador, _PoolPrestador.new);
+    final _PoolPrestador pool = _porIdentificador.putIfAbsent(
+      identificador,
+      _PoolPrestador.new,
+    );
     if (pool.sessoes.isEmpty) {
       await _adicionarSessao(identificador, credenciais, pool);
     }
@@ -60,8 +97,10 @@ class PoolSessoesPortal {
     required TipoConsultaPortal tipo,
     CancelToken? cancelToken,
   }) async {
-    final _PoolPrestador pool =
-        _porIdentificador.putIfAbsent(identificador, _PoolPrestador.new);
+    final _PoolPrestador pool = _porIdentificador.putIfAbsent(
+      identificador,
+      _PoolPrestador.new,
+    );
 
     while (true) {
       if (cancelToken?.isCancelled ?? false) {
@@ -77,6 +116,17 @@ class PoolSessoesPortal {
 
       if (escolhida != null) {
         escolhida.reservar(tipo);
+        final int ativas = _porIdentificador.values.fold<int>(
+          0,
+          (int total, _PoolPrestador pool) =>
+              total +
+              pool.sessoes.fold<int>(
+                0,
+                (int subtotal, _SessaoGerenciada sessao) =>
+                    subtotal + sessao.ativas,
+              ),
+        );
+        if (ativas > _picoRequisicoesAtivas) _picoRequisicoesAtivas = ativas;
         return EmprestimoSessaoPortal._(escolhida, tipo, pool);
       }
 
@@ -126,6 +176,14 @@ class PoolSessoesPortal {
         autenticada = true;
       } finally {
         if (!autenticada) {
+          for (final MapEntry<String, int> contador
+              in sessao.diagnosticoSessao.entries) {
+            _diagnosticoSessoesDescartadas.update(
+              contador.key,
+              (int valor) => valor + contador.value,
+              ifAbsent: () => contador.value,
+            );
+          }
           pool.sessoes.remove(gerenciada);
           await sessao.encerrar();
         }
@@ -183,9 +241,9 @@ class _SessaoGerenciada {
   int get ativas => elegibilidadesAtivas + senhasAtivas;
 
   bool disponivel(TipoConsultaPortal tipo) => switch (tipo) {
-        TipoConsultaPortal.elegibilidade => elegibilidadesAtivas == 0,
-        TipoConsultaPortal.senha => senhasAtivas < 3,
-      };
+    TipoConsultaPortal.elegibilidade => elegibilidadesAtivas == 0,
+    TipoConsultaPortal.senha => senhasAtivas < 3,
+  };
 
   void reservar(TipoConsultaPortal tipo) {
     switch (tipo) {

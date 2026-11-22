@@ -1,4 +1,5 @@
 import 'consulta_lote.dart';
+import 'consulta_guia.dart';
 
 /// Lote aceito pelo backend (`POST /api/lotes`).
 class LoteRemoto {
@@ -45,10 +46,15 @@ class ProgressoLote {
 
 /// Evento `resultado` de um lote concluído.
 class ResultadoLoteEvento {
-  const ResultadoLoteEvento({required this.status, required this.resultados});
+  const ResultadoLoteEvento({
+    required this.status,
+    required this.resultados,
+    this.pendentes = const [],
+  });
 
   final String status;
   final List<ResultadoConsultaLote> resultados;
+  final List<PendenciaConsultaLote> pendentes;
 
   static ResultadoLoteEvento fromJson(Map<String, dynamic> json) {
     final Object? itens = json['resultados'];
@@ -61,6 +67,47 @@ class ResultadoLoteEvento {
                   ResultadoConsultaLote.fromJson(item.cast<String, dynamic>()),
             ]
           : const [],
+      pendentes: json['pendentes'] is List
+          ? [
+              for (final Object? item in json['pendentes'] as List)
+                if (item is Map)
+                  if (PendenciaConsultaLote.fromJson(
+                        item.cast<String, dynamic>(),
+                      )
+                      case final PendenciaConsultaLote pendencia)
+                    pendencia,
+            ]
+          : const [],
+    );
+  }
+}
+
+class PendenciaConsultaLote {
+  const PendenciaConsultaLote({
+    required this.tipo,
+    required this.chave,
+    required this.motivo,
+  });
+
+  final TipoConsultaGuia tipo;
+  final String chave;
+  final String motivo;
+
+  static PendenciaConsultaLote? fromJson(Map<String, dynamic> json) {
+    final String? tipo = json['tipo'] as String?;
+    final String? chave = json['chave'] as String?;
+    final String? motivo = json['motivo'] as String?;
+    if (chave == null || motivo == null) return null;
+    final TipoConsultaGuia? tipoConsulta = switch (tipo) {
+      'elegibilidade' => TipoConsultaGuia.elegibilidade,
+      'senha' => TipoConsultaGuia.senha,
+      _ => null,
+    };
+    if (tipoConsulta == null) return null;
+    return PendenciaConsultaLote(
+      tipo: tipoConsulta,
+      chave: chave,
+      motivo: motivo,
     );
   }
 }

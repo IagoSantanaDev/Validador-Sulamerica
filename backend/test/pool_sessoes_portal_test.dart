@@ -34,16 +34,54 @@ class _SessaoFake extends SessaoPortal {
   Future<void> encerrar() async {}
 }
 
+class _SessaoFalhaFake extends SessaoPortal {
+  _SessaoFalhaFake() : super(logger: Logger(level: Level.off));
+
+  @override
+  Map<String, int> get diagnosticoSessao => const <String, int>{
+    'loginGetHttp403': 1,
+    'assinaturaF5MarkerSupportId': 1,
+  };
+
+  @override
+  Future<ResultadoLogin> login({
+    required String code,
+    required String user,
+    required String senha,
+  }) async => const ResultadoLogin.falha(MotivoFalhaLogin.respostaInesperada);
+
+  @override
+  Future<void> encerrar() async {}
+}
+
 CredenciaisPortal _credenciais() => CredenciaisPortal.resolver(
-      'teste',
-      ambiente: const <String, String>{
-        'PORTAL_PRESTADOR_ID_TESTE_CODE': 'code',
-        'PORTAL_PRESTADOR_ID_TESTE_USER': 'user',
-        'PORTAL_PRESTADOR_ID_TESTE_SENHA': 'senha',
-      },
-    )!;
+  'teste',
+  ambiente: const <String, String>{
+    'PORTAL_PRESTADOR_ID_TESTE_CODE': 'code',
+    'PORTAL_PRESTADOR_ID_TESTE_USER': 'user',
+    'PORTAL_PRESTADOR_ID_TESTE_SENHA': 'senha',
+  },
+)!;
 
 void main() {
+  test(
+    'preserva diagnóstico de sessão descartada após login inicial',
+    () async {
+      final PoolSessoesPortal pool = PoolSessoesPortal(
+        fabricaSessao: (_) => _SessaoFalhaFake(),
+      );
+
+      await expectLater(
+        pool.garantirAutenticada('teste', _credenciais()),
+        throwsA(isA<FalhaPoolSessoesException>()),
+      );
+
+      expect(pool.sessoesAtivas, 0);
+      expect(pool.diagnosticoSessaoPortal['loginGetHttp403'], 1);
+      expect(pool.diagnosticoSessaoPortal['assinaturaF5MarkerSupportId'], 1);
+    },
+  );
+
   test('logins concorrentes coalescem em uma sessão', () async {
     final List<_SessaoFake> criadas = <_SessaoFake>[];
     final PoolSessoesPortal pool = PoolSessoesPortal(
@@ -66,55 +104,57 @@ void main() {
     expect(criadas.single.logins, 1);
   });
 
-  test('cria sessão sob demanda e não excede quatro por identificador',
-      () async {
-    final List<_SessaoFake> criadas = <_SessaoFake>[];
-    final PoolSessoesPortal pool = PoolSessoesPortal(
-      fabricaSessao: (_) {
-        final _SessaoFake sessao = _SessaoFake();
-        criadas.add(sessao);
-        return sessao;
-      },
-    );
-    await pool.garantirAutenticada('teste', _credenciais());
+  test(
+    'cria sessão sob demanda e não excede quatro por identificador',
+    () async {
+      final List<_SessaoFake> criadas = <_SessaoFake>[];
+      final PoolSessoesPortal pool = PoolSessoesPortal(
+        fabricaSessao: (_) {
+          final _SessaoFake sessao = _SessaoFake();
+          criadas.add(sessao);
+          return sessao;
+        },
+      );
+      await pool.garantirAutenticada('teste', _credenciais());
 
-    final List<EmprestimoSessaoPortal> emprestimos = await Future.wait(
-      List<Future<EmprestimoSessaoPortal>>.generate(
-        12,
-        (_) => pool.adquirir(
-          identificador: 'teste',
-          credenciais: _credenciais(),
-          tipo: TipoConsultaPortal.senha,
+      final List<EmprestimoSessaoPortal> emprestimos = await Future.wait(
+        List<Future<EmprestimoSessaoPortal>>.generate(
+          12,
+          (_) => pool.adquirir(
+            identificador: 'teste',
+            credenciais: _credenciais(),
+            tipo: TipoConsultaPortal.senha,
+          ),
         ),
-      ),
-    );
+      );
 
-    expect(pool.sessoesAtivas, 4);
-    expect(criadas, hasLength(4));
-    expect(criadas.map((sessao) => sessao.logins), everyElement(1));
+      expect(pool.sessoesAtivas, 4);
+      expect(criadas, hasLength(4));
+      expect(criadas.map((sessao) => sessao.logins), everyElement(1));
 
-    bool liberada = false;
-    final Future<EmprestimoSessaoPortal> aguardando = pool
-        .adquirir(
-          identificador: 'teste',
-          credenciais: _credenciais(),
-          tipo: TipoConsultaPortal.senha,
-        )
-        .then((EmprestimoSessaoPortal emprestimo) {
-      liberada = true;
-      return emprestimo;
-    });
-    await Future<void>.delayed(Duration.zero);
-    expect(liberada, isFalse);
-    emprestimos.first.liberar();
-    final EmprestimoSessaoPortal proxima = await aguardando;
-    proxima.liberar();
-    for (final EmprestimoSessaoPortal emprestimo in emprestimos) {
-      emprestimo.liberar();
-    }
-  });
+      bool liberada = false;
+      final Future<EmprestimoSessaoPortal> aguardando = pool
+          .adquirir(
+            identificador: 'teste',
+            credenciais: _credenciais(),
+            tipo: TipoConsultaPortal.senha,
+          )
+          .then((EmprestimoSessaoPortal emprestimo) {
+            liberada = true;
+            return emprestimo;
+          });
+      await Future<void>.delayed(Duration.zero);
+      expect(liberada, isFalse);
+      emprestimos.first.liberar();
+      final EmprestimoSessaoPortal proxima = await aguardando;
+      proxima.liberar();
+      for (final EmprestimoSessaoPortal emprestimo in emprestimos) {
+        emprestimo.liberar();
+      }
+    },
+  );
 
-  test('elegibilidades são serializadas por sessão e senha aceita três',
+  test('elegibilidades serializam e senhas aceitam até três por sessão',
       () async {
     final List<_SessaoFake> criadas = <_SessaoFake>[];
     final PoolSessoesPortal pool = PoolSessoesPortal(
@@ -149,10 +189,10 @@ void main() {
 
     final EmprestimoSessaoPortal segundaElegibilidade =
         await pool.adquirir(
-      identificador: 'teste',
-      credenciais: _credenciais(),
-      tipo: TipoConsultaPortal.elegibilidade,
-    );
+          identificador: 'teste',
+          credenciais: _credenciais(),
+          tipo: TipoConsultaPortal.elegibilidade,
+        );
     expect(segundaElegibilidade.sessao, isNot(same(senhas.first.sessao)));
 
     for (final EmprestimoSessaoPortal senha in senhas) {

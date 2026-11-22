@@ -11,11 +11,13 @@ environment:
 
 dependencies:
   cookie_jar: ^4.0.8
+  crypto: ^3.0.8
   dio: ^5.7.0
   dio_cookie_manager: ^3.2.0
   logger: ^2.4.0
   shelf: ^1.4.2
   shelf_router: ^1.1.4
+  xml: ^7.1.0
 
 dev_dependencies:
   lints: ^5.1.1

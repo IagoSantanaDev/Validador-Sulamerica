@@ -15,6 +15,10 @@ services:
     envVars:
       - key: HOST
         value: "0.0.0.0"
+      - key: PORTAL_MAX_SESSIONS_PER_IDENTIFIER
+        value: "5"
+      - key: PORTAL_REQUEST_MAX_CONCURRENCY
+        value: "20"
       - key: CORS_ORIGIN
         value: "https://iagosantanadev.github.io, https://validador-sulamerica.pages.dev"
       # CORS controla acesso pelo navegador; não autentica chamadas diretas

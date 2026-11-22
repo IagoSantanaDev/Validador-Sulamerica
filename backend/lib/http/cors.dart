@@ -3,7 +3,7 @@ import 'package:shelf/shelf.dart';
 const String metodosPermitidosCors = 'GET, POST, OPTIONS';
 
 const String cabecalhosPermitidosCors =
-    'Content-Type, Authorization, Idempotency-Key, Last-Event-ID';
+    'Content-Type, Authorization, Idempotency-Key, Last-Event-ID, Cache-Control';
 
 const String cabecalhosExpostosCors = 'Location';
 

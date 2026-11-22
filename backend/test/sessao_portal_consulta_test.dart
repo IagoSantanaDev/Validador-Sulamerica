@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
@@ -47,7 +48,8 @@ ResponseBody _resposta(
   String corpo,
   int status, {
   Map<String, List<String>>? headers,
-}) => ResponseBody.fromString(corpo, status, headers: headers);
+}) =>
+    ResponseBody.fromString(corpo, status, headers: headers);
 
 void main() {
   test('HTTP 429 é devolvido sem retry de consulta', () async {
@@ -66,7 +68,13 @@ void main() {
       if (request.method == 'POST' &&
           request.uri.queryParameters['lumPageId'] == _idConsulta) {
         consultas++;
-        return _resposta('rate limited', 429);
+        return ResponseBody.fromString(
+          '<html><title>Rejected</title>Support ID ABC12345</html>',
+          429,
+          headers: <String, List<String>>{
+            'content-type': <String>['text/html; charset=utf-8'],
+          },
+        );
       }
       if (request.uri.path == '/prestador/') {
         return _resposta('<html>logout</html>', 200);
@@ -86,6 +94,316 @@ void main() {
     expect(resultado.sucesso, isFalse);
     expect(resultado.status, 429);
     expect(resultado.categoria, CategoriaFalhaConsultaPortal.http);
+    expect(sessao.diagnosticoSessao['assinaturaResposta'], 1);
+    expect(sessao.diagnosticoSessao['assinaturaF5Rejected'], 1);
+    expect(sessao.diagnosticoSessao['assinaturaF5MarkerSupportId'], 1);
+    expect(
+      jsonEncode(sessao.diagnosticoSessao),
+      isNot(contains('ABC12345')),
+    );
+    await sessao.encerrar();
+  });
+
+  test('diagnostica AJAX HTML sem guardar o corpo', () async {
+    final _AdapterTeste adapter = _AdapterTeste((RequestOptions request) async {
+      if (request.method == 'POST' &&
+          request.uri.queryParameters['lumPageId'] == _idLogin) {
+        return _resposta(
+          '',
+          302,
+          headers: <String, List<String>>{
+            'location': <String>['/prestador/'],
+          },
+        );
+      }
+      if (request.uri.path == '/prestador/') {
+        return _resposta('<html>logout</html>', 200);
+      }
+      if (request.uri.path == '/ajax-controller.jsp') {
+        return ResponseBody.fromString(
+          '<html>block page</html>',
+          200,
+          headers: <String, List<String>>{
+            'content-type': <String>['text/html'],
+          },
+        );
+      }
+      return _resposta('<html>formulario</html>', 200);
+    });
+    final SessaoPortal sessao = SessaoPortal(
+      dio: Dio()..httpClientAdapter = adapter,
+      logger: Logger(output: const _LogMudo(), level: Level.off),
+    );
+    await _login(sessao);
+
+    final ResultadoConsultaPortal<Map<String, dynamic>> resultado =
+        await sessao.consultarSenha(senha: '5000000000');
+
+    expect(
+      resultado.categoria,
+      CategoriaFalhaConsultaPortal.respostaInesperada,
+    );
+    expect(sessao.diagnosticoSessao['ajaxHttp200'], 1);
+    expect(sessao.diagnosticoSessao['ajaxContentTypeHtml'], 1);
+    expect(sessao.diagnosticoSessao['ajaxJsonInvalido'], 1);
+    expect(sessao.diagnosticoSessao['assinaturaResposta'], 1);
+    expect(sessao.diagnosticoSessao['assinaturaF5Rejected'], isNull);
+    expect(
+      jsonEncode(sessao.diagnosticoSessao),
+      isNot(contains('block page')),
+    );
+    await sessao.encerrar();
+  });
+
+  test('assina AJAX HTTP nao-200 com HTML sem guardar o corpo', () async {
+    final _AdapterTeste adapter = _AdapterTeste((RequestOptions request) async {
+      if (request.method == 'POST' &&
+          request.uri.queryParameters['lumPageId'] == _idLogin) {
+        return _resposta(
+          '',
+          302,
+          headers: <String, List<String>>{
+            'location': <String>['/prestador/'],
+          },
+        );
+      }
+      if (request.uri.path == '/prestador/') {
+        return _resposta('<html>logout</html>', 200);
+      }
+      if (request.uri.path == '/ajax-controller.jsp') {
+        return ResponseBody.fromString(
+          '<html><title>Rejected</title>Support ID ABC12345</html>',
+          502,
+          headers: <String, List<String>>{
+            'content-type': <String>['text/html'],
+          },
+        );
+      }
+      return _resposta('<html>formulario</html>', 200);
+    });
+    final SessaoPortal sessao = SessaoPortal(
+      dio: Dio()..httpClientAdapter = adapter,
+      logger: Logger(output: const _LogMudo(), level: Level.off),
+    );
+    await _login(sessao);
+
+    final ResultadoConsultaPortal<Map<String, dynamic>> resultado =
+        await sessao.consultarSenha(senha: '5000000000');
+
+    expect(resultado.status, 502);
+    expect(resultado.categoria, CategoriaFalhaConsultaPortal.http);
+    expect(sessao.diagnosticoSessao['assinaturaResposta'], 1);
+    expect(sessao.diagnosticoSessao['assinaturaF5Rejected'], 1);
+    expect(sessao.diagnosticoSessao['assinaturaF5MarkerSupportId'], 1);
+    expect(
+      jsonEncode(sessao.diagnosticoSessao),
+      isNot(contains('ABC12345')),
+    );
+    await sessao.encerrar();
+  });
+
+  test('nao repete transporte quando a resposta anexada tem marcador F5',
+      () async {
+    int consultas = 0;
+    final _AdapterTeste adapter = _AdapterTeste((RequestOptions request) async {
+      if (request.method == 'POST' &&
+          request.uri.queryParameters['lumPageId'] == _idLogin) {
+        return _resposta(
+          '',
+          302,
+          headers: <String, List<String>>{
+            'location': <String>['/prestador/'],
+          },
+        );
+      }
+      if (request.uri.path == '/prestador/') {
+        return _resposta('<html>logout</html>', 200);
+      }
+      if (request.method == 'POST' &&
+          request.uri.queryParameters['lumPageId'] == _idConsulta) {
+        consultas++;
+        throw DioException(
+          requestOptions: request,
+          type: DioExceptionType.connectionError,
+          response: Response<dynamic>(
+            requestOptions: request,
+            statusCode: 503,
+            data: '<html><title>Rejected</title>Support ID ABC12345</html>',
+            headers: Headers.fromMap(<String, List<String>>{
+              'content-type': <String>['text/html; charset=utf-8'],
+            }),
+          ),
+        );
+      }
+      return _resposta('<html>formulario</html>', 200);
+    });
+    final SessaoPortal sessao = SessaoPortal(
+      dio: Dio()..httpClientAdapter = adapter,
+      logger: Logger(output: const _LogMudo(), level: Level.off),
+    );
+    await _login(sessao);
+
+    final ResultadoConsultaPortal<String> resultado = await sessao
+        .consultarBeneficiario(carteirinhaCompleta: '12345678901234567890');
+
+    expect(consultas, 1);
+    expect(resultado.sucesso, isFalse);
+    expect(resultado.status, 503);
+    expect(resultado.categoria, CategoriaFalhaConsultaPortal.http);
+    expect(sessao.diagnosticoSessao['assinaturaF5Rejected'], 1);
+    expect(sessao.diagnosticoSessao['retriesTransitoriosIniciados'], 0);
+    await sessao.encerrar();
+  });
+
+  test('repete transporte com HTTP 503 sem marcador F5', () async {
+    int consultas = 0;
+    final _AdapterTeste adapter = _AdapterTeste((RequestOptions request) async {
+      if (request.method == 'POST' &&
+          request.uri.queryParameters['lumPageId'] == _idLogin) {
+        return _resposta(
+          '',
+          302,
+          headers: <String, List<String>>{
+            'location': <String>['/prestador/'],
+          },
+        );
+      }
+      if (request.uri.path == '/prestador/') {
+        return _resposta('<html>logout</html>', 200);
+      }
+      if (request.method == 'POST' &&
+          request.uri.queryParameters['lumPageId'] == _idConsulta) {
+        consultas++;
+        if (consultas == 1) {
+          throw DioException(
+            requestOptions: request,
+            type: DioExceptionType.connectionError,
+            response: Response<dynamic>(
+              requestOptions: request,
+              statusCode: 503,
+              data: 'temporarily unavailable',
+              headers: Headers.fromMap(<String, List<String>>{
+                'content-type': <String>['text/plain'],
+              }),
+            ),
+          );
+        }
+        return _resposta('<html>elegivel</html>', 200);
+      }
+      return _resposta('<html>formulario</html>', 200);
+    });
+    final SessaoPortal sessao = SessaoPortal(
+      dio: Dio()..httpClientAdapter = adapter,
+      logger: Logger(output: const _LogMudo(), level: Level.off),
+    );
+    await _login(sessao);
+
+    final ResultadoConsultaPortal<String> resultado = await sessao
+        .consultarBeneficiario(carteirinhaCompleta: '12345678901234567890');
+
+    expect(consultas, 2);
+    expect(resultado.sucesso, isTrue);
+    expect(sessao.diagnosticoSessao['retriesTransitoriosIniciados'], 1);
+    expect(sessao.diagnosticoSessao['retriesTransitoriosResolvidos'], 1);
+    await sessao.encerrar();
+  });
+
+  test('diagnostica DioException sem status e informa seu tipo', () async {
+    final _AdapterTeste adapter = _AdapterTeste((RequestOptions request) async {
+      if (request.method == 'POST' &&
+          request.uri.queryParameters['lumPageId'] == _idLogin) {
+        return _resposta(
+          '',
+          302,
+          headers: <String, List<String>>{
+            'location': <String>['/prestador/'],
+          },
+        );
+      }
+      if (request.uri.path == '/prestador/') {
+        return _resposta('<html>logout</html>', 200);
+      }
+      if (request.method == 'POST' &&
+          request.uri.queryParameters['lumPageId'] == _idConsulta) {
+        throw DioException(
+          requestOptions: request,
+          type: DioExceptionType.unknown,
+          error: StateError('detalhe interno nao publico'),
+        );
+      }
+      return _resposta('<html>formulario</html>', 200);
+    });
+    final SessaoPortal sessao = SessaoPortal(
+      dio: Dio()..httpClientAdapter = adapter,
+      logger: Logger(output: const _LogMudo(), level: Level.off),
+      repetirFalhasTransitorias: false,
+    );
+    await _login(sessao);
+
+    final ResultadoConsultaPortal<String> resultado = await sessao
+        .consultarBeneficiario(carteirinhaCompleta: '12345678901234567890');
+
+    expect(resultado.sucesso, isFalse);
+    expect(resultado.status, isNull);
+    expect(resultado.categoria, CategoriaFalhaConsultaPortal.http);
+    expect(sessao.diagnosticoSessao, containsPair('consultaDiounknown', 1));
+    expect(
+      sessao.diagnosticoSessao,
+      containsPair('consultaDioHttpSemStatus', 1),
+    );
+    expect(
+      sessao.diagnosticoSessao['consultaDioErroStateError'],
+      1,
+    );
+    expect(
+      jsonEncode(sessao.diagnosticoSessao),
+      isNot(contains('detalhe interno nao publico')),
+    );
+    await sessao.encerrar();
+  });
+
+  test('consulta diagnóstica retorna 401 sem renovar a sessão', () async {
+    int logins = 0;
+    int consultas = 0;
+    final _AdapterTeste adapter = _AdapterTeste((RequestOptions request) async {
+      if (request.method == 'POST' &&
+          request.uri.queryParameters['lumPageId'] == _idLogin) {
+        logins++;
+        return _resposta(
+          '',
+          302,
+          headers: <String, List<String>>{
+            'location': <String>['/prestador/'],
+          },
+        );
+      }
+      if (request.uri.path == '/prestador/') {
+        return _resposta('<html>logout</html>', 200);
+      }
+      if (request.method == 'POST' &&
+          request.uri.queryParameters['lumPageId'] == _idConsulta) {
+        consultas++;
+        return _resposta('expired', 401);
+      }
+      return _resposta('<html>formulario</html>', 200);
+    });
+    final SessaoPortal sessao = SessaoPortal(
+      dio: Dio()..httpClientAdapter = adapter,
+      logger: Logger(output: const _LogMudo(), level: Level.off),
+    );
+    await _login(sessao);
+
+    final ResultadoConsultaPortal<String> resultado =
+        await sessao.consultarBeneficiario(
+      carteirinhaCompleta: '12345678901234567890',
+      recuperarFalhaSessao: false,
+    );
+
+    expect(consultas, 1);
+    expect(logins, 1);
+    expect(resultado.sucesso, isFalse);
+    expect(resultado.status, 401);
+    expect(resultado.categoria, CategoriaFalhaConsultaPortal.sessao);
     await sessao.encerrar();
   });
 
@@ -139,6 +457,45 @@ void main() {
     },
   );
 
+  test('HTTP 503 transitorio e repetido ate a consulta responder', () async {
+    int consultas = 0;
+    final _AdapterTeste adapter = _AdapterTeste((RequestOptions request) async {
+      if (request.method == 'POST' &&
+          request.uri.queryParameters['lumPageId'] == _idLogin) {
+        return _resposta(
+          '',
+          302,
+          headers: <String, List<String>>{
+            'location': <String>['/prestador/'],
+          },
+        );
+      }
+      if (request.uri.path == '/prestador/') {
+        return _resposta('<html>logout</html>', 200);
+      }
+      if (request.method == 'POST' &&
+          request.uri.queryParameters['lumPageId'] == _idConsulta) {
+        consultas++;
+        if (consultas == 1) return _resposta('temporario', 503);
+        return _resposta('<html>elegivel</html>', 200);
+      }
+      return _resposta('<html>formulario</html>', 200);
+    });
+    final SessaoPortal sessao = SessaoPortal(
+      dio: Dio()..httpClientAdapter = adapter,
+      logger: Logger(output: const _LogMudo(), level: Level.off),
+    );
+    await _login(sessao);
+
+    final ResultadoConsultaPortal<String> resultado = await sessao
+        .consultarBeneficiario(carteirinhaCompleta: '12345678901234567890');
+
+    expect(consultas, 2);
+    expect(resultado.sucesso, isTrue);
+    expect(resultado.dados, contains('elegivel'));
+    await sessao.encerrar();
+  });
+
   test('consultas concorrentes compartilham renovação de sessão', () async {
     int logins = 0;
     int consultas = 0;
@@ -173,8 +530,8 @@ void main() {
     );
     await _login(sessao);
 
-    final List<ResultadoConsultaPortal<String>>
-    resultados = await Future.wait(<Future<ResultadoConsultaPortal<String>>>[
+    final List<ResultadoConsultaPortal<String>> resultados =
+        await Future.wait(<Future<ResultadoConsultaPortal<String>>>[
       sessao.consultarBeneficiario(carteirinhaCompleta: '12345678901234567890'),
       sessao.consultarBeneficiario(carteirinhaCompleta: '98765432109876543210'),
     ]);
@@ -182,6 +539,10 @@ void main() {
     expect(logins, 2);
     expect(consultas, 4);
     expect(resultados.every((resultado) => resultado.sucesso), isTrue);
+    expect(sessao.diagnosticoSessao['rejeicoes401'], 2);
+    expect(sessao.diagnosticoSessao['renovacoesIniciadas'], 1);
+    expect(sessao.diagnosticoSessao['renovacoesSucesso'], 1);
+    expect(sessao.diagnosticoSessao['rejeicoes401AposRenovacao'], 0);
     await sessao.encerrar();
   });
 
@@ -256,67 +617,66 @@ void main() {
   );
 
   test(
-    'renovação falha uma vez para chamadas concorrentes e consulta futura tenta de novo',
-    () async {
-      int logins = 0;
-      int consultas = 0;
-      final Completer<void> duasConsultas = Completer<void>();
-      final _AdapterTeste adapter = _AdapterTeste((
-        RequestOptions request,
-      ) async {
-        if (request.method == 'POST' &&
-            request.uri.queryParameters['lumPageId'] == _idLogin) {
-          logins++;
-          if (logins == 2) return _resposta('<html>sem login</html>', 200);
-          return _resposta(
-            '',
-            302,
-            headers: <String, List<String>>{
-              'location': <String>['/prestador/'],
-            },
-          );
+      'renovação falha uma vez para chamadas concorrentes e consulta futura tenta de novo',
+      () async {
+    int logins = 0;
+    int consultas = 0;
+    final Completer<void> duasConsultas = Completer<void>();
+    final _AdapterTeste adapter = _AdapterTeste((RequestOptions request) async {
+      if (request.method == 'POST' &&
+          request.uri.queryParameters['lumPageId'] == _idLogin) {
+        logins++;
+        if (logins == 2) return _resposta('<html>sem login</html>', 200);
+        return _resposta(
+          '',
+          302,
+          headers: <String, List<String>>{
+            'location': <String>['/prestador/'],
+          },
+        );
+      }
+      if (request.uri.path == '/prestador/') {
+        return _resposta('<html>logout</html>', 200);
+      }
+      if (request.method == 'POST' &&
+          request.uri.queryParameters['lumPageId'] == _idConsulta) {
+        consultas++;
+        if (consultas <= 2) {
+          if (consultas == 2) duasConsultas.complete();
+          await duasConsultas.future;
+          return _resposta('sessao expirada', 403);
         }
-        if (request.uri.path == '/prestador/') {
-          return _resposta('<html>logout</html>', 200);
-        }
-        if (request.method == 'POST' &&
-            request.uri.queryParameters['lumPageId'] == _idConsulta) {
-          consultas++;
-          if (consultas <= 2) {
-            if (consultas == 2) duasConsultas.complete();
-            await duasConsultas.future;
-            return _resposta('sessao expirada', 403);
-          }
-          return _resposta('<html>elegivel</html>', 200);
-        }
-        return _resposta('<html>formulario</html>', 200);
-      });
-      final SessaoPortal sessao = SessaoPortal(
-        dio: Dio()..httpClientAdapter = adapter,
-        logger: Logger(output: const _LogMudo(), level: Level.off),
-      );
-      await _login(sessao);
+        return _resposta('<html>elegivel</html>', 200);
+      }
+      return _resposta('<html>formulario</html>', 200);
+    });
+    final SessaoPortal sessao = SessaoPortal(
+      dio: Dio()..httpClientAdapter = adapter,
+      logger: Logger(output: const _LogMudo(), level: Level.off),
+    );
+    await _login(sessao);
 
-      final List<ResultadoConsultaPortal<String>> concorrentes =
-          await Future.wait(<Future<ResultadoConsultaPortal<String>>>[
-            sessao.consultarBeneficiario(
-              carteirinhaCompleta: '12345678901234567890',
-            ),
-            sessao.consultarBeneficiario(
-              carteirinhaCompleta: '98765432109876543210',
-            ),
-          ]);
-      expect(concorrentes.every((resultado) => !resultado.sucesso), isTrue);
-      expect(logins, 2);
+    final List<ResultadoConsultaPortal<String>> concorrentes =
+        await Future.wait(<Future<ResultadoConsultaPortal<String>>>[
+      sessao.consultarBeneficiario(carteirinhaCompleta: '12345678901234567890'),
+      sessao.consultarBeneficiario(carteirinhaCompleta: '98765432109876543210'),
+    ]);
+    expect(concorrentes.every((resultado) => !resultado.sucesso), isTrue);
+    expect(logins, 2);
+    expect(sessao.diagnosticoSessao['rejeicoes403'], 2);
+    expect(sessao.diagnosticoSessao['renovacoesIniciadas'], 1);
+    expect(sessao.diagnosticoSessao['renovacoesSucesso'], 0);
+    expect(sessao.diagnosticoSessao['renovacoesFalhaCredenciaisInvalidas'], 1);
 
-      final ResultadoConsultaPortal<String> posterior = await sessao
-          .consultarBeneficiario(carteirinhaCompleta: '12345678901234567890');
-      expect(posterior.sucesso, isTrue);
-      expect(logins, 3);
-      expect(consultas, 3);
-      await sessao.encerrar();
-    },
-  );
+    final ResultadoConsultaPortal<String> posterior = await sessao
+        .consultarBeneficiario(carteirinhaCompleta: '12345678901234567890');
+    expect(posterior.sucesso, isTrue);
+    expect(logins, 3);
+    expect(consultas, 3);
+    expect(sessao.diagnosticoSessao['renovacoesIniciadas'], 2);
+    expect(sessao.diagnosticoSessao['renovacoesSucesso'], 1);
+    await sessao.encerrar();
+  });
 }
 
 Future<void> _login(SessaoPortal sessao) async {

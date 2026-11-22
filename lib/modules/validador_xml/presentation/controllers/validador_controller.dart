@@ -38,6 +38,12 @@ enum EtapaConsultaBackend {
   concluida,
 }
 
+Duration? _retryAfter(AppException erro) => switch (erro) {
+  FilaCheiaException(:final retryAfter) => retryAfter,
+  ServicoIndisponivelException(:final retryAfter) => retryAfter,
+  _ => null,
+};
+
 class ValidadorController extends ChangeNotifier {
   static const int _maxConsultasPorLote = 300;
   static const List<Duration> _intervalosRetentativa = [
@@ -50,7 +56,7 @@ class ValidadorController extends ChangeNotifier {
     Duration(seconds: 2),
     Duration(seconds: 4),
   ];
-  static const Duration _limiteRetryAfterLote = Duration(seconds: 30);
+  static const Duration _limiteRetryAfterLote = Duration(seconds: 60);
 
   ValidadorController({
     ValidadorGuiasRepository? repository,
@@ -332,8 +338,9 @@ class ValidadorController extends ChangeNotifier {
         _avisarFalhaAutenticacao();
       } else {
         _registrarConsultasPendentes(consultas);
-        _mensagemAvisoConsultaBackend =
-            falha?.mensagem ?? tokenInicial.mensagemErro;
+        _mensagemAvisoConsultaBackend = falha == null
+            ? tokenInicial.mensagemErro
+            : _mensagemAmigavelConsulta(falha);
       }
       _atualizarResultado();
       return;
@@ -376,21 +383,24 @@ class ValidadorController extends ChangeNotifier {
           token = novoToken;
           continue;
         }
-        _mensagemAvisoConsultaBackend =
-            refresh.falha?.mensagem ?? refresh.mensagemErro;
+        _mensagemAvisoConsultaBackend = refresh.falha == null
+            ? refresh.mensagemErro
+            : _mensagemAmigavelConsulta(refresh.falha!);
         if (refresh.falha is NaoAutorizadoException) {
           _avisarFalhaAutenticacao();
         }
         break;
       }
 
-      if (falha is FilaCheiaException &&
+      if ((falha is FilaCheiaException ||
+              falha is ServicoIndisponivelException) &&
           tentativasFilaCheia < _intervalosFilaCheia.length) {
         _etapaConsultaBackend = EtapaConsultaBackend.aguardandoRetentativa;
         notifyListeners();
-        final Duration espera = falha.retryAfter == null
+        final Duration? retryAfter = _retryAfter(falha);
+        final Duration espera = retryAfter == null
             ? _intervalosFilaCheia[tentativasFilaCheia]
-            : _limitarRetryAfter(falha.retryAfter!);
+            : _limitarRetryAfter(retryAfter);
         tentativasFilaCheia++;
         await _aguardarRetentativa(espera);
         _etapaConsultaBackend = EtapaConsultaBackend.consultando;
@@ -412,7 +422,7 @@ class ValidadorController extends ChangeNotifier {
       if (falha is NaoAutorizadoException) {
         _avisarFalhaAutenticacao();
       }
-      _mensagemAvisoConsultaBackend = falha.mensagem;
+      _mensagemAvisoConsultaBackend = _mensagemAmigavelConsulta(falha);
       break;
     }
 
@@ -478,7 +488,10 @@ class ValidadorController extends ChangeNotifier {
         _aplicarResultadoLote(consultas, leitura.resultado!);
         _progressoConsultasConcluidas = max(
           _progressoConsultasConcluidas,
-          progressoBase + consultas.length,
+          progressoBase +
+              (leitura.resultado!.status == 'parcial'
+                  ? leitura.resultado!.resultados.length
+                  : consultas.length),
         ).toInt();
         _atualizarResultado();
         return;
@@ -496,8 +509,9 @@ class ValidadorController extends ChangeNotifier {
           token = refresh.token!;
           continue;
         }
-        _mensagemAvisoConsultaBackend =
-            refresh.falha?.mensagem ?? refresh.mensagemErro;
+        _mensagemAvisoConsultaBackend = refresh.falha == null
+            ? refresh.mensagemErro
+            : _mensagemAmigavelConsulta(refresh.falha!);
         if (refresh.falha is NaoAutorizadoException) {
           _avisarFalhaAutenticacao();
         }
@@ -515,7 +529,9 @@ class ValidadorController extends ChangeNotifier {
         continue;
       }
 
-      if (erro != null) _mensagemAvisoConsultaBackend = erro.mensagem;
+      if (erro != null) {
+        _mensagemAvisoConsultaBackend = _mensagemAmigavelConsulta(erro);
+      }
       break;
     }
 
@@ -563,19 +579,23 @@ class ValidadorController extends ChangeNotifier {
               streamFechou: false,
             ));
           }
-        } on FormatException catch (erro) {
+        } on FormatException {
           if (!completer.isCompleted) {
             completer.complete((
               resultado: null,
-              erro: ErroDesconhecidoException(erro.message),
+              erro: const ErroDesconhecidoException(
+                AppStrings.erroConsultaBackendGenerico,
+              ),
               streamFechou: false,
             ));
           }
-        } on TypeError catch (erro) {
+        } on TypeError {
           if (!completer.isCompleted) {
             completer.complete((
               resultado: null,
-              erro: ErroDesconhecidoException(erro.toString()),
+              erro: const ErroDesconhecidoException(
+                AppStrings.erroConsultaBackendGenerico,
+              ),
               streamFechou: false,
             ));
           }
@@ -587,7 +607,9 @@ class ValidadorController extends ChangeNotifier {
             resultado: null,
             erro: erro is AppException
                 ? erro
-                : ErroDesconhecidoException(erro.toString()),
+                : const ErroDesconhecidoException(
+                    AppStrings.erroConsultaBackendGenerico,
+                  ),
             streamFechou: false,
           ));
         }
@@ -614,19 +636,43 @@ class ValidadorController extends ChangeNotifier {
     ResultadoLoteEvento evento,
   ) {
     final Set<String> solicitadas = consultas.map(_chaveConsulta).toSet();
+    final Set<String> declaradasPendentes = evento.pendentes
+        .map(
+          (PendenciaConsultaLote pendencia) =>
+              '${pendencia.tipo.name}|${pendencia.chave}',
+        )
+        .where(solicitadas.contains)
+        .toSet();
     final Set<String> resolvidas = {};
     for (final ResultadoConsultaLote resultado in evento.resultados) {
       final String chave = '${resultado.tipo.name}|${resultado.chave}';
       if (!solicitadas.contains(chave)) continue;
-      if (_falhaTransitoriaNoResultado(resultado)) continue;
+      if (declaradasPendentes.contains(chave) ||
+          _falhaTransitoriaNoResultado(resultado)) {
+        continue;
+      }
       _resultadosConsultas[chave] = _consultaDesdeBatch(resultado);
       _consultasPendentes.remove(chave);
       resolvidas.add(chave);
     }
     for (final ConsultaLoteItem item in consultas) {
-      if (!resolvidas.contains(_chaveConsulta(item))) {
+      final String chave = _chaveConsulta(item);
+      if (!resolvidas.contains(chave) &&
+          (evento.status != 'parcial' ||
+              declaradasPendentes.contains(chave) ||
+              evento.resultados.any(
+                (ResultadoConsultaLote resultado) =>
+                    '${resultado.tipo.name}|${resultado.chave}' == chave &&
+                    _falhaTransitoriaNoResultado(resultado),
+              ))) {
         _consultasPendentes[_chaveConsulta(item)] = item;
       }
+    }
+    if (evento.pendentes.any(
+      (PendenciaConsultaLote pendencia) =>
+          pendencia.motivo == 'prazo_5_minutos',
+    )) {
+      _mensagemAvisoConsultaBackend = AppStrings.consultasPrazoExpirado;
     }
   }
 
@@ -655,6 +701,25 @@ class ValidadorController extends ChangeNotifier {
 
   void _avisarFalhaAutenticacao() {
     _mensagemAvisoConsultaBackend = AppStrings.erroLoginFalhou;
+  }
+
+  String _mensagemAmigavelConsulta(AppException erro) {
+    if (erro is FilaCheiaException) {
+      return AppStrings.filaConsultaBackendCheia;
+    }
+    if (erro is ServicoIndisponivelException) {
+      return AppStrings.servicoConsultaIndisponivel;
+    }
+    if (erro is SemConexaoException) {
+      return AppStrings.erroConexaoConsultaBackend;
+    }
+    if (erro is RequisicaoExpiradaException) {
+      return AppStrings.erroConsultaBackendExpirada;
+    }
+    if (erro is NaoAutorizadoException) {
+      return AppStrings.erroSessaoConsultaBackend;
+    }
+    return AppStrings.erroConsultaBackendGenerico;
   }
 
   String _chaveConsulta(ConsultaLoteItem item) =>
@@ -840,10 +905,13 @@ class ValidadorController extends ChangeNotifier {
       onSuccess: (_) => null,
       onFailure: (erro) => erro,
     );
-    if (falha is FilaCheiaException && falha.retryAfter != null) {
+    final Duration? retryAfter = falha == null ? null : _retryAfter(falha);
+    if ((falha is FilaCheiaException ||
+            falha is ServicoIndisponivelException) &&
+        retryAfter != null) {
       _etapaConsultaBackend = EtapaConsultaBackend.aguardandoRetentativa;
       notifyListeners();
-      await _aguardarRetentativa(falha.retryAfter!);
+      await _aguardarRetentativa(_limitarRetryAfter(retryAfter));
       _etapaConsultaBackend = EtapaConsultaBackend.consultando;
       resultado = await service.criarSessao(
         identificadorPrestador: identificadorPrestador,

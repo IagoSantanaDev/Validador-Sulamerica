@@ -1,6 +1,7 @@
 .dart_tool/
 .pub/
 build/
+.env
 README.md
 test/
 Dockerfile

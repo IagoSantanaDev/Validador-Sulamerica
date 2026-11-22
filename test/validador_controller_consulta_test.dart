@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:validador_xml_sulamerica/globals/constants/app_strings.dart';
 import 'package:validador_xml_sulamerica/globals/network/app_exception.dart';
 import 'package:validador_xml_sulamerica/globals/network/dio_client.dart';
 import 'package:validador_xml_sulamerica/globals/network/result.dart';
@@ -189,11 +190,17 @@ Map<String, Object?> _resultado({
 Stream<EventoSse> _resultadoStream(
   List<Map<String, Object?>> resultados, {
   String id = '1',
+  String status = 'concluido',
+  List<Map<String, String>> pendentes = const [],
 }) => Stream<EventoSse>.value(
   EventoSse(
     id: id,
     evento: 'resultado',
-    dados: jsonEncode({'status': 'concluido', 'resultados': resultados}),
+    dados: jsonEncode({
+      'status': status,
+      'resultados': resultados,
+      if (pendentes.isNotEmpty) 'pendentes': pendentes,
+    }),
   ),
 );
 
@@ -318,7 +325,7 @@ void main() {
     );
 
     test(
-      '429 do lote usa a mesma chave e Retry-After limitado a 30 segundos',
+      '429 do lote usa a mesma chave e Retry-After limitado a 60 segundos',
       () async {
         final List<Duration> esperas = [];
         final _FakeAsyncBackend service = _FakeAsyncBackend()
@@ -342,7 +349,7 @@ void main() {
         expect(service.lotes, hasLength(4));
         expect(service.chavesIdempotencia.toSet(), hasLength(1));
         expect(esperas, [
-          const Duration(seconds: 30),
+          const Duration(seconds: 60),
           const Duration(seconds: 2),
           const Duration(seconds: 10),
         ]);
@@ -435,11 +442,60 @@ void main() {
       },
     );
 
-    test('rejeição HTTP diferente de 429 não repete submissão', () async {
+    test('SSE não exibe TypeError: Failed to fetch ao usuário', () async {
+      final _FakeAsyncBackend service = _FakeAsyncBackend()
+        ..streams.add(
+          Stream<EventoSse>.error(
+            const ErroDesconhecidoException('TypeError: Failed to fetch'),
+          ),
+        );
+      final ValidadorController controller = await _validar(
+        _novoController(
+          service: service,
+          retorno: const [GuiaValidada(guia: _guiaSemSenha, erros: [])],
+        ),
+      );
+
+      expect(
+        controller.mensagemAvisoConsultaBackend,
+        AppStrings.erroConsultaBackendGenerico,
+      );
+      expect(
+        controller.mensagemAvisoConsultaBackend,
+        isNot(contains('Failed to fetch')),
+      );
+    });
+
+    test('SSE não exibe resposta técnica de token inválido', () async {
+      final _FakeAsyncBackend service = _FakeAsyncBackend()
+        ..respostasSessao.addAll([
+          Result.success('token-1'),
+          Result.failure(const NaoAutorizadoException()),
+        ])
+        ..streams.add(Stream<EventoSse>.error(const NaoAutorizadoException()));
+      final ValidadorController controller = await _validar(
+        _novoController(
+          service: service,
+          retorno: const [GuiaValidada(guia: _guiaSemSenha, erros: [])],
+        ),
+      );
+
+      expect(
+        controller.mensagemAvisoConsultaBackend,
+        AppStrings.erroLoginFalhou,
+      );
+      expect(controller.mensagemAvisoConsultaBackend, isNot(contains('401')));
+      expect(
+        controller.mensagemAvisoConsultaBackend,
+        isNot(contains('Token de sessao invalido')),
+      );
+    });
+
+    test('rejeição HTTP diferente de 429 e 503 não repete submissão', () async {
       final List<Duration> esperas = [];
       final _FakeAsyncBackend service = _FakeAsyncBackend()
         ..respostasLote.add(
-          Result.failure(const ErroServidorException(statusCode: 503)),
+          Result.failure(const ErroServidorException(statusCode: 500)),
         );
       final ValidadorController controller = await _validar(
         _novoController(
@@ -454,41 +510,126 @@ void main() {
       expect(controller.temConsultasPendentes, isTrue);
     });
 
-    test(
-      'falha de transporte permite retry automático, rejeição de portal fica manual',
-      () async {
-        final List<Duration> esperas = [];
-        final _FakeAsyncBackend service = _FakeAsyncBackend()
-          ..respostasLote.add(Result.failure(const SemConexaoException()))
-          ..streams.add(
-            _resultadoStream([
-              _resultado(
-                chave: _carteira,
-                sucesso: false,
-                erro: 'Falha na consulta ao portal SulAmerica.',
-              ),
-            ]),
-          );
-        final ValidadorController controller = await _validar(
-          _novoController(
-            service: service,
-            retorno: const [GuiaValidada(guia: _guiaSemSenha, erros: [])],
-            esperas: esperas,
+    test('503 em sessão respeita Retry-After limitado a 60 segundos', () async {
+      final List<Duration> esperas = [];
+      final _FakeAsyncBackend service = _FakeAsyncBackend()
+        ..respostasSessao.addAll([
+          Result.failure(
+            const ServicoIndisponivelException(
+              retryAfter: Duration(seconds: 90),
+            ),
+          ),
+          Result.success('token-recuperado'),
+        ]);
+      final ValidadorController controller = await _validar(
+        _novoController(
+          service: service,
+          retorno: const [GuiaValidada(guia: _guiaSemSenha, erros: [])],
+          esperas: esperas,
+        ),
+      );
+
+      expect(service.chamadasSessao, 2);
+      expect(esperas, [const Duration(seconds: 60)]);
+      expect(service.lotes, hasLength(1));
+      expect(controller.temConsultasPendentes, isFalse);
+    });
+
+    test('503 em lote repete com mesma chave e respeita Retry-After', () async {
+      final List<Duration> esperas = [];
+      final _FakeAsyncBackend service = _FakeAsyncBackend()
+        ..respostasLote.add(
+          Result.failure(
+            const ServicoIndisponivelException(
+              retryAfter: Duration(seconds: 45),
+            ),
           ),
         );
+      final ValidadorController controller = await _validar(
+        _novoController(
+          service: service,
+          retorno: const [GuiaValidada(guia: _guiaSemSenha, erros: [])],
+          esperas: esperas,
+        ),
+      );
 
-        expect(service.lotes, hasLength(2));
-        expect(esperas, [const Duration(seconds: 2)]);
-        expect(controller.temConsultasPendentes, isTrue);
-        expect(controller.guias.single.consultas, isEmpty);
+      expect(service.lotes, hasLength(2));
+      expect(service.chavesIdempotencia.first, service.chavesIdempotencia.last);
+      expect(esperas, [const Duration(seconds: 45)]);
+      expect(controller.temConsultasPendentes, isFalse);
+    });
 
-        await controller.retentarConsultasPendentes();
+    test('resultado parcial aplica concluídas e deixa pendências para retry manual', () async {
+      const String senha = '5000000000';
+      final _FakeAsyncBackend service = _FakeAsyncBackend()
+        ..streams.add(
+          _resultadoStream(
+            [_resultado(chave: _carteira)],
+            status: 'parcial',
+            pendentes: [
+              {'tipo': 'senha', 'chave': senha, 'motivo': 'prazo_5_minutos'},
+            ],
+          ),
+        );
+      final ValidadorController controller = await _validar(
+        _novoController(
+          service: service,
+          retorno: const [
+            GuiaValidada(
+              guia: GuiaTiss(
+                numeroGuiaPrestador: '111',
+                numeroCarteira: _carteira,
+                senha: senha,
+              ),
+              erros: [],
+            ),
+          ],
+        ),
+      );
 
-        expect(service.lotes, hasLength(3));
-        expect(controller.temConsultasPendentes, isFalse);
-        expect(controller.guias.single.consulta?.descricao, 'Elegível: SIM');
-      },
-    );
+      expect(controller.temConsultasPendentes, isTrue);
+      expect(controller.totalConsultasPendentes, 1);
+      expect(controller.guias.single.consultas, hasLength(1));
+      expect(controller.guias.single.consulta?.descricao, 'Elegível: SIM');
+      expect(
+        controller.mensagemAvisoConsultaBackend,
+        AppStrings.consultasPrazoExpirado,
+      );
+      expect(service.lotes, hasLength(1));
+    });
+
+    test('falha de transporte permite retry automático, rejeição de portal fica manual', () async {
+      final List<Duration> esperas = [];
+      final _FakeAsyncBackend service = _FakeAsyncBackend()
+        ..respostasLote.add(Result.failure(const SemConexaoException()))
+        ..streams.add(
+          _resultadoStream([
+            _resultado(
+              chave: _carteira,
+              sucesso: false,
+              erro: 'Falha na consulta ao portal SulAmerica.',
+            ),
+          ]),
+        );
+      final ValidadorController controller = await _validar(
+        _novoController(
+          service: service,
+          retorno: const [GuiaValidada(guia: _guiaSemSenha, erros: [])],
+          esperas: esperas,
+        ),
+      );
+
+      expect(service.lotes, hasLength(2));
+      expect(esperas, [const Duration(seconds: 2)]);
+      expect(controller.temConsultasPendentes, isTrue);
+      expect(controller.guias.single.consultas, isEmpty);
+
+      await controller.retentarConsultasPendentes();
+
+      expect(service.lotes, hasLength(3));
+      expect(controller.temConsultasPendentes, isFalse);
+      expect(controller.guias.single.consulta?.descricao, 'Elegível: SIM');
+    });
 
     test(
       'mantém limites locais de carteira e senha antes de chamar backend',
@@ -520,6 +661,57 @@ void main() {
           controller.guias.single.consultas.map((consulta) => consulta.tipo),
           containsAll([TipoConsultaGuia.elegibilidade, TipoConsultaGuia.senha]),
         );
+      },
+    );
+
+    test(
+      'falha transitória declarada como pendente permanece disponível para retry',
+      () async {
+        const String senha = '5000000000';
+        final _FakeAsyncBackend service = _FakeAsyncBackend()
+          ..streams.add(
+            _resultadoStream(
+              [
+                _resultado(chave: _carteira),
+                _resultado(
+                  chave: senha,
+                  tipo: 'senha',
+                  sucesso: false,
+                  erro: 'Falha na consulta ao portal SulAmerica (HTTP 503).',
+                ),
+              ],
+              status: 'parcial',
+              pendentes: [
+                {
+                  'tipo': 'senha',
+                  'chave': senha,
+                  'motivo': 'tentativas_esgotadas',
+                },
+              ],
+            ),
+          );
+        final ValidadorController controller = await _validar(
+          _novoController(
+            service: service,
+            retorno: const [
+              GuiaValidada(
+                guia: GuiaTiss(
+                  numeroGuiaPrestador: '111',
+                  numeroCarteira: _carteira,
+                  senha: senha,
+                ),
+                erros: [],
+              ),
+            ],
+          ),
+        );
+
+        expect(controller.temConsultasPendentes, isTrue);
+        expect(controller.totalConsultasPendentes, 1);
+        expect(controller.guias.single.consultas, hasLength(1));
+        expect(controller.guias.single.consulta?.descricao, 'Elegível: SIM');
+        expect(controller.mensagemAvisoConsultaBackend, isNull);
+        expect(service.lotes, hasLength(1));
       },
     );
 

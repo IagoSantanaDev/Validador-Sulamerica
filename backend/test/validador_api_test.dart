@@ -5,6 +5,7 @@ import 'package:dio/dio.dart' show CancelToken;
 import 'package:logger/logger.dart';
 import 'package:shelf/shelf.dart';
 import 'package:test/test.dart';
+import 'package:validador_backend/modules/sulamerica/data/disjuntor_portal.dart';
 import 'package:validador_backend/modules/sulamerica/data/repositorio_sessoes.dart';
 import 'package:validador_backend/modules/sulamerica/data/resultado_consulta_portal.dart';
 import 'package:validador_backend/modules/sulamerica/data/sessao_portal.dart';
@@ -14,8 +15,7 @@ const Map<String, String> _ambiente = <String, String>{
   'PORTAL_PRESTADOR_ID_TESTE_CODE': '000000000000',
   'PORTAL_PRESTADOR_ID_TESTE_USER': 'usuario-teste',
   'PORTAL_PRESTADOR_ID_TESTE_SENHA': 'senha-teste',
-  'CORS_ORIGIN':
-      'https://app.example,https://validador-sulamerica.pages.dev,https://iagosantanadev.github.io',
+  'CORS_ORIGIN': 'https://app.example,https://validador-sulamerica.pages.dev,https://iagosantanadev.github.io',
 };
 
 class _LogMudo implements LogOutput {
@@ -32,15 +32,27 @@ class _LogMudo implements LogOutput {
 }
 
 class _SessaoFake extends SessaoPortal {
-  _SessaoFake({this.gate, this.loginResult})
-      : super(logger: Logger(level: Level.off));
+  _SessaoFake({
+    this.gate,
+    this.loginResult,
+    this.beneficiaryResult,
+    this.supportIdMarkers = 0,
+  }) : super(logger: Logger(level: Level.off));
 
   final Completer<void>? gate;
   final ResultadoLogin? loginResult;
+  final ResultadoConsultaPortal<String>? beneficiaryResult;
+  final int supportIdMarkers;
   bool _autenticada = false;
   int logins = 0;
   int consultas = 0;
   final List<CancelToken?> tokensCancelamento = <CancelToken?>[];
+
+  @override
+  Map<String, int> get diagnosticoSessao => <String, int>{
+    ...super.diagnosticoSessao,
+    if (supportIdMarkers > 0) 'assinaturaF5MarkerSupportId': supportIdMarkers,
+  };
 
   @override
   bool get autenticada => _autenticada;
@@ -68,14 +80,16 @@ class _SessaoFake extends SessaoPortal {
   Future<ResultadoConsultaPortal<String>> consultarBeneficiario({
     required String carteirinhaCompleta,
     CancelToken? cancelToken,
+    bool recuperarFalhaSessao = true,
   }) async {
     consultas++;
     tokensCancelamento.add(cancelToken);
     await gate?.future;
-    return const ResultadoConsultaPortal<String>.sucesso(
-      dados: '<html>elegivel</html>',
-      status: 200,
-    );
+    return beneficiaryResult ??
+        const ResultadoConsultaPortal<String>.sucesso(
+          dados: '<html>elegivel</html>',
+          status: 200,
+        );
   }
 
   @override
@@ -108,26 +122,35 @@ _ContextoApi _criarApi({
   int limitePorChave = 100,
   int limiteGlobal = 500,
   int limiteExecucoes = 24,
+  int limiteSessoesPorIdentificador = 4,
   RepositorioSessoes? repositorio,
   ResultadoLogin? loginResult,
+  ResultadoConsultaPortal<String>? beneficiaryResult,
+  DisjuntorPortal? disjuntor,
+  Map<String, String> ambiente = _ambiente,
+  int supportIdMarkers = 0,
 }) {
   final Completer<void> gate = Completer<void>();
   final List<_SessaoFake> sessoes = <_SessaoFake>[];
   final ValidadorApi api = ValidadorApi(
     logger: Logger(output: const _LogMudo(), level: Level.off),
-    ambiente: _ambiente,
+    ambiente: ambiente,
     fabricaSessao: (_) {
       final _SessaoFake sessao = _SessaoFake(
         gate: gate,
         loginResult: loginResult,
+        beneficiaryResult: beneficiaryResult,
+        supportIdMarkers: supportIdMarkers,
       );
       sessoes.add(sessao);
       return sessao;
     },
     sondaPortal: () async => 200,
     repositorio: repositorio,
+    disjuntor: disjuntor,
     limiteRequisicoesPorChave: limitePorChave,
     limiteRequisicoesGlobal: limiteGlobal,
+    limiteSessoesPorIdentificador: limiteSessoesPorIdentificador,
     limiteExecucoes: limiteExecucoes,
   );
   return _ContextoApi(api: api, sessoes: sessoes, gate: gate);
@@ -140,17 +163,16 @@ Request _request(
   String? token,
   String? idempotencyKey,
   Map<String, String>? headers,
-}) =>
-    Request(
-      method,
-      Uri.parse('http://localhost$path'),
-      body: body == null ? null : jsonEncode(body),
-      headers: <String, String>{
-        if (token != null) 'authorization': 'Bearer $token',
-        if (idempotencyKey != null) 'idempotency-key': idempotencyKey,
-        ...?headers,
-      },
-    );
+}) => Request(
+  method,
+  Uri.parse('http://localhost$path'),
+  body: body == null ? null : jsonEncode(body),
+  headers: <String, String>{
+    if (token != null) 'authorization': 'Bearer $token',
+    if (idempotencyKey != null) 'idempotency-key': idempotencyKey,
+    ...?headers,
+  },
+);
 
 Future<String> _criarSessao(ValidadorApi api) async {
   final Response resposta = await api.handler(
@@ -175,18 +197,17 @@ Future<Response> _criarLote(
   String token,
   String key, {
   List<Map<String, dynamic>>? consultas,
-}) async =>
-    await api.handler(
-      _request(
-        'POST',
-        '/api/lotes',
-        token: token,
-        idempotencyKey: key,
-        body: <String, Object>{
-          'consultas': consultas ?? <Map<String, dynamic>>[_consulta()],
-        },
-      ),
-    );
+}) async => await api.handler(
+  _request(
+    'POST',
+    '/api/lotes',
+    token: token,
+    idempotencyKey: key,
+    body: <String, Object>{
+      'consultas': consultas ?? <Map<String, dynamic>>[_consulta()],
+    },
+  ),
+);
 
 void main() {
   group('POST /api/sessoes', () {
@@ -198,6 +219,48 @@ void main() {
         expect(token, matches(RegExp(r'^[a-f0-9]{32}$')));
         expect(contexto.sessoes, hasLength(1));
         expect(contexto.sessoes.single.logins, 1);
+      },
+    );
+
+    test(
+      'retorna 503 com Retry-After enquanto o circuito está aberto',
+      () async {
+        DateTime agora = DateTime.utc(2026);
+        int sondas = 0;
+        final DisjuntorPortal disjuntor = DisjuntorPortal(
+          sondarPortal: () async {
+            sondas++;
+            return const ResultadoSondaDisjuntor(status: 200);
+          },
+          agora: () => agora,
+        );
+        for (int i = 0; i < 5; i++) {
+          disjuntor.registrar(ResultadoDisjuntorPortal.falhaElegivel);
+        }
+        final _ContextoApi contexto = _criarApi(disjuntor: disjuntor);
+
+        final Response aberta = await contexto.api.handler(
+          _request(
+            'POST',
+            '/api/sessoes',
+            body: const <String, String>{'identificadorPrestador': 'teste'},
+          ),
+        );
+        expect(aberta.statusCode, 503);
+        expect(aberta.headers['retry-after'], '60');
+        expect(contexto.sessoes, isEmpty);
+
+        agora = agora.add(const Duration(seconds: 60));
+        final Response recuperada = await contexto.api.handler(
+          _request(
+            'POST',
+            '/api/sessoes',
+            body: const <String, String>{'identificadorPrestador': 'teste'},
+          ),
+        );
+        expect(recuperada.statusCode, 201);
+        expect(sondas, 1);
+        expect(disjuntor.estado, EstadoDisjuntorPortal.fechado);
       },
     );
 
@@ -221,6 +284,37 @@ void main() {
         expect(invalida.statusCode, 400);
         expect(desconhecida.statusCode, 401);
         expect(contexto.sessoes, isEmpty);
+      },
+    );
+
+    test(
+      'reutilização de sessão autenticada não limpa falhas do disjuntor',
+      () async {
+        final DisjuntorPortal disjuntor = DisjuntorPortal(
+          sondarPortal: () async => const ResultadoSondaDisjuntor(status: 200),
+        );
+        final _ContextoApi contexto = _criarApi(disjuntor: disjuntor);
+        await _criarSessao(contexto.api);
+        for (int i = 0; i < 4; i++) {
+          disjuntor.registrar(ResultadoDisjuntorPortal.falhaElegivel);
+        }
+
+        final Response reutilizada = await contexto.api.handler(
+          _request(
+            'POST',
+            '/api/sessoes',
+            body: const <String, String>{'identificadorPrestador': 'teste'},
+          ),
+        );
+        final Response status = await contexto.api.handler(
+          Request('GET', Uri.parse('http://localhost/api/status')),
+        );
+        final Map<String, dynamic> dados =
+            jsonDecode(await status.readAsString()) as Map<String, dynamic>;
+
+        expect(reutilizada.statusCode, 201);
+        expect(dados['status'], 'ok');
+        expect(dados.containsKey('disjuntorPortal'), isFalse);
       },
     );
 
@@ -285,6 +379,10 @@ void main() {
           );
 
           expect(resposta.statusCode, status);
+          expect(
+            resposta.headers['x-validador-api-error-origin'],
+            status == 502 ? 'api' : isNull,
+          );
           expect(await resposta.readAsString(), isNot(contains('detalhe que')));
         }
       },
@@ -316,6 +414,61 @@ void main() {
   });
 
   group('POST /api/lotes', () {
+    test(
+      'rejeita novo lote com 503 e Retry-After quando o circuito abre',
+      () async {
+        final DisjuntorPortal disjuntor = DisjuntorPortal(
+          sondarPortal: () async => const ResultadoSondaDisjuntor(status: 200),
+        );
+        final _ContextoApi contexto = _criarApi(disjuntor: disjuntor);
+        final String token = await _criarSessao(contexto.api);
+        for (int i = 0; i < 5; i++) {
+          disjuntor.registrar(ResultadoDisjuntorPortal.falhaElegivel);
+        }
+
+        final Response resposta = await _criarLote(
+          contexto.api,
+          token,
+          'lote-enquanto-aberto',
+        );
+
+        expect(resposta.statusCode, 503);
+        expect(resposta.headers['retry-after'], '60');
+      },
+    );
+
+    test(
+      'replay idempotente continua disponível com o circuito aberto',
+      () async {
+        final DisjuntorPortal disjuntor = DisjuntorPortal(
+          sondarPortal: () async => const ResultadoSondaDisjuntor(status: 200),
+        );
+        final _ContextoApi contexto = _criarApi(disjuntor: disjuntor);
+        final String token = await _criarSessao(contexto.api);
+        final Response original = await _criarLote(
+          contexto.api,
+          token,
+          'chave-replay',
+        );
+        final String id =
+            (jsonDecode(await original.readAsString()) as Map)['id'] as String;
+        for (int i = 0; i < 5; i++) {
+          disjuntor.registrar(ResultadoDisjuntorPortal.falhaElegivel);
+        }
+
+        final Response repetida = await _criarLote(
+          contexto.api,
+          token,
+          'chave-replay',
+        );
+        final Map<String, dynamic> corpo =
+            jsonDecode(await repetida.readAsString()) as Map<String, dynamic>;
+        expect(repetida.statusCode, 202);
+        expect(corpo['id'], id);
+        contexto.gate.complete();
+      },
+    );
+
     test('valida o payload antes de exigir Bearer', () async {
       final _ContextoApi contexto = _criarApi();
       final Response resposta = await contexto.api.handler(
@@ -404,26 +557,28 @@ void main() {
       await _aguardar(() async => await _ativos(contexto.api) == 0);
     });
 
-    test('itens inválidos não adquirem sessão nem consultam o portal',
-        () async {
-      final _ContextoApi contexto = _criarApi();
-      final String token = await _criarSessao(contexto.api);
-      final Response resposta = await _criarLote(
-        contexto.api,
-        token,
-        'invalid-items',
-        consultas: <Map<String, dynamic>>[
-          <String, dynamic>{'tipo': 'desconhecido', 'chave': 'x'},
-          <String, dynamic>{'tipo': 'elegibilidade', 'chave': 'invalida'},
-        ],
-      );
+    test(
+      'itens inválidos não adquirem sessão nem consultam o portal',
+      () async {
+        final _ContextoApi contexto = _criarApi();
+        final String token = await _criarSessao(contexto.api);
+        final Response resposta = await _criarLote(
+          contexto.api,
+          token,
+          'invalid-items',
+          consultas: <Map<String, dynamic>>[
+            <String, dynamic>{'tipo': 'desconhecido', 'chave': 'x'},
+            <String, dynamic>{'tipo': 'elegibilidade', 'chave': 'invalida'},
+          ],
+        );
 
-      expect(resposta.statusCode, 202);
-      await _aguardar(() async => await _ativos(contexto.api) == 0);
-      expect(contexto.sessoes, hasLength(1));
-      expect(contexto.sessoes.single.logins, 1);
-      expect(contexto.sessoes.single.consultas, 0);
-    });
+        expect(resposta.statusCode, 202);
+        await _aguardar(() async => await _ativos(contexto.api) == 0);
+        expect(contexto.sessoes, hasLength(1));
+        expect(contexto.sessoes.single.logins, 1);
+        expect(contexto.sessoes.single.consultas, 0);
+      },
+    );
 
     test('mais de 300 itens e corpo acima de 1 MB retornam 413', () async {
       final _ContextoApi contexto = _criarApi();
@@ -461,6 +616,104 @@ void main() {
   });
 
   group('SSE e ownership', () {
+    test('resultado HTTP inclui status sem expor chave da consulta', () async {
+      final _ContextoApi contexto = _criarApi(
+        beneficiaryResult: const ResultadoConsultaPortal<String>.falha(
+          categoria: CategoriaFalhaConsultaPortal.http,
+          status: 429,
+        ),
+      );
+      final String token = await _criarSessao(contexto.api);
+      final Response lote = await _criarLote(
+        contexto.api,
+        token,
+        'http-status',
+      );
+      final String id =
+          (jsonDecode(await lote.readAsString()) as Map)['id'] as String;
+      final Response eventos = await contexto.api.handler(
+        _request('GET', '/api/lotes/$id/eventos', token: token),
+      );
+      final Future<String> corpo = eventos.readAsString();
+      contexto.gate.complete();
+      final String sse = await corpo.timeout(const Duration(seconds: 2));
+      final String blocoResultado = sse
+          .split(RegExp(r'\r?\n\r?\n'))
+          .firstWhere((String bloco) => bloco.contains('event: resultado'));
+      final String dadosResultado = blocoResultado
+          .split(RegExp(r'\r?\n'))
+          .firstWhere((String linha) => linha.startsWith('data:'))
+          .substring(5)
+          .trimLeft();
+      final Map<String, dynamic> payload =
+          jsonDecode(dadosResultado) as Map<String, dynamic>;
+      final List<dynamic> resultados = payload['resultados'] as List<dynamic>;
+      final Map<String, dynamic> resultado =
+          resultados.single as Map<String, dynamic>;
+      final String erro = resultado['erro'] as String;
+
+      expect(erro, 'Falha na consulta ao portal SulAmerica (HTTP 429).');
+      expect(erro, isNot(contains('12345678901234567890')));
+      for (final String campo in <String>[
+        'tempoFilaMs',
+        'tempoSessaoMs',
+        'tempoPortalMs',
+        'tempoRetryMs',
+        'tempoExecucaoMs',
+      ]) {
+        expect(resultado[campo], isA<int>());
+        expect(resultado[campo], greaterThanOrEqualTo(0));
+      }
+      await _aguardar(() async => await _ativos(contexto.api) == 0);
+    });
+
+    test('status agrega falha HTTP terminal sem status', () async {
+      final _ContextoApi contexto = _criarApi(
+        beneficiaryResult: const ResultadoConsultaPortal<String>.falha(
+          categoria: CategoriaFalhaConsultaPortal.http,
+          status: null,
+        ),
+      );
+      final String token = await _criarSessao(contexto.api);
+      final Response lote = await _criarLote(
+        contexto.api,
+        token,
+        'http-sem-status',
+      );
+      final String id =
+          (jsonDecode(await lote.readAsString()) as Map)['id'] as String;
+      final Response eventos = await contexto.api.handler(
+        _request('GET', '/api/lotes/$id/eventos', token: token),
+      );
+      final Future<String> corpo = eventos.readAsString();
+      contexto.gate.complete();
+      final String sse = await corpo.timeout(const Duration(seconds: 2));
+      final String blocoResultado = sse
+          .split(RegExp(r'\r?\n\r?\n'))
+          .firstWhere((String bloco) => bloco.contains('event: resultado'));
+      final String dadosResultado = blocoResultado
+          .split(RegExp(r'\r?\n'))
+          .firstWhere((String linha) => linha.startsWith('data:'))
+          .substring(5)
+          .trimLeft();
+      final Map<String, dynamic> payload =
+          jsonDecode(dadosResultado) as Map<String, dynamic>;
+      final List<dynamic> resultados = payload['resultados'] as List<dynamic>;
+
+      expect(
+        (resultados.single as Map<String, dynamic>)['erro'],
+        'Falha na consulta ao portal SulAmerica.',
+      );
+      await _aguardar(() async => await _ativos(contexto.api) == 0);
+      final Response status = await contexto.api.handler(
+        Request('GET', Uri.parse('http://localhost/api/status')),
+      );
+      final Map dadosStatus = jsonDecode(await status.readAsString()) as Map;
+
+      expect(dadosStatus['status'], 'ok');
+      expect(dadosStatus.containsKey('falhasConsulta'), isFalse);
+    });
+
     test('outro token não pode abrir eventos do lote', () async {
       final _ContextoApi contexto = _criarApi();
       final String dono = await _criarSessao(contexto.api);
@@ -503,12 +756,15 @@ void main() {
       );
       final StringBuffer dados = StringBuffer();
       final Completer<void> segundaFechada = Completer<void>();
-      segunda.read().transform(utf8.decoder).listen(
-        dados.write,
-        onDone: () {
-          if (!segundaFechada.isCompleted) segundaFechada.complete();
-        },
-      );
+      segunda
+          .read()
+          .transform(utf8.decoder)
+          .listen(
+            dados.write,
+            onDone: () {
+              if (!segundaFechada.isCompleted) segundaFechada.complete();
+            },
+          );
       await primeiraFechada.future.timeout(const Duration(seconds: 1));
       expect(segunda.statusCode, 200);
       expect(segunda.headers['content-type'], contains('text/event-stream'));
@@ -544,16 +800,38 @@ void main() {
         final Map dados = jsonDecode(texto) as Map;
 
         expect(resposta.statusCode, 200);
-        expect(dados['sessoesAtivas'], 1);
-        expect(dados['lotes'], containsPair('ativos', 0));
-        expect(dados['memoriaRssMb'], isA<int>());
-        expect(dados['rateLimit'], containsPair('rejeicoes429', 0));
-        expect(dados['falhasPortal'], containsPair('502', 0));
-        expect(dados['falhasPortal'], containsPair('503', 0));
+        expect(dados.keys, containsAll(<String>[
+          'status',
+          'portalSulAmerica',
+          'timestamp',
+        ]));
+        expect(dados.keys, hasLength(3));
+        expect(dados['portalSulAmerica'], isA<Map>());
+        expect(dados['timestamp'], isA<String>());
         expect(texto, isNot(contains('usuario-teste')));
         expect(texto, isNot(contains('PORTAL_PRESTADOR')));
+        expect(texto, isNot(contains('diagnosticoSessaoPortal')));
       },
     );
+
+    test('status não expõe Support IDs', () async {
+      final _ContextoApi contexto = _criarApi(
+        ambiente: <String, String>{
+          ..._ambiente,
+          'PORTAL_ASSINATURAS_SUPPORT_IDS_ATIVAS': 'true',
+        },
+        supportIdMarkers: 1,
+      );
+      await _criarSessao(contexto.api);
+      final Response resposta = await contexto.api.handler(
+        Request('GET', Uri.parse('http://localhost/api/status')),
+      );
+      final String texto = await resposta.readAsString();
+
+      expect(resposta.statusCode, 200);
+      expect(texto, isNot(contains('supportIdsRespostaPortal')));
+      expect(texto, isNot(contains('assinaturaF5MarkerSupportId')));
+    });
   });
 
   group('limites e CORS', () {
@@ -625,13 +903,7 @@ void main() {
   });
 }
 
-Future<int> _ativos(ValidadorApi api) async {
-  final Response resposta = await api.handler(
-    Request('GET', Uri.parse('http://localhost/api/status')),
-  );
-  final Map dados = jsonDecode(await resposta.readAsString()) as Map;
-  return (dados['lotes'] as Map)['ativos'] as int;
-}
+Future<int> _ativos(ValidadorApi api) async => api.lotesAtivos;
 
 Future<void> _aguardar(Future<bool> Function() condicao) async {
   for (int tentativa = 0; tentativa < 200; tentativa++) {

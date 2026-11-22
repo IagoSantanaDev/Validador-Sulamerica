@@ -11,11 +11,15 @@ class ResultadoConsultaPortal<T> {
     required this.dados,
     required this.status,
   })  : sucesso = true,
-        categoria = null;
+        categoria = null,
+        retryable = false,
+        falhaElegivelCircuito = false;
 
   const ResultadoConsultaPortal.falha({
     required this.categoria,
     required this.status,
+    this.retryable = false,
+    this.falhaElegivelCircuito = false,
   })  : sucesso = false,
         dados = null;
 
@@ -23,6 +27,8 @@ class ResultadoConsultaPortal<T> {
   final T? dados;
   final int? status;
   final CategoriaFalhaConsultaPortal? categoria;
+  final bool retryable;
+  final bool falhaElegivelCircuito;
 }
 
 bool ehFalhaDeSessaoPortal(int? status) => status == 401 || status == 403;

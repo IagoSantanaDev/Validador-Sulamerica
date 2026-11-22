@@ -14,8 +14,12 @@ Future<void> main() async {
 
   final String host = Platform.environment['HOST'] ?? '0.0.0.0';
   final int porta = int.tryParse(Platform.environment['PORT'] ?? '') ?? 8080;
+  final int limiteSessoesPorIdentificador = _lerLimiteSessoesPorIdentificador();
 
-  final ValidadorApi api = ValidadorApi(logger: logger);
+  final ValidadorApi api = ValidadorApi(
+    logger: logger,
+    limiteSessoesPorIdentificador: limiteSessoesPorIdentificador,
+  );
 
   final server = await io.serve(api.handler, host, porta);
   logger.i('API intermediaria SulAmerica em '
@@ -24,6 +28,20 @@ Future<void> main() async {
     'Rotas: POST /api/sessoes | POST /api/lotes | '
     'GET /api/lotes/{id}/eventos | GET /api/status',
   );
+}
+
+int _lerLimiteSessoesPorIdentificador() {
+  final String? configurado =
+      Platform.environment['PORTAL_MAX_SESSIONS_PER_IDENTIFIER'];
+  if (configurado == null || configurado.trim().isEmpty) return 4;
+
+  final int? limite = int.tryParse(configurado);
+  if (limite == null || limite < 1 || limite > 8) {
+    throw const FormatException(
+      'PORTAL_MAX_SESSIONS_PER_IDENTIFIER deve estar entre 1 e 8.',
+    );
+  }
+  return limite;
 }
 
 class _JsonLogPrinter extends LogPrinter {

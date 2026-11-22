@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:cookie_jar/cookie_jar.dart';
 import 'package:dio/dio.dart';
@@ -8,7 +9,9 @@ import 'package:dio/io.dart';
 import 'package:dio_cookie_manager/dio_cookie_manager.dart';
 import 'package:logger/logger.dart';
 
+import 'assinatura_resposta_portal.dart';
 import 'resultado_consulta_portal.dart';
+import 'semaforo_requisicoes.dart';
 
 /// `falhaRede` cobre apenas `DioException`. Erro de codigo, header inesperado
 /// ou estado invalido cai em `falhaInterna`: juntar os dois sob o mesmo rotulo
@@ -24,19 +27,30 @@ class ResultadoLogin {
   const ResultadoLogin.autenticado()
     : autenticada = true,
       motivo = null,
-      detalhe = null;
+      detalhe = null,
+      falhaElegivelCircuito = false;
 
-  const ResultadoLogin.falha(this.motivo, {this.detalhe}) : autenticada = false;
+  const ResultadoLogin.falha(
+    this.motivo, {
+    this.detalhe,
+    this.falhaElegivelCircuito = false,
+  }) : autenticada = false;
 
   final bool autenticada;
   final MotivoFalhaLogin? motivo;
 
   final String? detalhe;
+  final bool falhaElegivelCircuito;
 }
 
 class SessaoPortal {
-  SessaoPortal({Dio? dio, CookieJar? cookieJar, Logger? logger})
-    : _dio = dio ?? Dio(),
+  SessaoPortal({
+    Dio? dio,
+    CookieJar? cookieJar,
+    Logger? logger,
+    bool repetirFalhasTransitorias = true,
+  }) : _repetirFalhasTransitorias = repetirFalhasTransitorias,
+       _dio = dio ?? Dio(),
       _cookieJar = cookieJar ?? CookieJar(),
       _logger = logger ?? Logger() {
     _dio.options = _dio.options.copyWith(
@@ -47,33 +61,18 @@ class SessaoPortal {
       followRedirects: false,
     );
 
-    // O cliente padrao do Dart continua validando a cadeia e o hostname.
+    // O HttpClient padrao valida TLS; redirects tem allowlist de host separada.
     if (dio == null) {
       _dio.httpClientAdapter = IOHttpClientAdapter(
         createHttpClient: () => HttpClient()
           ..maxConnectionsPerHost = 8
           ..idleTimeout = const Duration(seconds: 10),
-        validateCertificate: validarCertificado,
       );
     }
     _dio.interceptors.add(CookieManager(_cookieJar));
   }
 
   static const String hostPortal = 'saude.sulamericaseguros.com.br';
-
-  /// Confirma que o certificado apresentado foi emitido para o host do portal.
-  ///
-  /// A validacao de CA e de hostname ja foi feita pelo `HttpClient` antes deste
-  /// callback (ver doc do dio: ele so e invocado apos a cadeia ser aceita).
-  /// Este metodo nao repete essa checagem; ele registra no log um certificado
-  /// de outro host, que indicaria redirecionamento ou interceptacao.
-  bool validarCertificado(X509Certificate? certificate, String host, int port) {
-    if (host != hostPortal) {
-      _logger.e('TLS: host inesperado $host (esperado $hostPortal).');
-      return false;
-    }
-    return true;
-  }
 
   static const String _userAgent =
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
@@ -116,11 +115,59 @@ class SessaoPortal {
   };
 
   static const List<int> _tamanhosSegmentosCarteirinha = [3, 5, 4, 4, 4];
+  static final int _limiteLoginsSimultaneos = _lerInteiroAmbiente(
+    'PORTAL_LOGIN_MAX_CONCORRENCIA',
+    2,
+    minimo: 1,
+    maximo: 16,
+  );
+  static final int _limiteRequisicoesGlobal = _lerInteiroAmbiente(
+    'PORTAL_REQUEST_MAX_CONCURRENCY',
+    16,
+    minimo: 1,
+    maximo: 20,
+  );
+  static final int _maxRetriesFalhaTransitoria = _lerInteiroAmbiente(
+    'PORTAL_RETRY_MAX_TENTATIVAS',
+    3,
+    maximo: 10,
+  );
+  static final int _baseBackoffMs = _lerInteiroAmbiente(
+    'PORTAL_RETRY_BACKOFF_BASE_MS',
+    1000,
+    maximo: 60000,
+  );
+  static final int _maxBackoffMs = _lerInteiroAmbiente(
+    'PORTAL_RETRY_BACKOFF_MAX_MS',
+    20000,
+    minimo: 1,
+    maximo: 120000,
+  );
+  static final int _jitterPercent = _lerInteiroAmbiente(
+    'PORTAL_RETRY_JITTER_PERCENT',
+    30,
+    maximo: 100,
+  );
+  static final Random _aleatorioRetry = Random.secure();
+
+  static int _lerInteiroAmbiente(
+    String nome,
+    int padrao, {
+    int minimo = 0,
+    required int maximo,
+  }) {
+    final int? valor = int.tryParse(Platform.environment[nome] ?? '');
+    return (valor ?? padrao).clamp(minimo, maximo).toInt();
+  }
 
   final Dio _dio;
   final CookieJar _cookieJar;
   final Logger _logger;
-  static final _SemaforoRequisicoes _semaforoGlobal = _SemaforoRequisicoes(16);
+  final bool _repetirFalhasTransitorias;
+  static final SemaforoRequisicoes _semaforoGlobal =
+      SemaforoRequisicoes(_limiteRequisicoesGlobal);
+  static final SemaforoRequisicoes _semaforoLogins =
+      SemaforoRequisicoes(_limiteLoginsSimultaneos);
 
   bool _autenticada = false;
   String _codigoPrestador = '100000015513';
@@ -129,13 +176,69 @@ class SessaoPortal {
   bool _loginEmAndamentoRepeteFalhaRede = false;
   final Map<int, Future<ResultadoLogin>> _renovacoesPorGeracao = {};
   int _geracao = 0;
+  int _rejeicoes401 = 0;
+  int _rejeicoes403 = 0;
+  int _rejeicoes401AposRenovacao = 0;
+  int _rejeicoes403AposRenovacao = 0;
+  int _renovacoesIniciadas = 0;
+  int _renovacoesSucesso = 0;
+  int _renovacoesFalhaCredenciaisInvalidas = 0;
+  int _renovacoesFalhaRespostaInesperada = 0;
+  int _renovacoesFalhaRede = 0;
+  int _renovacoesFalhaInterna = 0;
+  int _renovacoesFalhaSemMotivo = 0;
+  int _renovacoesExcecaoInterna = 0;
+  int _retriesTransitoriosIniciados = 0;
+  int _retriesTransitoriosResolvidos = 0;
+  int _retriesTransitoriosEsgotados = 0;
+  final Map<String, int> _diagnosticoEtapas = <String, int>{};
+  final ColetorAssinaturasRespostaPortal _assinaturas =
+      ColetorAssinaturasRespostaPortal();
 
   bool get autenticada => _autenticada;
 
+  static Map<String, int> get diagnosticoConcorrencia =>
+      _semaforoGlobal.diagnostico;
+
+  static int get limiteRequisicoesGlobal => _limiteRequisicoesGlobal;
+
+  static Map<String, int> get diagnosticoLogins =>
+      _semaforoLogins.diagnostico;
+
+  Map<String, int> get diagnosticoSessao => <String, int>{
+    ..._diagnosticoEtapas,
+    'rejeicoes401': _rejeicoes401,
+    'rejeicoes403': _rejeicoes403,
+    'rejeicoes401AposRenovacao': _rejeicoes401AposRenovacao,
+    'rejeicoes403AposRenovacao': _rejeicoes403AposRenovacao,
+    'renovacoesIniciadas': _renovacoesIniciadas,
+    'renovacoesSucesso': _renovacoesSucesso,
+    'renovacoesFalhaCredenciaisInvalidas': _renovacoesFalhaCredenciaisInvalidas,
+    'renovacoesFalhaRespostaInesperada': _renovacoesFalhaRespostaInesperada,
+    'renovacoesFalhaRede': _renovacoesFalhaRede,
+    'renovacoesFalhaInterna': _renovacoesFalhaInterna,
+    'renovacoesFalhaSemMotivo': _renovacoesFalhaSemMotivo,
+    'renovacoesExcecaoInterna': _renovacoesExcecaoInterna,
+    'retriesTransitoriosIniciados': _retriesTransitoriosIniciados,
+    'retriesTransitoriosResolvidos': _retriesTransitoriosResolvidos,
+    'retriesTransitoriosEsgotados': _retriesTransitoriosEsgotados,
+  };
+
+  static Map<String, int> get configuracaoRetry => <String, int>{
+    'maxRetries': _maxRetriesFalhaTransitoria,
+    'backoffBaseMs': _baseBackoffMs,
+    'backoffMaxMs': _maxBackoffMs,
+    'jitterPercent': _jitterPercent,
+  };
+
+  static int get retriesTransitorios => _maxRetriesFalhaTransitoria;
+
+  static Duration esperaRetryTransitorio(int tentativa) =>
+      _backoffFalhaTransitoria(tentativa);
+
   Map<String, String> get _headersNavegador => {
     'User-Agent': _userAgent,
-    'Accept':
-        'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
     'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8',
     'Upgrade-Insecure-Requests': '1',
   };
@@ -173,23 +276,29 @@ class SessaoPortal {
         return existente;
       }
 
-      final Future<ResultadoLogin> promovido = _loginComRetry(
-        code: code,
-        user: user,
-        senha: senha,
-        repetirFalhaRede: true,
-        tentativaInicial: existente,
+      final Future<ResultadoLogin> promovido =
+          _semaforoLogins.executar<ResultadoLogin>(
+        () => _loginComRetry(
+          code: code,
+          user: user,
+          senha: senha,
+          repetirFalhaRede: true,
+          tentativaInicial: existente,
+        ),
       );
       _loginEmAndamento = promovido;
       _loginEmAndamentoRepeteFalhaRede = true;
       return _limparLoginEmAndamento(promovido);
     }
 
-    final Future<ResultadoLogin> futuro = _loginComRetry(
-      code: code,
-      user: user,
-      senha: senha,
-      repetirFalhaRede: repetirFalhaRede,
+    final Future<ResultadoLogin> futuro =
+        _semaforoLogins.executar<ResultadoLogin>(
+      () => _loginComRetry(
+        code: code,
+        user: user,
+        senha: senha,
+        repetirFalhaRede: repetirFalhaRede,
+      ),
     );
     _loginEmAndamento = futuro;
     _loginEmAndamentoRepeteFalhaRede = repetirFalhaRede;
@@ -226,8 +335,9 @@ class SessaoPortal {
     required bool repetirFalhaRede,
     Future<ResultadoLogin>? tentativaInicial,
   }) async {
-    final ResultadoLogin primeiro = await (tentativaInicial ??
-        _executarLogin(code: code, user: user, senha: senha));
+    final ResultadoLogin primeiro =
+        await (tentativaInicial ??
+            _executarLogin(code: code, user: user, senha: senha));
     if (primeiro.autenticada ||
         !repetirFalhaRede ||
         primeiro.motivo != MotivoFalhaLogin.falhaRede) {
@@ -255,12 +365,24 @@ class SessaoPortal {
         ),
       );
       if (pagina.statusCode != 200) {
+        _registrarStatus('loginGetHttp', pagina.statusCode);
+        _incrementarDiagnostico('loginGetRespostaInesperada');
+        final bool rejeicaoF5 = _registrarAssinaturaResposta(
+          status: pagina.statusCode,
+          contentType: pagina.headers['content-type']?.join(','),
+          body: pagina.data == null ? null : utf8.encode(pagina.data!),
+        );
         _logger.e(
           'GET inicial do login retornou HTTP ${pagina.statusCode} '
           '(possivel bloqueio do F5 ASM).',
         );
-        return const ResultadoLogin.falha(MotivoFalhaLogin.respostaInesperada);
+        return ResultadoLogin.falha(
+          MotivoFalhaLogin.respostaInesperada,
+          falhaElegivelCircuito:
+              _falhaElegivelCircuito(pagina.statusCode) && !rejeicaoF5,
+        );
       }
+      _registrarStatus('loginGetHttp', pagina.statusCode);
 
       final Map<String, String> campos = {
         ..._camposLogin,
@@ -279,10 +401,19 @@ class SessaoPortal {
           ),
         ),
       );
+      _registrarStatus('loginPostHttp', resposta.statusCode);
+      if (resposta.statusCode != 302 && resposta.statusCode != 200) {
+        _registrarAssinaturaResposta(
+          status: resposta.statusCode,
+          contentType: resposta.headers['content-type']?.join(','),
+          body: resposta.data == null ? null : utf8.encode(resposta.data!),
+        );
+      }
 
       if (resposta.statusCode == 302) {
         final String? urlFinal = _urlDeRedirect(resposta);
         if (urlFinal == null) {
+          _incrementarDiagnostico('loginRedirectSemLocation');
           _logger.e('Login Lumis: 302 sem Location.');
           return const ResultadoLogin.falha(
             MotivoFalhaLogin.respostaInesperada,
@@ -297,10 +428,19 @@ class SessaoPortal {
             ),
           ),
         );
+        _registrarStatus('loginRedirectHttp', pos.statusCode);
         if (pos.statusCode != 200) {
+          final bool rejeicaoF5 = _registrarAssinaturaResposta(
+            status: pos.statusCode,
+            contentType: pos.headers['content-type']?.join(','),
+            body: pos.data == null ? null : utf8.encode(pos.data!),
+          );
+          _incrementarDiagnostico('loginRedirectRespostaInesperada');
           _logger.e('Login Lumis: redirect final HTTP ${pos.statusCode}.');
-          return const ResultadoLogin.falha(
+          return ResultadoLogin.falha(
             MotivoFalhaLogin.respostaInesperada,
+            falhaElegivelCircuito:
+                _falhaElegivelCircuito(pos.statusCode) && !rejeicaoF5,
           );
         }
         final bool paginaAutenticada = (pos.data ?? '').toLowerCase().contains(
@@ -318,16 +458,22 @@ class SessaoPortal {
           'sessao: $quantidadeCookies cookies.',
         );
         if (!paginaAutenticada) {
+          _incrementarDiagnostico('loginRedirectSemLogout');
           return const ResultadoLogin.falha(
             MotivoFalhaLogin.credenciaisInvalidas,
           );
         }
+        _incrementarDiagnostico('loginAutenticado');
         return const ResultadoLogin.autenticado();
       }
 
       if (resposta.statusCode != 200) {
+        _incrementarDiagnostico('loginPostRespostaInesperada');
         _logger.e('Login Lumis retornou HTTP ${resposta.statusCode}.');
-        return const ResultadoLogin.falha(MotivoFalhaLogin.respostaInesperada);
+        return ResultadoLogin.falha(
+          MotivoFalhaLogin.respostaInesperada,
+          falhaElegivelCircuito: _falhaElegivelCircuito(resposta.statusCode),
+        );
       }
 
       final String corpo = resposta.data ?? '';
@@ -345,21 +491,42 @@ class SessaoPortal {
         'sessao: $quantidadeCookies cookies.',
       );
       if (!_autenticada) {
+        _incrementarDiagnostico('loginPostSemLogout');
         _logger.w('Login Lumis: resposta sem sessao autenticada.');
         return const ResultadoLogin.falha(
           MotivoFalhaLogin.credenciaisInvalidas,
         );
       }
+      _incrementarDiagnostico('loginAutenticado');
       return const ResultadoLogin.autenticado();
     } on FormatException {
+      _incrementarDiagnostico('loginFormatException');
       return const ResultadoLogin.falha(MotivoFalhaLogin.respostaInesperada);
     } on DioException catch (erro) {
-      _logger.e('Falha de rede no login: ${erro.type.name}.');
+      final int? status = erro.response?.statusCode;
+      if (status != null) _registrarStatus('loginDioHttp', status);
+      final bool rejeicaoF5 = _registrarAssinaturaDio(erro);
+      final bool falhaTransporte = _ehFalhaTransporte(erro) && !rejeicaoF5;
+      final bool falhaElegivel =
+          !rejeicaoF5 &&
+          ((status == null && falhaTransporte) ||
+              _falhaElegivelCircuito(status));
+      _incrementarDiagnostico(
+        falhaTransporte
+            ? 'loginDioFalhaTransporte'
+            : 'loginDioRespostaInesperada',
+      );
+      if (falhaTransporte) {
+        _logger.e('Falha de rede no login: ${erro.type.name}.');
+      } else {
+        _logger.w('Resposta inesperada no login: ${erro.type.name}.');
+      }
       return ResultadoLogin.falha(
-        _ehFalhaTransporte(erro)
+        falhaTransporte
             ? MotivoFalhaLogin.falhaRede
             : MotivoFalhaLogin.respostaInesperada,
         detalhe: _detalheDioException(erro),
+        falhaElegivelCircuito: falhaElegivel,
       );
     }
   }
@@ -379,22 +546,31 @@ class SessaoPortal {
   String? _urlDeRedirect(Response<String> resposta) {
     final List<String>? valores = resposta.headers['location'];
     if (valores == null || valores.isEmpty) return null;
-    final String destino = valores.first;
-    return Uri.parse(destino).hasScheme
-        ? destino
-        : 'https://$hostPortal$destino';
+    final Uri base = Uri.parse('https://$hostPortal/');
+    final Uri destino = base.resolve(valores.first);
+    if (destino.scheme != 'https' ||
+        destino.host != hostPortal ||
+        destino.userInfo.isNotEmpty) {
+      _incrementarDiagnostico('redirectDestinoInvalido');
+      throw const FormatException('Destino de redirect inesperado.');
+    }
+    return destino.toString();
   }
 
   Future<ResultadoConsultaPortal<String>> consultarBeneficiario({
     required String carteirinhaCompleta,
     CancelToken? cancelToken,
+    bool recuperarFalhaSessao = true,
   }) {
+    Future<ResultadoConsultaPortal<String>> consultar() =>
+        _consultarBeneficiario(
+          carteirinhaCompleta: carteirinhaCompleta,
+          cancelToken: cancelToken,
+        );
     return _consultarComRecuperacao<String>(
-      () => _consultarBeneficiario(
-        carteirinhaCompleta: carteirinhaCompleta,
-        cancelToken: cancelToken,
-      ),
+      consultar,
       cancelToken,
+      recuperarFalhaSessao: recuperarFalhaSessao,
     );
   }
 
@@ -448,7 +624,18 @@ class SessaoPortal {
           ),
           cancelToken: cancelToken,
         );
-        if (pos.statusCode != 200) return _falhaHttp<String>(pos.statusCode);
+        if (pos.statusCode != 200) {
+          final bool rejeicaoF5 = _registrarAssinaturaResposta(
+            status: pos.statusCode,
+            contentType: pos.headers['content-type']?.join(','),
+            body: pos.data == null ? null : utf8.encode(pos.data!),
+          );
+          return _falhaHttp<String>(
+            pos.statusCode,
+            retryable: _statusTransitorio(pos.statusCode) && !rejeicaoF5,
+            rejeicaoF5: rejeicaoF5,
+          );
+        }
         return ResultadoConsultaPortal<String>.sucesso(
           dados: pos.data ?? '',
           status: pos.statusCode,
@@ -456,7 +643,16 @@ class SessaoPortal {
       }
 
       if (resposta.statusCode != 200) {
-        return _falhaHttp<String>(resposta.statusCode);
+        final bool rejeicaoF5 = _registrarAssinaturaResposta(
+          status: resposta.statusCode,
+          contentType: resposta.headers['content-type']?.join(','),
+          body: resposta.data == null ? null : utf8.encode(resposta.data!),
+        );
+        return _falhaHttp<String>(
+          resposta.statusCode,
+          retryable: _statusTransitorio(resposta.statusCode) && !rejeicaoF5,
+          rejeicaoF5: rejeicaoF5,
+        );
       }
       return ResultadoConsultaPortal<String>.sucesso(
         dados: resposta.data ?? '',
@@ -538,19 +734,49 @@ class SessaoPortal {
         ),
         cancelToken: cancelToken,
       );
+      _registrarStatus('ajaxHttp', resposta.statusCode);
+      _registrarContentTypeAjax(resposta.headers['content-type']);
+
+      if (resposta.statusCode == 200 &&
+          (resposta.headers['content-type'] ?? const <String>[])
+              .join(',')
+              .toLowerCase()
+              .startsWith('text/html')) {
+        _registrarAssinaturaResposta(
+          status: resposta.statusCode,
+          contentType: resposta.headers['content-type']?.join(','),
+          body: resposta.data,
+        );
+      }
 
       if (resposta.statusCode != 200) {
-        return _falhaHttp<Map<String, dynamic>>(resposta.statusCode);
+        final bool rejeicaoF5 = _registrarAssinaturaResposta(
+          status: resposta.statusCode,
+          contentType: resposta.headers['content-type']?.join(','),
+          body: resposta.data,
+        );
+        return _falhaHttp<Map<String, dynamic>>(
+          resposta.statusCode,
+          retryable: _statusTransitorio(resposta.statusCode) && !rejeicaoF5,
+        );
       }
 
       final String corpo = _decodificarCorpo(resposta.data ?? []);
-      final dynamic json = jsonDecode(corpo);
+      final dynamic json;
+      try {
+        json = jsonDecode(corpo);
+      } on FormatException {
+        _incrementarDiagnostico('ajaxJsonInvalido');
+        rethrow;
+      }
       if (json is! Map<String, dynamic>) {
+        _incrementarDiagnostico('ajaxJsonRaizInvalida');
         return ResultadoConsultaPortal<Map<String, dynamic>>.falha(
           categoria: CategoriaFalhaConsultaPortal.respostaInesperada,
           status: resposta.statusCode,
         );
       }
+      _incrementarDiagnostico('ajaxJsonValido');
       return ResultadoConsultaPortal<Map<String, dynamic>>.sucesso(
         dados: json,
         status: resposta.statusCode,
@@ -565,12 +791,58 @@ class SessaoPortal {
     }
   }
 
+  bool _registrarAssinaturaResposta({
+    required int? status,
+    required String? contentType,
+    required List<int>? body,
+  }) {
+    final AssinaturaRespostaPortal assinatura = _assinaturas.coletar(
+      status: status,
+      contentType: contentType,
+      body: body,
+    );
+    _incrementarDiagnostico('assinaturaResposta');
+    if (assinatura.bodySha256 != null) {
+      _incrementarDiagnostico('assinaturaBodyComHash');
+    }
+    if (assinatura.title != null) {
+      _incrementarDiagnostico('assinaturaComTitle');
+    }
+    if (assinatura.f5Rejected) {
+      _incrementarDiagnostico('assinaturaF5Rejected');
+    }
+    if (assinatura.hasRejectedMarker) {
+      _incrementarDiagnostico('assinaturaF5MarkerRejected');
+    }
+    if (assinatura.hasSupportIdMarker) {
+      _incrementarDiagnostico('assinaturaF5MarkerSupportId');
+    }
+    return assinatura.f5Rejected;
+  }
+
+  bool _registrarAssinaturaDio(DioException erro) {
+    final Response<dynamic>? resposta = erro.response;
+    if (resposta == null) return false;
+    final Object? corpo = resposta.data;
+    final List<int>? bytes = switch (corpo) {
+      String texto => utf8.encode(texto),
+      List<int> conteudo => conteudo,
+      _ => null,
+    };
+    return _registrarAssinaturaResposta(
+      status: resposta.statusCode,
+      contentType: resposta.headers['content-type']?.join(','),
+      body: bytes,
+    );
+  }
+
   Future<ResultadoConsultaPortal<T>> _consultarComRecuperacao<T>(
     Future<ResultadoConsultaPortal<T>> Function() consultar,
-    CancelToken? cancelToken,
-  ) async {
+    CancelToken? cancelToken, {
+    bool recuperarFalhaSessao = true,
+  }) async {
     bool repetiuSessao = false;
-    bool repetiuTransporte = false;
+    int retriesFalhaTransitoria = 0;
     int? geracaoAcompanhada;
     try {
       while (true) {
@@ -587,11 +859,23 @@ class SessaoPortal {
           geracaoAcompanhada = geracaoObservada;
         }
         final ResultadoConsultaPortal<T> resultado = await consultar();
-        if (resultado.sucesso ||
-            resultado.categoria == CategoriaFalhaConsultaPortal.cancelada) {
+        if (resultado.sucesso) {
+          if (retriesFalhaTransitoria > 0) {
+            _retriesTransitoriosResolvidos++;
+          }
           return resultado;
         }
-        if (resultado.categoria == CategoriaFalhaConsultaPortal.sessao &&
+        if (resultado.categoria == CategoriaFalhaConsultaPortal.cancelada) {
+          return resultado;
+        }
+        if (resultado.categoria == CategoriaFalhaConsultaPortal.sessao) {
+          _registrarRejeicaoSessao(
+            resultado.status,
+            aposRenovacao: repetiuSessao,
+          );
+        }
+        if (recuperarFalhaSessao &&
+            resultado.categoria == CategoriaFalhaConsultaPortal.sessao &&
             !repetiuSessao) {
           repetiuSessao = true;
           final ResultadoLogin login = await _renovar(geracaoObservada);
@@ -599,21 +883,56 @@ class SessaoPortal {
             return ResultadoConsultaPortal<T>.falha(
               categoria: CategoriaFalhaConsultaPortal.sessao,
               status: resultado.status,
+              retryable: login.falhaElegivelCircuito,
+              falhaElegivelCircuito: login.falhaElegivelCircuito,
             );
           }
           continue;
         }
-        if (resultado.categoria == CategoriaFalhaConsultaPortal.transporte &&
-            !repetiuTransporte) {
-          repetiuTransporte = true;
-          await Future<void>.delayed(const Duration(milliseconds: 500));
+        if (_repetirFalhasTransitorias &&
+            _ehFalhaTransitoria(resultado) &&
+            retriesFalhaTransitoria < _maxRetriesFalhaTransitoria) {
+          retriesFalhaTransitoria++;
+          _retriesTransitoriosIniciados++;
+          await Future<void>.delayed(
+            _backoffFalhaTransitoria(retriesFalhaTransitoria),
+          );
           continue;
+        }
+        if (_repetirFalhasTransitorias && _ehFalhaTransitoria(resultado)) {
+          _retriesTransitoriosEsgotados++;
         }
         return resultado;
       }
     } finally {
       if (geracaoAcompanhada != null) _sairConsulta(geracaoAcompanhada);
     }
+  }
+
+  bool _ehFalhaTransitoria<T>(ResultadoConsultaPortal<T> resultado) {
+    return resultado.retryable;
+  }
+
+  bool _statusTransitorio(int? status) => switch (status) {
+    408 || 500 || 502 || 503 || 504 => true,
+    _ => false,
+  };
+
+  bool _falhaElegivelCircuito(int? status) =>
+      status == 502 || status == 503 || status == 504;
+
+  bool _assinaturaFalhaRetryable(int? status, bool rejeicaoF5) =>
+      _statusTransitorio(status) && !rejeicaoF5;
+
+  static Duration _backoffFalhaTransitoria(int tentativa) {
+    final int base = min(
+      _maxBackoffMs,
+      _baseBackoffMs * (1 << (tentativa - 1)),
+    );
+    final double variacao = _jitterPercent / 100;
+    final double jitter =
+        1 - variacao + _aleatorioRetry.nextDouble() * variacao * 2;
+    return Duration(milliseconds: min(_maxBackoffMs, (base * jitter).round()));
   }
 
   final Map<int, int> _consultasAtivasPorGeracao = <int, int>{};
@@ -641,28 +960,115 @@ class SessaoPortal {
       return Future<ResultadoLogin>.value(const ResultadoLogin.autenticado());
     }
     return _renovacoesPorGeracao.putIfAbsent(geracaoObservada, () {
+      _renovacoesIniciadas++;
       final ({String code, String user, String senha})? credenciais =
           _credenciais;
+      final Future<ResultadoLogin> renovacao;
       if (credenciais == null) {
-        return Future<ResultadoLogin>.value(
+        renovacao = Future<ResultadoLogin>.value(
           const ResultadoLogin.falha(MotivoFalhaLogin.credenciaisInvalidas),
         );
+      } else {
+        renovacao = _loginCompartilhado(
+          code: credenciais.code,
+          user: credenciais.user,
+          senha: credenciais.senha,
+          repetirFalhaRede: true,
+        );
       }
-      return _loginCompartilhado(
-        code: credenciais.code,
-        user: credenciais.user,
-        senha: credenciais.senha,
-        repetirFalhaRede: true,
-      );
+      return _contabilizarRenovacao(renovacao);
     });
   }
 
-  ResultadoConsultaPortal<T> _falhaHttp<T>(int? status) {
+  Future<ResultadoLogin> _contabilizarRenovacao(
+    Future<ResultadoLogin> renovacao,
+  ) async {
+    try {
+      final ResultadoLogin resultado = await renovacao;
+      if (resultado.autenticada) {
+        _renovacoesSucesso++;
+      } else {
+        switch (resultado.motivo) {
+          case MotivoFalhaLogin.credenciaisInvalidas:
+            _renovacoesFalhaCredenciaisInvalidas++;
+          case MotivoFalhaLogin.respostaInesperada:
+            _renovacoesFalhaRespostaInesperada++;
+          case MotivoFalhaLogin.falhaRede:
+            _renovacoesFalhaRede++;
+          case MotivoFalhaLogin.falhaInterna:
+            _renovacoesFalhaInterna++;
+          case null:
+            _renovacoesFalhaSemMotivo++;
+        }
+      }
+      return resultado;
+    } on Object {
+      _renovacoesExcecaoInterna++;
+      rethrow;
+    }
+  }
+
+  void _registrarRejeicaoSessao(int? status, {required bool aposRenovacao}) {
+    if (status == 401) {
+      if (aposRenovacao) {
+        _rejeicoes401AposRenovacao++;
+      } else {
+        _rejeicoes401++;
+      }
+    } else if (status == 403) {
+      if (aposRenovacao) {
+        _rejeicoes403AposRenovacao++;
+      } else {
+        _rejeicoes403++;
+      }
+    }
+  }
+
+  void _incrementarDiagnostico(String chave) {
+    _diagnosticoEtapas.update(
+      chave,
+      (int valor) => valor + 1,
+      ifAbsent: () => 1,
+    );
+  }
+
+  void _registrarStatus(String etapa, int? status) {
+    if (status == null) {
+      _incrementarDiagnostico('${etapa}SemStatus');
+      return;
+    }
+    _incrementarDiagnostico('$etapa$status');
+  }
+
+  void _registrarContentTypeAjax(List<String>? valores) {
+    if (valores == null || valores.isEmpty) {
+      _incrementarDiagnostico('ajaxContentTypeAusente');
+      return;
+    }
+    final String mime = valores.first.split(';').first.trim().toLowerCase();
+    if (mime == 'application/json' || mime.endsWith('+json')) {
+      _incrementarDiagnostico('ajaxContentTypeJson');
+    } else if (mime.startsWith('text/html')) {
+      _incrementarDiagnostico('ajaxContentTypeHtml');
+    } else {
+      _incrementarDiagnostico('ajaxContentTypeOutro');
+    }
+  }
+
+  ResultadoConsultaPortal<T> _falhaHttp<T>(
+    int? status, {
+    bool retryable = false,
+    bool rejeicaoF5 = false,
+  }) {
+    _registrarStatus('consultaHttp', status);
     return ResultadoConsultaPortal<T>.falha(
       categoria: ehFalhaDeSessaoPortal(status)
           ? CategoriaFalhaConsultaPortal.sessao
           : CategoriaFalhaConsultaPortal.http,
       status: status,
+      retryable: retryable,
+      falhaElegivelCircuito:
+          !rejeicaoF5 && _falhaElegivelCircuito(status),
     );
   }
 
@@ -674,13 +1080,31 @@ class SessaoPortal {
       );
     }
     final int? status = erro.response?.statusCode;
+    _incrementarDiagnostico('consultaDio${erro.type.name}');
+    _registrarStatus('consultaDioHttp', status);
+    final Object? causa = erro.error;
+    if (causa != null) {
+      _incrementarDiagnostico('consultaDioErro${causa.runtimeType}');
+    }
+    final bool rejeicaoF5 = _registrarAssinaturaDio(erro);
+    final bool transporte = _ehFalhaTransporte(erro);
+    final CategoriaFalhaConsultaPortal categoria =
+        ehFalhaDeSessaoPortal(status) && !rejeicaoF5
+        ? CategoriaFalhaConsultaPortal.sessao
+        : transporte && !rejeicaoF5
+        ? CategoriaFalhaConsultaPortal.transporte
+        : CategoriaFalhaConsultaPortal.http;
     return ResultadoConsultaPortal<T>.falha(
-      categoria: ehFalhaDeSessaoPortal(status)
-          ? CategoriaFalhaConsultaPortal.sessao
-          : _ehFalhaTransporte(erro)
-          ? CategoriaFalhaConsultaPortal.transporte
-          : CategoriaFalhaConsultaPortal.http,
+      categoria: categoria,
       status: status,
+      retryable:
+          !rejeicaoF5 &&
+          (transporte
+              ? status == null || _statusTransitorio(status)
+              : _assinaturaFalhaRetryable(status, false)),
+      falhaElegivelCircuito:
+          !rejeicaoF5 &&
+          ((status == null && transporte) || _falhaElegivelCircuito(status)),
     );
   }
 
@@ -725,70 +1149,4 @@ class SessaoPortal {
   Future<void> encerrar() async {
     _dio.close();
   }
-}
-
-class _SemaforoRequisicoes {
-  _SemaforoRequisicoes(this.limite);
-
-  final int limite;
-  int _ativas = 0;
-  final List<Completer<void>> _espera = <Completer<void>>[];
-
-  Future<T> executar<T>(
-    Future<T> Function() operacao, {
-    CancelToken? cancelToken,
-  }) async {
-    if (cancelToken?.isCancelled ?? false) {
-      throw _erroCancelamento(cancelToken!);
-    }
-
-    bool possuiVaga = false;
-    if (_ativas < limite && _espera.isEmpty) {
-      _ativas++;
-      possuiVaga = true;
-    } else {
-      final Completer<void> livre = Completer<void>();
-      _espera.add(livre);
-      try {
-        if (cancelToken == null) {
-          await livre.future;
-        } else {
-          await Future.any<void>(<Future<void>>[
-            livre.future,
-            cancelToken.whenCancel.then<void>(
-              (_) => throw _erroCancelamento(cancelToken),
-            ),
-          ]);
-        }
-        possuiVaga = livre.isCompleted;
-      } finally {
-        _espera.remove(livre);
-      }
-    }
-
-    if (cancelToken?.isCancelled ?? false) {
-      if (possuiVaga) _liberarVaga();
-      throw _erroCancelamento(cancelToken!);
-    }
-    try {
-      return await operacao();
-    } finally {
-      _liberarVaga();
-    }
-  }
-
-  void _liberarVaga() {
-    if (_espera.isNotEmpty) {
-      _espera.removeAt(0).complete();
-    } else {
-      _ativas--;
-    }
-  }
-
-  DioException _erroCancelamento(CancelToken cancelToken) =>
-      cancelToken.cancelError ??
-      DioException(
-        requestOptions: RequestOptions(path: ''),
-        type: DioExceptionType.cancel,
-      );
 }

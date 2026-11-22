@@ -20,6 +20,10 @@ O servidor usa `HOST` (padrão `0.0.0.0`) e `PORT` (padrão `8080`).
 o `render.yaml` configura os frontends públicos no GitHub Pages e Cloudflare
 Pages; ao implantar por outro serviço, configure a allowlist no ambiente de
 execução. CORS não autentica chamadas diretas.
+`PORTAL_MAX_SESSIONS_PER_IDENTIFIER` define sessões máximas do portal por
+identificador (padrão 4, faixa 1–8); alteração exige reiniciar o serviço.
+`PORTAL_REQUEST_MAX_CONCURRENCY` define concorrência global de chamadas ao
+portal e do agendador (padrão 16, faixa 1–20); ambos usam o mesmo limite.
 
 As credenciais são resolvidas exclusivamente no servidor por variáveis no
 formato `PORTAL_PRESTADOR_ID_<IDENTIFICADOR>_{CODE,USER,SENHA}`. Cadastre os
@@ -44,8 +48,9 @@ autenticada no pool.
 - `401`: identificador desconhecido ou credencial recusada.
 - `429`: limite de taxa ou capacidade; somente a rejeição por taxa pode trazer
   `Retry-After`.
-- `500`, `502` ou `503`: falha interna, resposta inesperada ou indisponibilidade
-  do portal, sem detalhe interno.
+- `503`: disjuntor do portal aberto ou sonda de recuperação ainda indisponível;
+  inclui `Retry-After`.
+- `500` ou `502`: falha interna ou resposta inesperada, sem detalhe interno.
 
 ### Criar lote
 
@@ -65,6 +70,9 @@ autenticada no pool.
 `/api/lotes/{id}/eventos`. Repetir a chave com o mesmo payload retorna a
 execução existente; payload diferente retorna `409`. Limite acima de 300 itens
 retorna `413`; capacidade esgotada retorna `429` com `Retry-After: 10`.
+Submissões novas retornam `503` com `Retry-After` enquanto o disjuntor estiver
+aberto ou ocupado pela sonda; um replay idempotente válido continua retornando
+a execução original.
 
 ### Acompanhar execução
 
@@ -79,21 +87,43 @@ aguardando 2, 4 e 8 segundos e retomando do último id recebido. O resultado nã
 `401` indica token inválido; `404` indica lote inexistente, descartado ou de
 outro token. Sem assinantes por 30 segundos, o lote é cancelado. Cancelar uma
 requisição local não garante que o portal interrompa uma operação já recebida.
+O resultado usa `status: "ok"` quando todas as consultas terminaram e
+`status: "parcial"` quando há itens pendentes. Resultados concluídos permanecem
+em `resultados`; `pendentes` informa `tipo`, `chave` e `motivo`. O limite de
+despacho é cinco minutos a partir do enfileiramento: ele impede iniciar novos
+itens, mas chamadas em andamento e seus retries podem terminar depois desse
+limite.
 
 ### Estado do serviço
 
 `GET /api/status` não exige token e fica fora dos limites de requisições ao
-portal. Devolve contadores agregados de sessões, lotes, memória RSS, rejeições
-429 e falhas upstream, além do resultado da sonda do portal. Não inclui tokens,
-identificadores nem dados de consulta.
+portal. Devolve somente `status`, `portalSulAmerica` e `timestamp`:
+
+```json
+{
+  "status": "ok",
+  "portalSulAmerica": {"alcançavel": true, "status": 200},
+  "timestamp": "2026-11-22T10:00:00.000Z"
+}
+```
+
+Não publica sessões, lotes, memória, contadores de falha, tokens,
+identificadores, carteirinhas, senhas, cookies, corpos de resposta ou Support
+IDs. Métricas operacionais detalhadas podem continuar registradas internamente,
+mas não são expostas neste endpoint público.
 
 ## Capacidade e execução
 
 - Uma instância, com estado apenas em memória; reinício encerra sessões e lotes.
-- Até 4 sessões do portal por identificador e no máximo 8 no processo.
+- Até 4 sessões do portal por identificador por padrão, limite configurável por
+  `PORTAL_MAX_SESSIONS_PER_IDENTIFIER`; máximo documentado de 8 no processo.
 - Até 24 execuções na fila e em processamento; a 25ª é rejeitada.
-- Até 16 requisições simultâneas ao portal.
-- Elegibilidade serial por sessão; até 3 consultas de senha concorrentes por
+- Até 2 logins simultâneos no processo por padrão; configure
+  `PORTAL_LOGIN_MAX_CONCORRENCIA` entre 1 e 16.
+- Até 16 requisições simultâneas ao portal por padrão; configure
+  `PORTAL_REQUEST_MAX_CONCURRENCY` entre 1 e 20 para ajustar semáforo e
+  agendador juntos.
+- Uma elegibilidade por sessão; até 3 consultas de senha simultâneas por
   sessão.
 - Rate limit de 20/min por identificador em `/api/sessoes`, 20/min por token em
   `/api/lotes` e backstop de 120/min. Status e SSE não consomem esse limite.
@@ -103,16 +133,30 @@ identificadores nem dados de consulta.
 O agendador alterna entre identificadores e lotes, seleciona primeiro uma
 sessão autenticada menos ocupada e não abre sessões extras para cada lote.
 Resultados de consulta são tipados por chamada. Uma rejeição de sessão (401/403)
-pode provocar uma renovação compartilhada e uma repetição; falhas de transporte
-ou timeout têm uma repetição própria. Rejeições HTTP diferentes de 401/403 não
-são tratadas como falhas de rede.
+pode provocar uma renovação compartilhada e uma repetição. Falhas de transporte
+e respostas HTTP 408, 500, 502, 503 ou 504 recebem até quatro tentativas totais
+por item no agendador, com backoff exponencial e jitter. Os retries são
+coordenados com o disjuntor; chamadas diretas do harness E2 mantêm o retry
+interno de `SessaoPortal`. HTTP 429, 401/403 após renovação e respostas
+inesperadas não são repetidas automaticamente. Rejeições HTTP não são tratadas
+como falhas de rede.
+Configure `PORTAL_RETRY_MAX_TENTATIVAS` (padrão 3),
+`PORTAL_RETRY_BACKOFF_BASE_MS` (1000), `PORTAL_RETRY_BACKOFF_MAX_MS` (20000) e
+`PORTAL_RETRY_JITTER_PERCENT` (30) no ambiente do backend.
+`GET /api/status` publica os valores efetivos em `resilienciaPortal.retryConfiguracao`
+e, em `resilienciaPortal.retriesAgendador`, os contadores `iniciados`,
+`resolvidos` e `esgotados`. Um retry é contado como iniciado depois do backoff
+e da permissão do disjuntor; cancelamentos durante o backoff não são contados.
+`resolvidos` conta itens que tiveram sucesso após retry. `esgotados` conta
+somente itens cuja última tentativa permitida também falhou de forma retryable;
+uma cadeia que termina em falha não retryable não incrementa esse contador.
 
 Em 401 na submissão ou no SSE, o frontend cria uma sessão uma vez; na submissão,
 mantém a mesma chave idempotente, e no SSE, o último id recebido. Na criação de
-sessão, 429 só é repetido uma vez se houver `Retry-After`. Para criação de lote,
-429 permite até três reenvios com a mesma chave e backoff de 1, 2 e 4 segundos;
-um `Retry-After` substitui a espera correspondente e é limitado a 30 segundos.
-Rejeições HTTP diferentes não são repetidas automaticamente. Falhas de rede
+sessão, 429 e 503 só são repetidos uma vez se houver `Retry-After`. Para criação
+de lote, 429 e 503 permitem até três reenvios com a mesma chave e backoff de 1, 2 e 4
+segundos; um `Retry-After` substitui a espera correspondente e é limitado a 60
+segundos. Rejeições HTTP diferentes não são repetidas automaticamente. Falhas de rede
 não têm SLA numérico definido: o harness registra duração p50 e p95 para
 caracterizar o comportamento medido.
 
@@ -156,3 +200,13 @@ Windows, os dois cenários concluíram 12 lotes sem 429 e mediram RSS de
 61,6–67,7 MB. `ProcessInfo.currentRss` depende da plataforma, portanto esse
 resultado não certifica o RSS no Linux/Render. Não há SLA numérico de duração
 antes de medir o comportamento observado no portal real.
+
+O cenário E2 conecta diretamente ao portal, sem passar pelo pool da API. Ele
+exige `PORTAL_PRESTADOR_ID_<CNPJ>_{CODE,USER,SENHA}` no ambiente do processo.
+Para cada braço (2 e 4 logins), consulta a primeira sessão antes e depois dos
+logins adicionais, sem renovação automática durante a sonda; assim 401/403 da
+sessão original ficam observáveis. O relatório não inclui carteiras ou senhas.
+
+```powershell
+dart run tool/matriz_carga.dart --xml "caminho/arquivo.xml" --cenario e2
+```
