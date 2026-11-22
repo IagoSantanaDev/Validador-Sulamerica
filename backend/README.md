@@ -97,31 +97,20 @@ limite.
 ### Estado do serviço
 
 `GET /api/status` não exige token e fica fora dos limites de requisições ao
-portal. Devolve contadores agregados de sessões, lotes, memória RSS, rejeições
-429 e falhas upstream, além do resultado da sonda do portal. Não publica nem
-retém Support IDs individuais; mantém apenas o contador agregado
-`assinaturaF5MarkerSupportId`. `diagnosticoSessaoPortal`
-conta rejeições 401/403 antes e depois da renovação, renovações bem-sucedidas,
-falhas por motivo e exceções internas. Também registra status HTTP por etapa do
-login, redirect sem `Location`, login sem indicador de sessão, status da chamada
-AJAX, classe do `Content-Type` e resultado do parse JSON. `concorrenciaPortal`
-mostra limites e picos do semáforo de requisições e do pool. O objeto
-`concorrenciaPortal.logins` publica `limite`, `ativasAgora`, `picoAtivas`,
-`aguardandoAgora`, `picoAguardando` e `totalAguardas`. Contadores de sessões
-descartadas após falha inicial de login são preservados. Métricas agregam em
-memória e zeram quando o processo reinicia. Não inclui corpo de resposta,
-cookies, tokens, identificadores nem dados de consulta.
-`disjuntorPortal` expõe estado, sequência de falhas elegíveis, janela, cooldown
-e `Retry-After`; `lotes.parciais` conta finalizações parciais. O circuito é
-global e em memória: abre após cinco falhas elegíveis consecutivas em 60
-segundos (transporte sem resposta ou HTTP 502/503/504), permanece aberto por 60
-segundos e exige uma sonda HTTP para fechar. HTTP 429, demais 4xx/5xx,
-respostas F5 e falhas de parse não incrementam o contador.
-`falhasConsulta` agrega apenas falhas terminais de itens por categoria e status.
-Em `diagnosticoSessaoPortal`, contadores `consultaDio...` registram o tipo de
-`DioException`, seu tipo de causa interna e o status (ou a ausência dele) para
-cada tentativa; `consultaHttp...` registra respostas HTTP não-200. Esses dados
-não incluem mensagem de exceção, URL, corpo ou identificadores.
+portal. Devolve somente `status`, `portalSulAmerica` e `timestamp`:
+
+```json
+{
+  "status": "ok",
+  "portalSulAmerica": {"alcançavel": true, "status": 200},
+  "timestamp": "2026-11-22T10:00:00.000Z"
+}
+```
+
+Não publica sessões, lotes, memória, contadores de falha, tokens,
+identificadores, carteirinhas, senhas, cookies, corpos de resposta ou Support
+IDs. Métricas operacionais detalhadas podem continuar registradas internamente,
+mas não são expostas neste endpoint público.
 
 ## Capacidade e execução
 
