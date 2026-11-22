@@ -311,11 +311,10 @@ void main() {
         );
         final Map<String, dynamic> dados =
             jsonDecode(await status.readAsString()) as Map<String, dynamic>;
-        final Map<String, dynamic> circuito =
-            dados['disjuntorPortal'] as Map<String, dynamic>;
 
         expect(reutilizada.statusCode, 201);
-        expect(circuito['falhasConsecutivas'], 4);
+        expect(dados['status'], 'ok');
+        expect(dados.containsKey('disjuntorPortal'), isFalse);
       },
     );
 
@@ -711,7 +710,8 @@ void main() {
       );
       final Map dadosStatus = jsonDecode(await status.readAsString()) as Map;
 
-      expect(dadosStatus['falhasConsulta'], containsPair('http_semStatus', 1));
+      expect(dadosStatus['status'], 'ok');
+      expect(dadosStatus.containsKey('falhasConsulta'), isFalse);
     });
 
     test('outro token não pode abrir eventos do lote', () async {
@@ -800,107 +800,38 @@ void main() {
         final Map dados = jsonDecode(texto) as Map;
 
         expect(resposta.statusCode, 200);
-        expect(dados['sessoesAtivas'], 1);
-        expect(dados['lotes'], containsPair('ativos', 0));
-        expect(dados['lotes'], containsPair('parciais', 0));
-        expect(dados['disjuntorPortal'], containsPair('estado', 'fechado'));
-        expect(dados['memoriaRssMb'], isA<int>());
-        expect(dados['rateLimit'], containsPair('rejeicoes429', 0));
-        expect(dados['falhasPortal'], containsPair('502', 0));
-        expect(dados['falhasPortal'], containsPair('503', 0));
-        expect(dados['falhasConsulta'], isEmpty);
-        expect(
-          dados['diagnosticoSessaoPortal'],
-          containsPair('rejeicoes401', 0),
-        );
-        final Map resiliencia = dados['resilienciaPortal'] as Map;
-        expect(resiliencia['retryConfiguracao'], contains('maxRetries'));
-        expect(resiliencia['retryConfiguracao'], contains('backoffBaseMs'));
-        expect(resiliencia['retryConfiguracao'], contains('backoffMaxMs'));
-        expect(resiliencia['retryConfiguracao'], contains('jitterPercent'));
-        expect(resiliencia['retriesTransitoriosIniciados'], 0);
-        expect(resiliencia['retriesTransitoriosResolvidos'], 0);
-        expect(resiliencia['retriesTransitoriosEsgotados'], 0);
-        expect(resiliencia['retriesAgendador'], <String, int>{
-          'iniciados': 0,
-          'resolvidos': 0,
-          'esgotados': 0,
-        });
-        expect(
-          dados['diagnosticoSessaoPortal'],
-          containsPair('renovacoesFalhaCredenciaisInvalidas', 0),
-        );
-        final Map concorrencia = dados['concorrenciaPortal'] as Map;
-        expect(
-          concorrencia,
-          containsPair('limite', SessaoPortal.limiteRequisicoesGlobal),
-        );
-        expect(
-          concorrencia,
-          containsPair('limiteAgendador', SessaoPortal.limiteRequisicoesGlobal),
-        );
-        expect(concorrencia, containsPair('limiteSessoesPorIdentificador', 4));
-        final Map logins = concorrencia['logins'] as Map;
-        expect(logins['limite'], inInclusiveRange(1, 16));
-        expect(logins['ativasAgora'], isA<int>());
-        expect(logins['picoAtivas'], isA<int>());
-        expect(logins['aguardandoAgora'], isA<int>());
-        expect(logins['picoAguardando'], isA<int>());
-        expect(logins['totalAguardas'], isA<int>());
-        expect(dados.containsKey('supportIdsRespostaPortal'), isFalse);
+        expect(dados.keys, containsAll(<String>[
+          'status',
+          'portalSulAmerica',
+          'timestamp',
+        ]));
+        expect(dados.keys, hasLength(3));
+        expect(dados['portalSulAmerica'], isA<Map>());
+        expect(dados['timestamp'], isA<String>());
         expect(texto, isNot(contains('usuario-teste')));
         expect(texto, isNot(contains('PORTAL_PRESTADOR')));
+        expect(texto, isNot(contains('diagnosticoSessaoPortal')));
       },
     );
 
-    test(
-      'pool de sessão aceita limite configurado sem mudar limite global',
-      () async {
-        final _ContextoApi contexto = _criarApi(
-          limiteSessoesPorIdentificador: 5,
-        );
-        final Response resposta = await contexto.api.handler(
-          Request('GET', Uri.parse('http://localhost/api/status')),
-        );
-        final Map dados = jsonDecode(await resposta.readAsString()) as Map;
-        final Map concorrencia = dados['concorrenciaPortal'] as Map;
+    test('status não expõe Support IDs', () async {
+      final _ContextoApi contexto = _criarApi(
+        ambiente: <String, String>{
+          ..._ambiente,
+          'PORTAL_ASSINATURAS_SUPPORT_IDS_ATIVAS': 'true',
+        },
+        supportIdMarkers: 1,
+      );
+      await _criarSessao(contexto.api);
+      final Response resposta = await contexto.api.handler(
+        Request('GET', Uri.parse('http://localhost/api/status')),
+      );
+      final String texto = await resposta.readAsString();
 
-        expect(concorrencia, containsPair('limiteSessoesPorIdentificador', 5));
-        expect(
-          concorrencia,
-          containsPair('limite', SessaoPortal.limiteRequisicoesGlobal),
-        );
-        expect(
-          concorrencia,
-          containsPair('limiteAgendador', SessaoPortal.limiteRequisicoesGlobal),
-        );
-      },
-    );
-
-    test(
-      'status nunca expõe Support IDs e preserva contadores agregados',
-      () async {
-        final _ContextoApi contexto = _criarApi(
-          ambiente: <String, String>{
-            ..._ambiente,
-            'PORTAL_ASSINATURAS_SUPPORT_IDS_ATIVAS': 'true',
-          },
-          supportIdMarkers: 1,
-        );
-        await _criarSessao(contexto.api);
-        final Response resposta = await contexto.api.handler(
-          Request('GET', Uri.parse('http://localhost/api/status')),
-        );
-        final Map dados = jsonDecode(await resposta.readAsString()) as Map;
-
-        expect(resposta.statusCode, 200);
-        expect(dados.containsKey('supportIdsRespostaPortal'), isFalse);
-        expect(
-          dados['diagnosticoSessaoPortal'],
-          containsPair('assinaturaF5MarkerSupportId', 1),
-        );
-      },
-    );
+      expect(resposta.statusCode, 200);
+      expect(texto, isNot(contains('supportIdsRespostaPortal')));
+      expect(texto, isNot(contains('assinaturaF5MarkerSupportId')));
+    });
   });
 
   group('limites e CORS', () {
@@ -972,13 +903,7 @@ void main() {
   });
 }
 
-Future<int> _ativos(ValidadorApi api) async {
-  final Response resposta = await api.handler(
-    Request('GET', Uri.parse('http://localhost/api/status')),
-  );
-  final Map dados = jsonDecode(await resposta.readAsString()) as Map;
-  return (dados['lotes'] as Map)['ativos'] as int;
-}
+Future<int> _ativos(ValidadorApi api) async => api.lotesAtivos;
 
 Future<void> _aguardar(Future<bool> Function() condicao) async {
   for (int tentativa = 0; tentativa < 200; tentativa++) {

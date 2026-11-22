@@ -125,6 +125,8 @@ class ValidadorApi {
 
   Handler get handler => _handler;
 
+  int get lotesAtivos => _agendador.ativas;
+
   Future<Response> _criarSessao(Request request) async {
     final Map<String, dynamic>? corpo;
     try {
@@ -534,38 +536,8 @@ class ValidadorApi {
 
   Future<Response> _status(Request request) async {
     final Map<String, dynamic> alcancePortal = await _alcancePortal();
-    final Map<String, int> diagnosticoSessao = _pool.diagnosticoSessaoPortal;
     return respostaJson(<String, dynamic>{
       'status': 'ok',
-      'sessoesAtivas': _pool.sessoesAtivas,
-      'lotes': <String, int>{
-        'ativos': _agendador.ativas,
-        'naFila': _agendador.naFila,
-        'concluidos': _agendador.concluidos,
-        'parciais': _agendador.parciais,
-      },
-      'memoriaRssMb': (ProcessInfo.currentRss / (1024 * 1024)).round(),
-      'rateLimit': <String, int>{'rejeicoes429': _rejeicoes429},
-      'disjuntorPortal': _disjuntor.diagnostico,
-      'falhasPortal': <String, int>{'502': _falhas502, '503': _falhas503},
-      'falhasConsulta': Map<String, int>.of(_falhasConsulta),
-      'diagnosticoSessaoPortal': diagnosticoSessao,
-      'resilienciaPortal': <String, Object>{
-        'retryConfiguracao': SessaoPortal.configuracaoRetry,
-        'retriesTransitoriosIniciados':
-            diagnosticoSessao['retriesTransitoriosIniciados'] ?? 0,
-        'retriesTransitoriosResolvidos':
-            diagnosticoSessao['retriesTransitoriosResolvidos'] ?? 0,
-        'retriesTransitoriosEsgotados':
-            diagnosticoSessao['retriesTransitoriosEsgotados'] ?? 0,
-        'retriesAgendador': _agendador.diagnosticoRetries,
-      },
-      'concorrenciaPortal': <String, Object>{
-        ...SessaoPortal.diagnosticoConcorrencia,
-        ..._pool.diagnosticoConcorrenciaPortal,
-        'limiteAgendador': _agendador.limiteGlobal,
-        'logins': SessaoPortal.diagnosticoLogins,
-      },
       'portalSulAmerica': alcancePortal,
       'timestamp': DateTime.now().toIso8601String(),
     });
