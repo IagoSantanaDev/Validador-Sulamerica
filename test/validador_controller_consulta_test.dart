@@ -504,11 +504,15 @@ void main() {
       final _FakeAsyncBackend service = _FakeAsyncBackend()
         ..respostasSessao.add(
           Result.failure(
-            const ServicoIndisponivelException(retryAfter: Duration(seconds: 60)),
+            const ServicoIndisponivelException(
+              retryAfter: Duration(seconds: 60),
+            ),
           ),
         )
         ..respostasStatus.addAll([
-          Result.success({'bloqueio': {'ativo': false}}),
+          Result.success({
+            'bloqueio': {'ativo': false},
+          }),
           Result.success({'bloqueio': bloqueio}),
         ]);
       final ValidadorController controller = _novoController(
@@ -544,7 +548,9 @@ void main() {
           ),
         )
         ..respostasStatus.addAll([
-          Result.success({'bloqueio': {'ativo': false}}),
+          Result.success({
+            'bloqueio': {'ativo': false},
+          }),
           Result.success({'bloqueio': bloqueio}),
         ]);
       final ValidadorController controller = _novoController(
@@ -991,43 +997,93 @@ void main() {
       expect(controller.temConsultasPendentes, isFalse);
     });
 
-    test('resultado parcial aplica concluídas e deixa pendências para retry manual', () async {
-      const String senha = '5000000000';
-      final _FakeAsyncBackend service = _FakeAsyncBackend()
-        ..streams.add(
-          _resultadoStream(
-            [_resultado(chave: _carteira)],
-            status: 'parcial',
-            pendentes: [
-              {'tipo': 'senha', 'chave': senha, 'motivo': 'prazo_5_minutos'},
+    test(
+      'resultado parcial não exibe dados do portal e mantém tudo pendente',
+      () async {
+        const String senha = '5000000000';
+        final _FakeAsyncBackend service = _FakeAsyncBackend()
+          ..streams.add(
+            _resultadoStream(
+              [_resultado(chave: _carteira)],
+              status: 'parcial',
+              pendentes: [
+                {'tipo': 'senha', 'chave': senha, 'motivo': 'prazo_5_minutos'},
+              ],
+            ),
+          );
+        final ValidadorController controller = await _validar(
+          _novoController(
+            service: service,
+            retorno: const [
+              GuiaValidada(
+                guia: GuiaTiss(
+                  numeroGuiaPrestador: '111',
+                  numeroCarteira: _carteira,
+                  senha: senha,
+                ),
+                erros: [],
+              ),
             ],
           ),
         );
-      final ValidadorController controller = await _validar(
-        _novoController(
-          service: service,
-          retorno: const [
-            GuiaValidada(
-              guia: GuiaTiss(
-                numeroGuiaPrestador: '111',
-                numeroCarteira: _carteira,
-                senha: senha,
-              ),
-              erros: [],
+
+        expect(controller.temConsultasPendentes, isTrue);
+        expect(controller.totalConsultasPendentes, 2);
+        expect(controller.guias.single.consultas, isEmpty);
+        expect(
+          controller.mensagemAvisoConsultaBackend,
+          AppStrings.consultasPrazoExpirado,
+        );
+        expect(service.lotes, hasLength(1));
+
+        await controller.retentarConsultasPendentes();
+
+        expect(controller.temConsultasPendentes, isFalse);
+        expect(controller.guias.single.consultas, hasLength(2));
+      },
+    );
+
+    test('resultado parcial em chunk posterior oculta resultados de chunks anteriores', () async {
+      final List<GuiaValidada> guias = [
+        for (int indice = 0; indice < 301; indice++)
+          GuiaValidada(
+            guia: GuiaTiss(
+              numeroGuiaPrestador: indice.toString().padLeft(3, '0'),
+              numeroCarteira: indice.toString().padLeft(20, '0'),
+              senha: null,
             ),
-          ],
-        ),
+            erros: const [],
+          ),
+      ];
+      final _FakeAsyncBackend service = _FakeAsyncBackend()
+        ..streams.addAll([
+          _resultadoStream([
+            for (int indice = 0; indice < 300; indice++)
+              _resultado(chave: indice.toString().padLeft(20, '0')),
+          ]),
+          _resultadoStream(
+            [_resultado(chave: '300'.padLeft(20, '0'))],
+            status: 'parcial',
+            pendentes: [
+              {
+                'tipo': 'elegibilidade',
+                'chave': '300'.padLeft(20, '0'),
+                'motivo': 'tentativas_esgotadas',
+              },
+            ],
+          ),
+        ]);
+      final ValidadorController controller = await _validar(
+        _novoController(service: service, retorno: guias),
       );
 
       expect(controller.temConsultasPendentes, isTrue);
       expect(controller.totalConsultasPendentes, 1);
-      expect(controller.guias.single.consultas, hasLength(1));
-      expect(controller.guias.single.consulta?.descricao, 'Elegível: SIM');
+      expect(controller.guias, hasLength(301));
       expect(
-        controller.mensagemAvisoConsultaBackend,
-        AppStrings.consultasPrazoExpirado,
+        controller.guias.every((GuiaValidada guia) => guia.consultas.isEmpty),
+        isTrue,
       );
-      expect(service.lotes, hasLength(1));
     });
 
     test('falha de transporte permite retry automático, rejeição de portal fica manual', () async {
@@ -1137,9 +1193,8 @@ void main() {
       );
 
       expect(controller.temConsultasPendentes, isTrue);
-      expect(controller.totalConsultasPendentes, 1);
-      expect(controller.guias.single.consultas, hasLength(1));
-      expect(controller.guias.single.consulta?.descricao, 'Elegível: SIM');
+      expect(controller.totalConsultasPendentes, 2);
+      expect(controller.guias.single.consultas, isEmpty);
       expect(controller.mensagemAvisoConsultaBackend, isNull);
       expect(service.lotes, hasLength(1));
     });

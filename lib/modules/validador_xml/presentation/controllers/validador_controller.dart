@@ -96,6 +96,7 @@ class ValidadorController extends ChangeNotifier {
   final Map<String, ConsultaLoteItem> _consultasPendentes = {};
   final Map<String, ConsultaGuia> _resultadosConsultas = {};
   List<GuiaValidada> _guiasBaseConsultas = const [];
+  bool _resultadosConsultasConcluidos = true;
   bool _retentativaManualEmAndamento = false;
   bool _descartandoLoteBloqueado = false;
   String? _identificadorPrestadorDaConsulta;
@@ -268,11 +269,14 @@ class ValidadorController extends ChangeNotifier {
   String? get nomeArquivo => _nomeArquivo;
   String? get mensagemErro => _mensagemErro;
   int? get tamanhoArquivoBytes => _bytesArquivo?.length;
+  List<GuiaValidada> get _guiasExibidas =>
+      _resultadosConsultasConcluidos ? _resultado : _guiasBaseConsultas;
   List<GuiaValidada> get guiasComErro =>
-      _resultado.where((g) => g.temErro || g.temFalhaConsulta).toList();
-  List<GuiaValidada> get guias => _resultado;
-  int get totalGuias => _resultado.length;
-  int get totalGuiasComErro => _resultado.where((guia) => guia.temErro).length;
+      _guiasExibidas.where((g) => g.temErro || g.temFalhaConsulta).toList();
+  List<GuiaValidada> get guias => _guiasExibidas;
+  int get totalGuias => _guiasExibidas.length;
+  int get totalGuiasComErro =>
+      _guiasExibidas.where((guia) => guia.temErro).length;
   InformacoesLote get informacoes => _informacoes;
   String? get hashMd5 => _hashMd5;
   Duration get tempoProcessamento => _tempoProcessamento;
@@ -454,6 +458,8 @@ class ValidadorController extends ChangeNotifier {
     _guiasBaseConsultas = base;
     _resultado = List.of(base);
     _totalConsultas = itens.length;
+    _resultadosConsultasConcluidos =
+        itens.isEmpty || identificadorPrestador == null;
     if (itens.isEmpty) {
       _etapaConsultaBackend = EtapaConsultaBackend.concluida;
       return base;
@@ -481,6 +487,7 @@ class ValidadorController extends ChangeNotifier {
       }
     }
     if (epocaBloqueio != _epocaBloqueio) return const <GuiaValidada>[];
+    _resultadosConsultasConcluidos = _consultasPendentes.isEmpty;
     _atualizarResultado();
     _etapaConsultaBackend = _consultasPendentes.isEmpty
         ? EtapaConsultaBackend.concluida
@@ -918,16 +925,12 @@ class ValidadorController extends ChangeNotifier {
     }
     for (final ConsultaLoteItem item in consultas) {
       final String chave = _chaveConsulta(item);
-      if (!resolvidas.contains(chave) &&
-          (evento.status != 'parcial' ||
-              declaradasPendentes.contains(chave) ||
-              evento.resultados.any(
-                (ResultadoConsultaLote resultado) =>
-                    '${resultado.tipo.name}|${resultado.chave}' == chave &&
-                    _falhaTransitoriaNoResultado(resultado),
-              ))) {
+      if (!resolvidas.contains(chave)) {
         _consultasPendentes[_chaveConsulta(item)] = item;
       }
+    }
+    if (evento.status == 'parcial') {
+      _registrarConsultasPendentes(consultas);
     }
     if (evento.pendentes.any(
       (PendenciaConsultaLote pendencia) =>
@@ -1015,6 +1018,7 @@ class ValidadorController extends ChangeNotifier {
     _consultasPendentes.clear();
     _resultadosConsultas.clear();
     _guiasBaseConsultas = const [];
+    _resultadosConsultasConcluidos = true;
     _identificadorPrestadorDaConsulta = null;
     _mensagemAvisoConsultaBackend = null;
     _etapaConsultaBackend = EtapaConsultaBackend.naoIniciada;
@@ -1061,6 +1065,7 @@ class ValidadorController extends ChangeNotifier {
       }
       if (_consultasPendentes.isEmpty) {
         _mensagemAvisoConsultaBackend = null;
+        _resultadosConsultasConcluidos = true;
       }
       _etapaConsultaBackend = _consultasPendentes.isEmpty
           ? EtapaConsultaBackend.concluida
