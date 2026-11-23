@@ -103,6 +103,7 @@ class ValidadorController extends ChangeNotifier {
   int _progressoConsultasConcluidas = 0;
   int _totalConsultas = 0;
   bool _disposed = false;
+  int _epocaBloqueio = 0;
   BloqueioPortal? _bloqueioPortal;
   Timer? _timerBloqueio;
   EtapaValidacaoLocal? _etapaValidacaoLocal;
@@ -196,6 +197,7 @@ class ValidadorController extends ChangeNotifier {
   }
 
   void _ativarBloqueio(BloqueioPortal bloqueio) {
+    _epocaBloqueio++;
     _bloqueioPortal = bloqueio;
     _agendarTimerBloqueio();
     _retornarAoInicioBloqueado();
@@ -298,9 +300,11 @@ class ValidadorController extends ChangeNotifier {
   }
 
   Future<void> validar() async {
+    final int epocaBloqueio = _epocaBloqueio;
     _etapaValidacaoLocal = EtapaValidacaoLocal.verificandoDisponibilidade;
     notifyListeners();
     if (await _consultarBloqueio()) return;
+    if (epocaBloqueio != _epocaBloqueio) return;
     final Uint8List? bytes = _bytesArquivo;
     if (bytes == null) {
       _etapaValidacaoLocal = null;
@@ -319,6 +323,7 @@ class ValidadorController extends ChangeNotifier {
       _etapaValidacaoLocal = EtapaValidacaoLocal.carregandoBaseTuss;
       notifyListeners();
       await _repository.preparar();
+      if (epocaBloqueio != _epocaBloqueio) return;
       _etapaValidacaoLocal = EtapaValidacaoLocal.extraindoGuias;
       notifyListeners();
       final LoteGuiasExtraido lote = _datasource.extrairLote(conteudoXml);
@@ -328,6 +333,7 @@ class ValidadorController extends ChangeNotifier {
       final List<GuiaValidada> resultadoBruto = await Future(
         () => _repository.validarGuias(lote.guias),
       );
+      if (epocaBloqueio != _epocaBloqueio) return;
       final String? identificadorPrestador = _regraCredenciais.resolver(
         informacoes.prestadorCnpjCpf,
       );
@@ -335,7 +341,7 @@ class ValidadorController extends ChangeNotifier {
         resultadoBruto,
         identificadorPrestador,
       );
-      if (_bloqueioPortal != null) {
+      if (epocaBloqueio != _epocaBloqueio || _bloqueioPortal != null) {
         _retornarAoInicioBloqueado();
         return;
       }
@@ -344,25 +350,31 @@ class ValidadorController extends ChangeNotifier {
       _informacoes = informacoes;
       _status = StatusValidador.concluido;
     } on XmlMalFormadoException catch (erro) {
+      if (epocaBloqueio != _epocaBloqueio) return;
       _resultado = const [];
       _status = StatusValidador.erro;
       _mensagemErro = erro.toString();
     } on NenhumaGuiaEncontradaException catch (erro) {
+      if (epocaBloqueio != _epocaBloqueio) return;
       _resultado = const [];
       _status = StatusValidador.erro;
       _mensagemErro = erro.toString();
     } on TussBaseLocalInvalidaException catch (erro) {
+      if (epocaBloqueio != _epocaBloqueio) return;
       _resultado = const [];
       _status = StatusValidador.erro;
       _mensagemErro = 'Não foi possível carregar a base TUSS: ${erro.mensagem}';
     } catch (erro) {
+      if (epocaBloqueio != _epocaBloqueio) return;
       _resultado = const [];
       _status = StatusValidador.erro;
       _mensagemErro = 'Erro inesperado ao validar o arquivo: $erro';
     } finally {
-      cronometro.stop();
-      _tempoProcessamento = cronometro.elapsed;
-      _etapaValidacaoLocal = null;
+      if (epocaBloqueio == _epocaBloqueio) {
+        cronometro.stop();
+        _tempoProcessamento = cronometro.elapsed;
+        _etapaValidacaoLocal = null;
+      }
     }
     notifyListeners();
   }
@@ -384,6 +396,7 @@ class ValidadorController extends ChangeNotifier {
     List<GuiaValidada> guias,
     String? identificadorPrestador,
   ) async {
+    final int epocaBloqueio = _epocaBloqueio;
     final SulAmericaBackendService? service = _service;
     _limparEstadoConsultas();
     _identificadorPrestadorDaConsulta = identificadorPrestador;
@@ -461,9 +474,13 @@ class ValidadorController extends ChangeNotifier {
         service,
         itens.sublist(inicio, fim),
         _progressoConsultasConcluidas,
+        epocaBloqueio: epocaBloqueio,
       );
-      if (_bloqueioPortal != null) return const <GuiaValidada>[];
+      if (epocaBloqueio != _epocaBloqueio || _bloqueioPortal != null) {
+        return const <GuiaValidada>[];
+      }
     }
+    if (epocaBloqueio != _epocaBloqueio) return const <GuiaValidada>[];
     _atualizarResultado();
     _etapaConsultaBackend = _consultasPendentes.isEmpty
         ? EtapaConsultaBackend.concluida
@@ -475,12 +492,15 @@ class ValidadorController extends ChangeNotifier {
   Future<void> _processarConsultas(
     SulAmericaBackendService service,
     List<ConsultaLoteItem> consultas,
-    int progressoBase,
-  ) async {
+    int progressoBase, {
+    required int epocaBloqueio,
+  }) async {
     final tokenInicial = await _obterTokenSessao(
       service,
       _identificadorPrestadorDaConsulta,
+      epocaBloqueio: epocaBloqueio,
     );
+    if (epocaBloqueio != _epocaBloqueio) return;
     final String? tokenInicialValido = tokenInicial.token;
     if (tokenInicialValido == null) {
       if (_bloqueioPortal != null) return;
@@ -510,6 +530,7 @@ class ValidadorController extends ChangeNotifier {
         idempotencyKey: idempotencyKey,
         consultas: consultas,
       );
+      if (epocaBloqueio != _epocaBloqueio) return;
       final AppException? falha = resposta.fold<AppException?>(
         onSuccess: (_) => null,
         onFailure: (erro) => erro,
@@ -530,7 +551,9 @@ class ValidadorController extends ChangeNotifier {
         final refresh = await _obterTokenSessao(
           service,
           _identificadorPrestadorDaConsulta,
+          epocaBloqueio: epocaBloqueio,
         );
+        if (epocaBloqueio != _epocaBloqueio) return;
         final String? novoToken = refresh.token;
         if (novoToken != null) {
           token = novoToken;
@@ -556,6 +579,7 @@ class ValidadorController extends ChangeNotifier {
             : _limitarRetryAfter(retryAfter);
         tentativasFilaCheia++;
         await _aguardarRetentativa(espera);
+        if (epocaBloqueio != _epocaBloqueio) return;
         _etapaConsultaBackend = EtapaConsultaBackend.consultando;
         continue;
       }
@@ -567,6 +591,7 @@ class ValidadorController extends ChangeNotifier {
         await _aguardarRetentativa(
           _intervalosRetentativa[tentativasTransporte],
         );
+        if (epocaBloqueio != _epocaBloqueio) return;
         tentativasTransporte++;
         _etapaConsultaBackend = EtapaConsultaBackend.consultando;
         continue;
@@ -588,7 +613,14 @@ class ValidadorController extends ChangeNotifier {
       return;
     }
 
-    await _acompanharLote(service, loteAceito, consultas, token, progressoBase);
+    await _acompanharLote(
+      service,
+      loteAceito,
+      consultas,
+      token,
+      progressoBase,
+      epocaBloqueio: epocaBloqueio,
+    );
   }
 
   Future<void> _acompanharLote(
@@ -596,8 +628,9 @@ class ValidadorController extends ChangeNotifier {
     LoteRemoto lote,
     List<ConsultaLoteItem> consultas,
     String tokenInicial,
-    int progressoBase,
-  ) async {
+    int progressoBase, {
+    required int epocaBloqueio,
+  }) async {
     String token = tokenInicial;
     int? ultimoId;
     int reconexoes = 0;
@@ -636,6 +669,7 @@ class ValidadorController extends ChangeNotifier {
           }
         },
       );
+      if (epocaBloqueio != _epocaBloqueio) return;
 
       if (leitura.bloqueio != null) {
         _ativarBloqueio(leitura.bloqueio!);
@@ -643,6 +677,11 @@ class ValidadorController extends ChangeNotifier {
       }
 
       if (leitura.resultado != null) {
+        if (leitura.resultado!.status == 'parcial' &&
+            await _consultarBloqueio()) {
+          return;
+        }
+        if (epocaBloqueio != _epocaBloqueio) return;
         _aplicarResultadoLote(consultas, leitura.resultado!);
         _progressoConsultasConcluidas = max(
           _progressoConsultasConcluidas,
@@ -662,7 +701,9 @@ class ValidadorController extends ChangeNotifier {
         final refresh = await _obterTokenSessao(
           service,
           _identificadorPrestadorDaConsulta,
+          epocaBloqueio: epocaBloqueio,
         );
+        if (epocaBloqueio != _epocaBloqueio) return;
         if (refresh.token != null) {
           token = refresh.token!;
           continue;
@@ -682,10 +723,12 @@ class ValidadorController extends ChangeNotifier {
           await _consultarBloqueio()) {
         return;
       }
+      if (epocaBloqueio != _epocaBloqueio) return;
       if (streamInterrompido && reconexoes < _intervalosRetentativa.length) {
         _etapaConsultaBackend = EtapaConsultaBackend.aguardandoRetentativa;
         notifyListeners();
         await _aguardarRetentativa(_intervalosRetentativa[reconexoes]);
+        if (epocaBloqueio != _epocaBloqueio) return;
         reconexoes++;
         _etapaConsultaBackend = EtapaConsultaBackend.consultando;
         continue;
@@ -970,7 +1013,9 @@ class ValidadorController extends ChangeNotifier {
         _retentativaManualEmAndamento) {
       return;
     }
+    final int epocaBloqueio = _epocaBloqueio;
     if (await _consultarBloqueio()) return;
+    if (epocaBloqueio != _epocaBloqueio) return;
     _retentativaManualEmAndamento = true;
     _etapaConsultaBackend = EtapaConsultaBackend.consultando;
     final List<ConsultaLoteItem> consultas = _consultasPendentes.values
@@ -992,14 +1037,18 @@ class ValidadorController extends ChangeNotifier {
           service,
           consultas.sublist(inicio, fim),
           _progressoConsultasConcluidas,
+          epocaBloqueio: epocaBloqueio,
         );
+        if (epocaBloqueio != _epocaBloqueio) return;
       }
       _etapaConsultaBackend = _consultasPendentes.isEmpty
           ? EtapaConsultaBackend.concluida
           : EtapaConsultaBackend.pendente;
     } finally {
-      _retentativaManualEmAndamento = false;
-      notifyListeners();
+      if (epocaBloqueio == _epocaBloqueio) {
+        _retentativaManualEmAndamento = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -1086,8 +1135,9 @@ class ValidadorController extends ChangeNotifier {
   Future<({String? token, String? mensagemErro, AppException? falha})>
   _obterTokenSessao(
     SulAmericaBackendService service,
-    String? identificadorPrestador,
-  ) async {
+    String? identificadorPrestador, {
+    required int epocaBloqueio,
+  }) async {
     if (identificadorPrestador == null) {
       return (
         token: null,
@@ -1103,12 +1153,18 @@ class ValidadorController extends ChangeNotifier {
     Result<String> resultado = await service.criarSessao(
       identificadorPrestador: identificadorPrestador,
     );
+    if (epocaBloqueio != _epocaBloqueio) {
+      return (token: null, mensagemErro: null, falha: null);
+    }
     AppException? falha = resultado.fold<AppException?>(
       onSuccess: (_) => null,
       onFailure: (erro) => erro,
     );
     if (await _consultarBloqueioAposFalha(falha)) {
       return (token: null, mensagemErro: falha!.mensagem, falha: falha);
+    }
+    if (epocaBloqueio != _epocaBloqueio) {
+      return (token: null, mensagemErro: null, falha: null);
     }
     final Duration? retryAfter = falha == null ? null : _retryAfter(falha);
     if ((falha is FilaCheiaException ||
@@ -1117,16 +1173,25 @@ class ValidadorController extends ChangeNotifier {
       _etapaConsultaBackend = EtapaConsultaBackend.aguardandoRetentativa;
       notifyListeners();
       await _aguardarRetentativa(_limitarRetryAfter(retryAfter));
+      if (epocaBloqueio != _epocaBloqueio) {
+        return (token: null, mensagemErro: null, falha: null);
+      }
       _etapaConsultaBackend = EtapaConsultaBackend.consultando;
       resultado = await service.criarSessao(
         identificadorPrestador: identificadorPrestador,
       );
+      if (epocaBloqueio != _epocaBloqueio) {
+        return (token: null, mensagemErro: null, falha: null);
+      }
       falha = resultado.fold<AppException?>(
         onSuccess: (_) => null,
         onFailure: (erro) => erro,
       );
       if (await _consultarBloqueioAposFalha(falha)) {
         return (token: null, mensagemErro: falha!.mensagem, falha: falha);
+      }
+      if (epocaBloqueio != _epocaBloqueio) {
+        return (token: null, mensagemErro: null, falha: null);
       }
     }
 

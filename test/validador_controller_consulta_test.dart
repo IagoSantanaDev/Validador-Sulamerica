@@ -285,6 +285,10 @@ void main() {
         expect(controller.nomeArquivo, isNull);
         expect(controller.guias, isEmpty);
         expect(controller.bloqueioPortal?.codigo, 'F5');
+        expect(
+          controller.etapaConsultaBackend,
+          EtapaConsultaBackend.naoIniciada,
+        );
         expect(service.lotes, hasLength(1));
       },
     );
@@ -346,7 +350,88 @@ void main() {
         expect(controller.guias, isEmpty);
         expect(controller.temConsultasPendentes, isFalse);
         expect(controller.bloqueioPortal?.codigo, '429');
+        expect(
+          controller.etapaConsultaBackend,
+          EtapaConsultaBackend.naoIniciada,
+        );
         expect(service.lotes, hasLength(2));
+      },
+    );
+
+    test(
+      'não mantém pendências quando o bloqueio abre junto ao resultado SSE',
+      () async {
+        const Map<String, Object?> bloqueio = {
+          'ativo': true,
+          'motivo': 'limite_portal',
+          'codigo': '429',
+          'mensagem': 'Limite de consultas do portal atingido (429)',
+          'retryAfterSegundos': 120,
+        };
+        final Map<String, String> pendencia = {
+          'tipo': 'elegibilidade',
+          'chave': _carteira,
+          'motivo': 'tentativas_esgotadas',
+        };
+        final _FakeAsyncBackend service = _FakeAsyncBackend()
+          ..respostasStatus.addAll([
+            Result.success({
+              'bloqueio': {'ativo': false},
+            }),
+            Result.success({
+              'bloqueio': {'ativo': false},
+            }),
+            Result.success({
+              'bloqueio': {'ativo': false},
+            }),
+            Result.success({'bloqueio': bloqueio}),
+          ])
+          ..streams.addAll([
+            _resultadoStream(
+              [
+                _resultado(
+                  chave: _carteira,
+                  sucesso: false,
+                  erro: 'Falha na consulta ao portal SulAmerica.',
+                ),
+              ],
+              status: 'parcial',
+              pendentes: [pendencia],
+            ),
+            _resultadoStream(
+              [
+                _resultado(
+                  chave: _carteira,
+                  sucesso: false,
+                  erro: 'Falha na consulta ao portal SulAmerica.',
+                ),
+              ],
+              status: 'parcial',
+              pendentes: [pendencia],
+            ),
+          ]);
+        final ValidadorController controller = await _validar(
+          _novoController(
+            service: service,
+            retorno: const [GuiaValidada(guia: _guiaSemSenha, erros: [])],
+          ),
+        );
+        addTearDown(controller.dispose);
+
+        expect(controller.temConsultasPendentes, isTrue);
+        expect(controller.etapaConsultaBackend, EtapaConsultaBackend.pendente);
+
+        await controller.retentarConsultasPendentes();
+
+        expect(controller.status, StatusValidador.semArquivo);
+        expect(controller.nomeArquivo, isNull);
+        expect(controller.guias, isEmpty);
+        expect(controller.temConsultasPendentes, isFalse);
+        expect(
+          controller.etapaConsultaBackend,
+          EtapaConsultaBackend.naoIniciada,
+        );
+        expect(controller.bloqueioPortal?.codigo, '429');
       },
     );
 
