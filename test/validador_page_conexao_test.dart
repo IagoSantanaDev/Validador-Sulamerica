@@ -63,7 +63,7 @@ void main() {
     expect(find.text(AppStrings.dropZoneTexto), findsOneWidget);
   });
 
-  testWidgets('API indisponível não bloqueia a seleção de XML', (
+  testWidgets('oculta a dropzone quando a API está indisponível', (
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(const MaterialApp(home: ValidadorPage()));
@@ -72,7 +72,7 @@ void main() {
     expect(find.text(AppStrings.apiIndisponivelTitulo), findsOneWidget);
     expect(find.text(AppStrings.apiTentarNovamente), findsOneWidget);
     expect(find.text(AppStrings.apiVerificandoTitulo), findsNothing);
-    expect(find.text(AppStrings.dropZoneTexto), findsOneWidget);
+    expect(find.text(AppStrings.dropZoneTexto), findsNothing);
   });
 
   testWidgets('mostra causa e contagem regressiva do bloqueio global', (
@@ -108,12 +108,6 @@ void main() {
 
     expect(find.text('Consultas temporariamente bloqueadas (429)'), findsOneWidget);
     expect(find.textContaining('01:30'), findsOneWidget);
-    expect(find.text(AppStrings.dropZoneTexto), findsOneWidget);
-    expect(
-      tester
-          .widgetList<AbsorbPointer>(find.byType(AbsorbPointer))
-          .any((AbsorbPointer widget) => widget.absorbing),
-      isTrue,
-    );
+    expect(find.text(AppStrings.dropZoneTexto), findsNothing);
   });
 }

@@ -144,18 +144,13 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
                   const SizedBox(height: AppDimens.spaceLg),
                   _painelConexao(c, conexao),
                 ],
-                if (conexao != EstadoConexao.verificando) ...[
+                if (conexao == EstadoConexao.pronto &&
+                    c.bloqueioPortal == null) ...[
                   const SizedBox(height: AppDimens.spaceLg),
-                  AbsorbPointer(
-                    absorbing: c.bloqueioPortal != null,
-                    child: Opacity(
-                      opacity: c.bloqueioPortal == null ? 1 : 0.5,
-                      child: DropZoneSite(
-                        onArquivoSelecionado: (nome, bytes) {
-                          unawaited(_selecionarArquivo(nome, bytes));
-                        },
-                      ),
-                    ),
+                  DropZoneSite(
+                    onArquivoSelecionado: (nome, bytes) {
+                      unawaited(_selecionarArquivo(nome, bytes));
+                    },
                   ),
                 ],
                 if (c.status == StatusValidador.erro && c.mensagemErro != null)
