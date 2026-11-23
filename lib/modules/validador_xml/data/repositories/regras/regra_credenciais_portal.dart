@@ -1,17 +1,11 @@
 class RegraCredenciaisPortal {
   const RegraCredenciaisPortal();
 
-  static const String _cnpjCemed = '27372066000673';
-  static const String _cnpjHsr = '27372066000169';
-
-  static const Set<String> _identificadoresPrestadores = {
-    _cnpjCemed,
-    _cnpjHsr,
-  };
-
   String? resolver(String? identificadorPrestador) {
     final String chave = _apenasDigitos(identificadorPrestador);
-    return _identificadoresPrestadores.contains(chave) ? chave : null;
+    if (chave.length != 14) return null;
+    if (chave.split('').toSet().length == 1) return null;
+    return chave;
   }
 
   String _apenasDigitos(String? valor) =>
