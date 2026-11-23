@@ -152,11 +152,17 @@ class ExecucaoLote {
 
   /// Cancelamento explícito, também usado quando a carência sem assinantes
   /// expira. O callback roda no máximo uma vez por execução.
-  void cancelar() {
+  void cancelar({
+    String mensagem = 'Lote cancelado.',
+    Map<String, dynamic>? bloqueio,
+  }) {
     if (!ativo) return;
     _finalizar();
     _estado = EstadoExecucaoLote.cancelado;
-    _emitir('erro', <String, dynamic>{'mensagem': 'Lote cancelado.'});
+    _emitir('erro', <String, dynamic>{
+      'mensagem': mensagem,
+      if (bloqueio != null) 'bloqueio': bloqueio,
+    });
     _executarCancelamento();
     _encerrarAssinantes();
   }
@@ -191,7 +197,7 @@ class ExecucaoLote {
 
   void _aoAssinar(_Assinante assinante, int? desde) {
     _enviar(assinante, codificarRetrySse(const Duration(seconds: 3)));
-    if (ativo) {
+    if (ativo || _estado == EstadoExecucaoLote.cancelado) {
       for (final EventoExecucao evento in _eventos) {
         if (desde == null || evento.id > desde) {
           _enviar(assinante, evento.codificar());
