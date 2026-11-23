@@ -289,6 +289,67 @@ void main() {
       },
     );
 
+    test(
+      'retry manual de pendência entra no bloqueio ao receber erro SSE',
+      () async {
+        const Map<String, Object?> bloqueio = {
+          'ativo': true,
+          'motivo': 'limite_portal',
+          'codigo': '429',
+          'mensagem': 'Limite de consultas do portal atingido (429)',
+          'retryAfterSegundos': 120,
+        };
+        final _FakeAsyncBackend service = _FakeAsyncBackend()
+          ..streams.addAll([
+            _resultadoStream(
+              [
+                _resultado(
+                  chave: _carteira,
+                  sucesso: false,
+                  erro: 'Falha na consulta ao portal SulAmerica.',
+                ),
+              ],
+              status: 'parcial',
+              pendentes: [
+                {
+                  'tipo': 'elegibilidade',
+                  'chave': _carteira,
+                  'motivo': 'tentativas_esgotadas',
+                },
+              ],
+            ),
+            Stream<EventoSse>.value(
+              EventoSse(
+                id: '1',
+                evento: 'erro',
+                dados: jsonEncode({
+                  'mensagem': bloqueio['mensagem'],
+                  'bloqueio': bloqueio,
+                }),
+              ),
+            ),
+          ]);
+        final ValidadorController controller = await _validar(
+          _novoController(
+            service: service,
+            retorno: const [GuiaValidada(guia: _guiaSemSenha, erros: [])],
+          ),
+        );
+        addTearDown(controller.dispose);
+
+        expect(controller.temConsultasPendentes, isTrue);
+
+        await controller.retentarConsultasPendentes();
+
+        expect(controller.status, StatusValidador.semArquivo);
+        expect(controller.nomeArquivo, isNull);
+        expect(controller.guias, isEmpty);
+        expect(controller.temConsultasPendentes, isFalse);
+        expect(controller.bloqueioPortal?.codigo, '429');
+        expect(service.lotes, hasLength(2));
+      },
+    );
+
     test('503 consulta status antes de tentar novamente', () async {
       const Map<String, dynamic> bloqueio = {
         'ativo': true,
