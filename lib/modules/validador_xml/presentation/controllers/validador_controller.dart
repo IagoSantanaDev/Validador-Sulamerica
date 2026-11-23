@@ -1018,6 +1018,7 @@ class ValidadorController extends ChangeNotifier {
     if (epocaBloqueio != _epocaBloqueio) return;
     _retentativaManualEmAndamento = true;
     _etapaConsultaBackend = EtapaConsultaBackend.consultando;
+    _mensagemAvisoConsultaBackend = null;
     final List<ConsultaLoteItem> consultas = _consultasPendentes.values
         .toList();
     _totalConsultas = consultas.length;
@@ -1040,6 +1041,9 @@ class ValidadorController extends ChangeNotifier {
           epocaBloqueio: epocaBloqueio,
         );
         if (epocaBloqueio != _epocaBloqueio) return;
+      }
+      if (_consultasPendentes.isEmpty) {
+        _mensagemAvisoConsultaBackend = null;
       }
       _etapaConsultaBackend = _consultasPendentes.isEmpty
           ? EtapaConsultaBackend.concluida

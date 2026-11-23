@@ -703,6 +703,11 @@ void main() {
         expect(esperas, isEmpty);
         expect(controller.temConsultasPendentes, isTrue);
         expect(controller.mensagemAvisoConsultaBackend, contains('fila'));
+
+        await controller.retentarConsultasPendentes();
+
+        expect(controller.temConsultasPendentes, isFalse);
+        expect(controller.mensagemAvisoConsultaBackend, isNull);
       },
     );
 
