@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -8,13 +9,17 @@ import 'package:validador_xml_sulamerica/modules/validador_xml/data/repositories
 import 'package:validador_xml_sulamerica/modules/validador_xml/presentation/controllers/validador_controller.dart';
 
 class _FakeValidadorGuiasRepository implements ValidadorGuiasRepository {
-  _FakeValidadorGuiasRepository(this.retorno);
+  _FakeValidadorGuiasRepository(this.retorno, {this.aoPreparar});
 
   final List<GuiaValidada> retorno;
+  final Future<void> Function()? aoPreparar;
   List<GuiaTiss>? guiasValidadas;
 
   @override
-  Future<void> preparar() async {}
+  Future<void> preparar() async {
+    final Future<void> Function()? callback = aoPreparar;
+    if (callback != null) await callback();
+  }
 
   @override
   List<GuiaValidada> validarLote(String conteudoXml) => retorno;
@@ -39,23 +44,19 @@ void main() {
   );
 
   List<GuiaValidada> loteComErroEValida() => const [
-        GuiaValidada(
-          guia: guiaComErro,
-          erros: [
-            ErroValidacao(
-              campo: 'senha',
-              mensagem: 'senha deve começar com 5',
-            ),
-          ],
-        ),
-        GuiaValidada(guia: guiaValida, erros: []),
-      ];
+    GuiaValidada(
+      guia: guiaComErro,
+      erros: [
+        ErroValidacao(campo: 'senha', mensagem: 'senha deve começar com 5'),
+      ],
+    ),
+    GuiaValidada(guia: guiaValida, erros: []),
+  ];
 
-  Future<ValidadorController> validarLote(
-    List<GuiaValidada> retorno,
-  ) async {
-    final ValidadorController controller =
-        ValidadorController(repository: _FakeValidadorGuiasRepository(retorno));
+  Future<ValidadorController> validarLote(List<GuiaValidada> retorno) async {
+    final ValidadorController controller = ValidadorController(
+      repository: _FakeValidadorGuiasRepository(retorno),
+    );
     controller.definirArquivo(
       nomeArquivo: 'lote.xml',
       bytes: Uint8List.fromList(
@@ -67,13 +68,41 @@ void main() {
   }
 
   group('ValidadorController - exibição de erros', () {
+    test('expõe a etapa enquanto prepara a base local', () async {
+      final Completer<void> preparar = Completer<void>();
+      final ValidadorController controller = ValidadorController(
+        repository: _FakeValidadorGuiasRepository(
+          const [],
+          aoPreparar: () => preparar.future,
+        ),
+      );
+      controller.definirArquivo(
+        nomeArquivo: 'lote.xml',
+        bytes: Uint8List.fromList(
+          '<mensagemTISS><loteGuias><guiaSP-SADT/></loteGuias></mensagemTISS>'
+              .codeUnits,
+        ),
+      );
+
+      final Future<void> validacao = controller.validar();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(
+        controller.etapaValidacaoLocal,
+        EtapaValidacaoLocal.carregandoBaseTuss,
+      );
+      preparar.complete();
+      await validacao;
+    });
+
     test('preserva metadados do XML extraído com as guias', () async {
       final _FakeValidadorGuiasRepository repository =
           _FakeValidadorGuiasRepository(const [
-        GuiaValidada(guia: guiaValida, erros: []),
-      ]);
-      final ValidadorController controller =
-          ValidadorController(repository: repository);
+            GuiaValidada(guia: guiaValida, erros: []),
+          ]);
+      final ValidadorController controller = ValidadorController(
+        repository: repository,
+      );
       const String xml = '''
 <mensagemTISS>
   <cabecalho>
@@ -105,8 +134,9 @@ void main() {
     });
 
     test('expõe apenas as guias com erro, apesar do lote completo', () async {
-      final ValidadorController controller =
-          await validarLote(loteComErroEValida());
+      final ValidadorController controller = await validarLote(
+        loteComErroEValida(),
+      );
 
       expect(controller.status, StatusValidador.concluido);
       expect(controller.totalGuias, 2);
@@ -116,9 +146,9 @@ void main() {
     });
 
     test('lote sem erros fica com a lista de erros vazia', () async {
-      final ValidadorController controller = await validarLote(
-        const [GuiaValidada(guia: guiaValida, erros: [])],
-      );
+      final ValidadorController controller = await validarLote(const [
+        GuiaValidada(guia: guiaValida, erros: []),
+      ]);
 
       expect(controller.status, StatusValidador.concluido);
       expect(controller.totalGuias, 1);

@@ -31,6 +31,14 @@ enum StatusValidador { semArquivo, arquivoPronto, validando, concluido, erro }
 
 enum EstadoConexao { verificando, apiIndisponivel, pronto }
 
+enum EtapaValidacaoLocal {
+  verificandoDisponibilidade,
+  lendoXml,
+  carregandoBaseTuss,
+  extraindoGuias,
+  validandoGuias,
+}
+
 enum EtapaConsultaBackend {
   naoIniciada,
   consultando,
@@ -97,8 +105,10 @@ class ValidadorController extends ChangeNotifier {
   bool _disposed = false;
   BloqueioPortal? _bloqueioPortal;
   Timer? _timerBloqueio;
+  EtapaValidacaoLocal? _etapaValidacaoLocal;
 
   EtapaConsultaBackend get etapaConsultaBackend => _etapaConsultaBackend;
+  EtapaValidacaoLocal? get etapaValidacaoLocal => _etapaValidacaoLocal;
   BloqueioPortal? get bloqueioPortal => _bloqueioPortal;
   int get totalConsultasPendentes => _consultasPendentes.length;
   bool get temConsultasPendentes => _consultasPendentes.isNotEmpty;
@@ -230,6 +240,7 @@ class ValidadorController extends ChangeNotifier {
     _informacoes = InformacoesLote.vazio;
     _hashMd5 = null;
     _tempoProcessamento = Duration.zero;
+    _etapaValidacaoLocal = null;
     _limparEstadoConsultas();
     _descartandoLoteBloqueado = false;
     notifyListeners();
@@ -278,6 +289,7 @@ class ValidadorController extends ChangeNotifier {
     _bytesArquivo = bytes;
     _status = StatusValidador.arquivoPronto;
     _mensagemErro = null;
+    _etapaValidacaoLocal = null;
     _resultado = const [];
     _limparEstadoConsultas();
     _informacoes = InformacoesLote.vazio;
@@ -286,11 +298,17 @@ class ValidadorController extends ChangeNotifier {
   }
 
   Future<void> validar() async {
+    _etapaValidacaoLocal = EtapaValidacaoLocal.verificandoDisponibilidade;
+    notifyListeners();
     if (await _consultarBloqueio()) return;
     final Uint8List? bytes = _bytesArquivo;
-    if (bytes == null) return;
+    if (bytes == null) {
+      _etapaValidacaoLocal = null;
+      return;
+    }
 
     _status = StatusValidador.validando;
+    _etapaValidacaoLocal = EtapaValidacaoLocal.lendoXml;
     _mensagemErro = null;
     _limparEstadoConsultas();
     notifyListeners();
@@ -298,9 +316,15 @@ class ValidadorController extends ChangeNotifier {
     final Stopwatch cronometro = Stopwatch()..start();
     try {
       final String conteudoXml = _decodificarXml(bytes);
+      _etapaValidacaoLocal = EtapaValidacaoLocal.carregandoBaseTuss;
+      notifyListeners();
       await _repository.preparar();
+      _etapaValidacaoLocal = EtapaValidacaoLocal.extraindoGuias;
+      notifyListeners();
       final LoteGuiasExtraido lote = _datasource.extrairLote(conteudoXml);
       final InformacoesLote informacoes = lote.informacoes;
+      _etapaValidacaoLocal = EtapaValidacaoLocal.validandoGuias;
+      notifyListeners();
       final List<GuiaValidada> resultadoBruto = await Future(
         () => _repository.validarGuias(lote.guias),
       );
@@ -338,6 +362,7 @@ class ValidadorController extends ChangeNotifier {
     } finally {
       cronometro.stop();
       _tempoProcessamento = cronometro.elapsed;
+      _etapaValidacaoLocal = null;
     }
     notifyListeners();
   }

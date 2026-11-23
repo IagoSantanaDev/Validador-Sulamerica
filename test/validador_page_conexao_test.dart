@@ -10,6 +10,7 @@ import 'package:validador_xml_sulamerica/globals/constants/app_strings.dart';
 import 'package:validador_xml_sulamerica/globals/network/dio_client.dart';
 import 'package:validador_xml_sulamerica/modules/validador_xml/data/services/sul_america_backend_service.dart';
 import 'package:validador_xml_sulamerica/modules/validador_xml/presentation/pages/validador_page.dart';
+import 'package:validador_xml_sulamerica/modules/validador_xml/presentation/widgets/drop_zone_site.dart';
 
 class _AdapterStatusPendente implements HttpClientAdapter {
   final Completer<ResponseBody> resposta = Completer<ResponseBody>();
@@ -25,6 +26,41 @@ class _AdapterStatusPendente implements HttpClientAdapter {
   ) {
     return resposta.future;
   }
+}
+
+class _AdapterStatusSequencial implements HttpClientAdapter {
+  _AdapterStatusSequencial(this.respostas);
+
+  final List<Future<ResponseBody>> respostas;
+  int _indice = 0;
+
+  @override
+  void close({bool force = false}) {}
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) => respostas[_indice++];
+}
+
+ResponseBody _respostaStatus({
+  required bool bloqueado,
+  int retryAfterSegundos = 0,
+}) {
+  return ResponseBody.fromBytes(
+    utf8.encode(
+      '{"status":"ok","bloqueio":{"ativo":$bloqueado,'
+      '"motivo":"limite_portal","codigo":"429",'
+      '"mensagem":"Limite de consultas do portal atingido (429)",'
+      '"retryAfterSegundos":$retryAfterSegundos}}',
+    ),
+    200,
+    headers: {
+      Headers.contentTypeHeader: [Headers.jsonContentType],
+    },
+  );
 }
 
 void main() {
@@ -116,5 +152,63 @@ void main() {
       tester.getTopLeft(tituloBloqueio).dy,
       greaterThan(tester.getTopLeft(find.text(AppStrings.jumbotronLegenda)).dy),
     );
+  });
+
+  testWidgets('revalida o mesmo XML após um bloqueio interromper a validação', (
+    WidgetTester tester,
+  ) async {
+    final GetIt getIt = GetIt.instance;
+    final Completer<ResponseBody> validacaoAposBloqueio =
+        Completer<ResponseBody>();
+    final _AdapterStatusSequencial adapter = _AdapterStatusSequencial([
+      Future.value(_respostaStatus(bloqueado: false)),
+      Future.value(_respostaStatus(bloqueado: false)),
+      Future.value(
+        _respostaStatus(bloqueado: true, retryAfterSegundos: 1),
+      ),
+      Future.value(_respostaStatus(bloqueado: false)),
+      Future.value(_respostaStatus(bloqueado: false)),
+      validacaoAposBloqueio.future,
+    ]);
+    final Dio dio = Dio()..httpClientAdapter = adapter;
+    getIt.registerSingleton<SulAmericaBackendService>(
+      SulAmericaBackendService(
+        DioClient(baseUrl: 'http://localhost', dio: dio),
+      ),
+    );
+    addTearDown(() => getIt.reset());
+
+    await tester.pumpWidget(const MaterialApp(home: ValidadorPage()));
+    await tester.pumpAndSettle();
+
+    DropZoneSite dropzone = tester.widget(find.byType(DropZoneSite));
+    dropzone.onArquivoSelecionado(
+      'lote.xml',
+      Uint8List.fromList('<mensagemTISS/>'.codeUnits),
+    );
+    for (int i = 0; i < 5; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    expect(
+      find.text('Consultas temporariamente bloqueadas (429)'),
+      findsOneWidget,
+    );
+
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpAndSettle();
+    expect(find.byType(DropZoneSite), findsOneWidget);
+
+    dropzone = tester.widget(find.byType(DropZoneSite));
+    dropzone.onArquivoSelecionado(
+      'lote.xml',
+      Uint8List.fromList('<mensagemTISS/>'.codeUnits),
+    );
+    for (int i = 0; i < 5; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    expect(find.text(AppStrings.verificandoDisponibilidade), findsOneWidget);
+    expect(adapter._indice, 6);
   });
 }

@@ -99,12 +99,7 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
 
     if (c.status == StatusValidador.arquivoPronto ||
         c.status == StatusValidador.validando) {
-      final String textoEtapa = switch (c.etapaConsultaBackend) {
-        EtapaConsultaBackend.consultando => AppStrings.consultandoSulAmerica,
-        EtapaConsultaBackend.aguardandoRetentativa =>
-          AppStrings.consultasAguardandoRetentativa,
-        _ => AppStrings.lendoValidandoXml,
-      };
+      final String textoEtapa = _textoEtapaValidacao(c);
       return Center(
         child: Padding(
           padding: const EdgeInsets.only(top: AppDimens.spaceXs),
@@ -174,6 +169,26 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
     );
   }
 
+  String _textoEtapaValidacao(ValidadorController controller) {
+    if (controller.etapaConsultaBackend ==
+        EtapaConsultaBackend.consultando) {
+      return AppStrings.consultandoSulAmerica;
+    }
+    if (controller.etapaConsultaBackend ==
+        EtapaConsultaBackend.aguardandoRetentativa) {
+      return AppStrings.consultasAguardandoRetentativa;
+    }
+    return switch (controller.etapaValidacaoLocal) {
+      EtapaValidacaoLocal.verificandoDisponibilidade =>
+        AppStrings.verificandoDisponibilidade,
+      EtapaValidacaoLocal.lendoXml => AppStrings.lendoXml,
+      EtapaValidacaoLocal.carregandoBaseTuss => AppStrings.carregandoBaseTuss,
+      EtapaValidacaoLocal.extraindoGuias => AppStrings.extraindoGuias,
+      EtapaValidacaoLocal.validandoGuias => AppStrings.validandoGuiasLocais,
+      null => AppStrings.lendoValidandoXml,
+    };
+  }
+
   Widget _painelBloqueio(ValidadorController controller) {
     final bloqueio = controller.bloqueioPortal!;
     final int minutos = bloqueio.segundosRestantes ~/ 60;
@@ -205,6 +220,8 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
   Future<void> _selecionarArquivo(String nome, Uint8List bytes) async {
     final ValidadorController controller = context.read<ValidadorController>();
     if (await controller.verificarBloqueioAgora() || !mounted) return;
+    _ultimoValidadoNome = null;
+    _identificador = null;
     controller.definirArquivo(nomeArquivo: nome, bytes: bytes);
   }
 
