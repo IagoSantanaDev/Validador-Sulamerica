@@ -46,7 +46,8 @@ autenticada no pool.
 - `201`: `{ "token": "<32 hex>", "identificadorPrestador": "..." }`
 - `400`: identificador ausente ou vazio.
 - `401`: identificador desconhecido ou credencial recusada.
-- `429`: limite local de taxa ou capacidade, sem `Retry-After`.
+- `429`: limite local de taxa inclui `Retry-After`; capacidade de sessões
+  esgotada pode não incluir o header.
 - `503`: bloqueio global do portal, com `Retry-After` e um objeto `bloqueio`
   contendo `ativo`, `motivo`, `codigo`, `mensagem` e `retryAfterSegundos`.
 - `500` ou `502`: falha interna ou resposta inesperada, sem detalhe interno.
@@ -68,7 +69,8 @@ autenticada no pool.
 `202 Accepted` devolve `id`, `estado` e `total`, com `Location` apontando para
 `/api/lotes/{id}/eventos`. Repetir a chave com o mesmo payload retorna a
 execução existente; payload diferente retorna `409`. Limite acima de 300 itens
-retorna `413`; capacidade esgotada retorna `429` sem `Retry-After`.
+retorna `413`. O limite local de taxa retorna `429` com `Retry-After`;
+capacidade da fila esgotada retorna `429` sem esse header.
 Submissões novas retornam `503` com o bloqueio ativo; um replay idempotente
 válido continua retornando a execução original.
 

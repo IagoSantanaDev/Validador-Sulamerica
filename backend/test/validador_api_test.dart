@@ -169,9 +169,9 @@ Request _request(
   Uri.parse('http://localhost$path'),
   body: body == null ? null : jsonEncode(body),
   headers: <String, String>{
-    if (token != null) 'authorization': 'Bearer $token',
-    if (idempotencyKey != null) 'idempotency-key': idempotencyKey,
-    ...?headers,
+        if (token != null) 'authorization': 'Bearer $token',
+        if (idempotencyKey != null) 'idempotency-key': idempotencyKey,
+        ...?headers,
   },
 );
 
@@ -914,6 +914,24 @@ void main() {
   });
 
   group('limites e CORS', () {
+    test('limite de criação de lote informa Retry-After da API', () async {
+      final _ContextoApi contexto = _criarApi(limitePorChave: 1);
+      final String token = await _criarSessao(contexto.api);
+      final Response aceito = await _criarLote(contexto.api, token, 'batch-1');
+      final Response limitada = await _criarLote(
+        contexto.api,
+        token,
+        'batch-2',
+      );
+
+      expect(aceito.statusCode, 202);
+      expect(limitada.statusCode, 429);
+      expect(limitada.headers['retry-after'], '60');
+
+      contexto.gate.complete();
+      await _aguardar(() async => await _ativos(contexto.api) == 0);
+    });
+
     test('fila cheia responde 429 sem Retry-After', () async {
       final _ContextoApi contexto = _criarApi();
       final String token = await _criarSessao(contexto.api);

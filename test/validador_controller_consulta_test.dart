@@ -685,11 +685,16 @@ void main() {
     });
 
     test(
-      '429 de sessão sem Retry-After não repete e deixa consulta pendente',
+      '429 de sessão sem Retry-After usa espera progressiva até sucesso',
       () async {
-        final _FakeAsyncBackend service = _FakeAsyncBackend()
-          ..respostasSessao.add(Result.failure(const FilaCheiaException()));
         final List<Duration> esperas = [];
+        final _FakeAsyncBackend service = _FakeAsyncBackend()
+          ..respostasSessao.addAll([
+            Result.failure(const FilaCheiaException()),
+            Result.failure(const FilaCheiaException()),
+            Result.failure(const FilaCheiaException()),
+            Result.success('token-liberado'),
+          ]);
         final ValidadorController controller = await _validar(
           _novoController(
             service: service,
@@ -698,21 +703,20 @@ void main() {
           ),
         );
 
-        expect(service.chamadasSessao, 1);
-        expect(service.lotes, isEmpty);
-        expect(esperas, isEmpty);
-        expect(controller.temConsultasPendentes, isTrue);
-        expect(controller.mensagemAvisoConsultaBackend, contains('fila'));
-
-        await controller.retentarConsultasPendentes();
-
+        expect(service.chamadasSessao, 4);
+        expect(esperas, [
+          const Duration(seconds: 1),
+          const Duration(seconds: 2),
+          const Duration(seconds: 4),
+        ]);
+        expect(controller.status, StatusValidador.concluido);
         expect(controller.temConsultasPendentes, isFalse);
         expect(controller.mensagemAvisoConsultaBackend, isNull);
       },
     );
 
     test(
-      '429 do lote usa a mesma chave e Retry-After limitado a 60 segundos',
+      '429 do lote aguarda Retry-After até conseguir criar o lote',
       () async {
         final List<Duration> esperas = [];
         final _FakeAsyncBackend service = _FakeAsyncBackend()
@@ -720,9 +724,14 @@ void main() {
             Result.failure(
               const FilaCheiaException(retryAfter: Duration(seconds: 90)),
             ),
-            Result.failure(const FilaCheiaException()),
+            Result.failure(
+              const FilaCheiaException(retryAfter: Duration(seconds: 30)),
+            ),
             Result.failure(
               const FilaCheiaException(retryAfter: Duration(seconds: 10)),
+            ),
+            Result.failure(
+              const FilaCheiaException(retryAfter: Duration(seconds: 5)),
             ),
           ]);
         final ValidadorController controller = await _validar(
@@ -733,14 +742,50 @@ void main() {
           ),
         );
 
-        expect(service.lotes, hasLength(4));
+        expect(service.lotes, hasLength(5));
         expect(service.chavesIdempotencia.toSet(), hasLength(1));
         expect(esperas, [
-          const Duration(seconds: 60),
-          const Duration(seconds: 2),
+          const Duration(seconds: 90),
+          const Duration(seconds: 30),
           const Duration(seconds: 10),
+          const Duration(seconds: 5),
         ]);
+        expect(controller.status, StatusValidador.concluido);
+        expect(controller.temConsultasPendentes, isFalse);
         expect(controller.guias.single.consulta?.descricao, 'Elegível: SIM');
+      },
+    );
+
+    test(
+      '429 do lote sem Retry-After usa espera progressiva até sucesso',
+      () async {
+        final List<Duration> esperas = [];
+        final _FakeAsyncBackend service = _FakeAsyncBackend()
+          ..respostasLote.addAll(
+            List<Result<LoteRemoto>>.generate(
+              4,
+              (_) => Result.failure(const FilaCheiaException()),
+            ),
+          );
+        final ValidadorController controller = await _validar(
+          _novoController(
+            service: service,
+            retorno: const [GuiaValidada(guia: _guiaSemSenha, erros: [])],
+            esperas: esperas,
+          ),
+        );
+
+        expect(service.lotes, hasLength(5));
+        expect(service.chavesIdempotencia.toSet(), hasLength(1));
+        expect(esperas, [
+          const Duration(seconds: 1),
+          const Duration(seconds: 2),
+          const Duration(seconds: 4),
+          const Duration(seconds: 4),
+        ]);
+        expect(controller.status, StatusValidador.concluido);
+        expect(controller.temConsultasPendentes, isFalse);
+        expect(controller.mensagemAvisoConsultaBackend, isNull);
       },
     );
 

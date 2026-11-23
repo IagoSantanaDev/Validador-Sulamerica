@@ -568,12 +568,29 @@ class ValidadorController extends ChangeNotifier {
         break;
       }
 
-      if ((falha is FilaCheiaException ||
-              falha is ServicoIndisponivelException) &&
+      final Duration? retryAfter = _retryAfter(falha);
+      if (falha is FilaCheiaException) {
+        _etapaConsultaBackend = EtapaConsultaBackend.aguardandoRetentativa;
+        notifyListeners();
+        final Duration espera =
+            retryAfter ??
+            _intervalosFilaCheia[
+              min(tentativasFilaCheia, _intervalosFilaCheia.length - 1)
+            ];
+        if (retryAfter == null &&
+            tentativasFilaCheia < _intervalosFilaCheia.length - 1) {
+          tentativasFilaCheia++;
+        }
+        await _aguardarRetentativa(espera);
+        if (epocaBloqueio != _epocaBloqueio) return;
+        _etapaConsultaBackend = EtapaConsultaBackend.consultando;
+        continue;
+      }
+
+      if (falha is ServicoIndisponivelException &&
           tentativasFilaCheia < _intervalosFilaCheia.length) {
         _etapaConsultaBackend = EtapaConsultaBackend.aguardandoRetentativa;
         notifyListeners();
-        final Duration? retryAfter = _retryAfter(falha);
         final Duration espera = retryAfter == null
             ? _intervalosFilaCheia[tentativasFilaCheia]
             : _limitarRetryAfter(retryAfter);
@@ -1157,6 +1174,7 @@ class ValidadorController extends ChangeNotifier {
     late Result<String> resultado;
     AppException? falha;
     bool repetiuServicoIndisponivel = false;
+    int tentativasFilaCheia = 0;
     while (true) {
       resultado = await service.criarSessao(
         identificadorPrestador: identificadorPrestador,
@@ -1176,13 +1194,22 @@ class ValidadorController extends ChangeNotifier {
       }
 
       final Duration? espera = switch (falha) {
-        FilaCheiaException(retryAfter: final Duration duracao) => duracao,
+        FilaCheiaException(retryAfter: final Duration? duracao) =>
+          duracao ??
+              _intervalosFilaCheia[
+                min(tentativasFilaCheia, _intervalosFilaCheia.length - 1)
+              ],
         ServicoIndisponivelException(retryAfter: final Duration duracao)
             when !repetiuServicoIndisponivel =>
           _limitarRetryAfter(duracao),
         _ => null,
       };
       if (espera == null) break;
+      if (falha is FilaCheiaException &&
+          falha.retryAfter == null &&
+          tentativasFilaCheia < _intervalosFilaCheia.length - 1) {
+        tentativasFilaCheia++;
+      }
 
       _etapaConsultaBackend = EtapaConsultaBackend.aguardandoRetentativa;
       notifyListeners();
