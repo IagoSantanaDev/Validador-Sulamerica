@@ -40,6 +40,12 @@ class AppStrings {
       'A fila de consultas está ocupada. Aguarde um momento e tente novamente.';
   static const String servicoConsultaIndisponivel =
       'O serviço de consultas está temporariamente indisponível. Tente novamente em instantes.';
+  static const String bloqueioPortalTitulo =
+      'Consultas temporariamente bloqueadas';
+  static const String bloqueioPortalLiberacao =
+      'Nova consulta liberada em ';
+  static const String bloqueioPortalVerificando =
+      'Verificando disponibilidade...';
   static const String erroConexaoConsultaBackend =
       'Não foi possível conectar ao serviço de consultas. Verifique sua conexão e tente novamente.';
   static const String erroConsultaBackendExpirada =

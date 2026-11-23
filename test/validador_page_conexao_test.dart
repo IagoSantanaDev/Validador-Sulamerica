@@ -74,4 +74,46 @@ void main() {
     expect(find.text(AppStrings.apiVerificandoTitulo), findsNothing);
     expect(find.text(AppStrings.dropZoneTexto), findsOneWidget);
   });
+
+  testWidgets('mostra causa e contagem regressiva do bloqueio global', (
+    WidgetTester tester,
+  ) async {
+    final GetIt getIt = GetIt.instance;
+    final _AdapterStatusPendente adapter = _AdapterStatusPendente();
+    final Dio dio = Dio()..httpClientAdapter = adapter;
+    getIt.registerSingleton<SulAmericaBackendService>(
+      SulAmericaBackendService(
+        DioClient(baseUrl: 'http://localhost', dio: dio),
+      ),
+    );
+    addTearDown(() => getIt.reset());
+
+    await tester.pumpWidget(const MaterialApp(home: ValidadorPage()));
+    await tester.pump();
+    adapter.resposta.complete(
+      ResponseBody.fromBytes(
+        utf8.encode(
+          '{"status":"ok","bloqueio":{"ativo":true,'
+          '"motivo":"limite_portal","codigo":"429",'
+          '"mensagem":"Limite de consultas do portal atingido (429)",'
+          '"retryAfterSegundos":90}}',
+        ),
+        200,
+        headers: {
+          Headers.contentTypeHeader: [Headers.jsonContentType],
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Consultas temporariamente bloqueadas (429)'), findsOneWidget);
+    expect(find.textContaining('01:30'), findsOneWidget);
+    expect(find.text(AppStrings.dropZoneTexto), findsOneWidget);
+    expect(
+      tester
+          .widgetList<AbsorbPointer>(find.byType(AbsorbPointer))
+          .any((AbsorbPointer widget) => widget.absorbing),
+      isTrue,
+    );
+  });
 }

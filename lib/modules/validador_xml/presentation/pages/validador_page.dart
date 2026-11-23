@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
@@ -79,6 +81,7 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
     return Column(
       children: [
         NavbarSite(onTituloTap: _voltarParaHome),
+        if (controller.bloqueioPortal != null) _painelBloqueio(controller),
         Expanded(
           child: AnimatedSwitcher(
             duration: const Duration(milliseconds: 200),
@@ -143,12 +146,16 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
                 ],
                 if (conexao != EstadoConexao.verificando) ...[
                   const SizedBox(height: AppDimens.spaceLg),
-                  DropZoneSite(
-                    onArquivoSelecionado: (nome, bytes) =>
-                        context.read<ValidadorController>().definirArquivo(
-                              nomeArquivo: nome,
-                              bytes: bytes,
-                            ),
+                  AbsorbPointer(
+                    absorbing: c.bloqueioPortal != null,
+                    child: Opacity(
+                      opacity: c.bloqueioPortal == null ? 1 : 0.5,
+                      child: DropZoneSite(
+                        onArquivoSelecionado: (nome, bytes) {
+                          unawaited(_selecionarArquivo(nome, bytes));
+                        },
+                      ),
+                    ),
                   ),
                 ],
                 if (c.status == StatusValidador.erro && c.mensagemErro != null)
@@ -167,6 +174,40 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
         ),
       ),
     );
+  }
+
+  Widget _painelBloqueio(ValidadorController controller) {
+    final bloqueio = controller.bloqueioPortal!;
+    final int minutos = bloqueio.segundosRestantes ~/ 60;
+    final int segundos = bloqueio.segundosRestantes % 60;
+    final String restante = bloqueio.segundosRestantes == 0
+        ? AppStrings.bloqueioPortalVerificando
+        : '${AppStrings.bloqueioPortalLiberacao}'
+              '${minutos.toString().padLeft(2, '0')}:'
+              '${segundos.toString().padLeft(2, '0')}.';
+    return Padding(
+      padding: const EdgeInsets.all(AppDimens.spaceMd),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(
+            maxWidth: AppDimens.larguraMaximaHome,
+          ),
+          child: PainelStatus(
+            icone: Icons.block,
+            cor: AppColors.error,
+            titulo:
+                '${AppStrings.bloqueioPortalTitulo} (${bloqueio.codigo})',
+            mensagem: '${bloqueio.mensagem}. $restante',
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _selecionarArquivo(String nome, Uint8List bytes) async {
+    final ValidadorController controller = context.read<ValidadorController>();
+    if (await controller.verificarBloqueioAgora() || !mounted) return;
+    controller.definirArquivo(nomeArquivo: nome, bytes: bytes);
   }
 
   Widget _painelConexao(ValidadorController c, EstadoConexao conexao) {
@@ -345,11 +386,11 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
                     },
                   ),
                 ],
-              ),
             ),
           ),
         ),
-      );
+      ),
+    );
   }
 
   Widget _filtroErros() {

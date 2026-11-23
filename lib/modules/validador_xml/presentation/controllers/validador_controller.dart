@@ -15,6 +15,7 @@ import '../../data/datasources/xml_lote_guias_datasource.dart';
 import '../../data/datasources/xml_lote_guias_exceptions.dart';
 import '../../data/models/consulta_guia.dart';
 import '../../data/models/consulta_lote.dart';
+import '../../data/models/bloqueio_portal.dart';
 import '../../data/models/guia_validada.dart';
 import '../../data/models/informacoes_lote.dart';
 import '../../data/models/lote_guias_extraido.dart';
@@ -88,12 +89,17 @@ class ValidadorController extends ChangeNotifier {
   final Map<String, ConsultaGuia> _resultadosConsultas = {};
   List<GuiaValidada> _guiasBaseConsultas = const [];
   bool _retentativaManualEmAndamento = false;
+  bool _descartandoLoteBloqueado = false;
   String? _identificadorPrestadorDaConsulta;
   String? _mensagemAvisoConsultaBackend;
   int _progressoConsultasConcluidas = 0;
   int _totalConsultas = 0;
+  bool _disposed = false;
+  BloqueioPortal? _bloqueioPortal;
+  Timer? _timerBloqueio;
 
   EtapaConsultaBackend get etapaConsultaBackend => _etapaConsultaBackend;
+  BloqueioPortal? get bloqueioPortal => _bloqueioPortal;
   int get totalConsultasPendentes => _consultasPendentes.length;
   bool get temConsultasPendentes => _consultasPendentes.isNotEmpty;
   String? get mensagemAvisoConsultaBackend => _mensagemAvisoConsultaBackend;
@@ -118,10 +124,122 @@ class ValidadorController extends ChangeNotifier {
     }
 
     final Result<Map<String, dynamic>> status = await service.status();
+    if (status is Success<Map<String, dynamic>>) {
+      _atualizarBloqueio(status.valor['bloqueio']);
+    }
     _estadoConexao = status is Success<Map<String, dynamic>>
         ? EstadoConexao.pronto
         : EstadoConexao.apiIndisponivel;
     notifyListeners();
+  }
+
+  Future<bool> verificarBloqueioAgora() => _consultarBloqueio();
+
+  Future<bool> _consultarBloqueio() async {
+    final SulAmericaBackendService? service = _service;
+    if (service == null) return _bloqueioPortal != null;
+
+    final Result<Map<String, dynamic>> resposta = await service.status();
+    if (resposta is Success<Map<String, dynamic>>) {
+      _atualizarBloqueio(resposta.valor['bloqueio']);
+      return _bloqueioPortal != null;
+    }
+
+    final AppException? falha = resposta.fold<AppException?>(
+      onSuccess: (_) => null,
+      onFailure: (erro) => erro,
+    );
+    if (falha is ServicoIndisponivelException) {
+      if (_ativarBloqueioJson(falha.bloqueio)) return true;
+    }
+    final BloqueioPortal? bloqueio = _bloqueioPortal;
+    if (bloqueio != null) {
+      _bloqueioPortal = bloqueio.comSegundosRestantes(5);
+      _agendarTimerBloqueio();
+      notifyListeners();
+    }
+    return _bloqueioPortal != null;
+  }
+
+  void _atualizarBloqueio(Object? valor) {
+    if (valor is Map && valor['ativo'] == true) {
+      _ativarBloqueioJson(valor.cast<String, dynamic>());
+      return;
+    }
+    if (_bloqueioPortal == null) return;
+    _timerBloqueio?.cancel();
+    _timerBloqueio = null;
+    _bloqueioPortal = null;
+    notifyListeners();
+  }
+
+  bool _ativarBloqueioJson(Map<String, dynamic>? json) {
+    if (json == null || json['ativo'] != true) return false;
+    _ativarBloqueio(BloqueioPortal.fromJson(json));
+    return true;
+  }
+
+  Future<bool> _consultarBloqueioAposFalha(AppException? erro) async {
+    if (erro is! ServicoIndisponivelException) return false;
+    if (_ativarBloqueioJson(erro.bloqueio)) return true;
+    return _consultarBloqueio();
+  }
+
+  void _ativarBloqueio(BloqueioPortal bloqueio) {
+    _bloqueioPortal = bloqueio;
+    _agendarTimerBloqueio();
+    _retornarAoInicioBloqueado();
+  }
+
+  void _agendarTimerBloqueio() {
+    _timerBloqueio?.cancel();
+    final BloqueioPortal? bloqueio = _bloqueioPortal;
+    if (bloqueio == null) return;
+    if (bloqueio.segundosRestantes == 0) {
+      _timerBloqueio = Timer(const Duration(seconds: 1), () {
+        _timerBloqueio = null;
+        if (!_disposed) unawaited(_consultarBloqueio());
+      });
+    } else {
+      _timerBloqueio = Timer.periodic(const Duration(seconds: 1), (Timer timer) {
+        final BloqueioPortal? atual = _bloqueioPortal;
+        if (atual == null) {
+          timer.cancel();
+          return;
+        }
+        final int restantes = atual.segundosRestantes - 1;
+        _bloqueioPortal = atual.comSegundosRestantes(restantes);
+        notifyListeners();
+        if (restantes <= 0) {
+          timer.cancel();
+          _timerBloqueio = null;
+          unawaited(_consultarBloqueio());
+        }
+      });
+    }
+  }
+
+  void _retornarAoInicioBloqueado() {
+    if (_descartandoLoteBloqueado) return;
+    _descartandoLoteBloqueado = true;
+    _status = StatusValidador.semArquivo;
+    _nomeArquivo = null;
+    _bytesArquivo = null;
+    _resultado = const [];
+    _mensagemErro = null;
+    _informacoes = InformacoesLote.vazio;
+    _hashMd5 = null;
+    _tempoProcessamento = Duration.zero;
+    _limparEstadoConsultas();
+    _descartandoLoteBloqueado = false;
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    _timerBloqueio?.cancel();
+    super.dispose();
   }
 
   StatusValidador _status = StatusValidador.semArquivo;
@@ -155,6 +273,7 @@ class ValidadorController extends ChangeNotifier {
   }
 
   void definirArquivo({required String nomeArquivo, required Uint8List bytes}) {
+    if (_bloqueioPortal != null) return;
     _nomeArquivo = nomeArquivo;
     _bytesArquivo = bytes;
     _status = StatusValidador.arquivoPronto;
@@ -167,6 +286,7 @@ class ValidadorController extends ChangeNotifier {
   }
 
   Future<void> validar() async {
+    if (await _consultarBloqueio()) return;
     final Uint8List? bytes = _bytesArquivo;
     if (bytes == null) return;
 
@@ -191,6 +311,10 @@ class ValidadorController extends ChangeNotifier {
         resultadoBruto,
         identificadorPrestador,
       );
+      if (_bloqueioPortal != null) {
+        _retornarAoInicioBloqueado();
+        return;
+      }
 
       _resultado = _ordenarPorNumeroGuia(resultado);
       _informacoes = informacoes;
@@ -313,6 +437,7 @@ class ValidadorController extends ChangeNotifier {
         itens.sublist(inicio, fim),
         _progressoConsultasConcluidas,
       );
+      if (_bloqueioPortal != null) return const <GuiaValidada>[];
     }
     _atualizarResultado();
     _etapaConsultaBackend = _consultasPendentes.isEmpty
@@ -333,6 +458,7 @@ class ValidadorController extends ChangeNotifier {
     );
     final String? tokenInicialValido = tokenInicial.token;
     if (tokenInicialValido == null) {
+      if (_bloqueioPortal != null) return;
       final AppException? falha = tokenInicial.falha;
       if (falha is NaoAutorizadoException) {
         _avisarFalhaAutenticacao();
@@ -370,6 +496,8 @@ class ValidadorController extends ChangeNotifier {
         );
         break;
       }
+
+      if (await _consultarBloqueioAposFalha(falha)) return;
 
       if (falha is NaoAutorizadoException && !reautenticouSubmissao) {
         reautenticouSubmissao = true;
@@ -484,6 +612,11 @@ class ValidadorController extends ChangeNotifier {
         },
       );
 
+      if (leitura.bloqueio != null) {
+        _ativarBloqueio(leitura.bloqueio!);
+        return;
+      }
+
       if (leitura.resultado != null) {
         _aplicarResultadoLote(consultas, leitura.resultado!);
         _progressoConsultasConcluidas = max(
@@ -520,6 +653,10 @@ class ValidadorController extends ChangeNotifier {
 
       final bool streamInterrompido =
           leitura.streamFechou || (erro != null && _falhaTransporte(erro));
+      if ((erro != null || leitura.streamFechou) &&
+          await _consultarBloqueio()) {
+        return;
+      }
       if (streamInterrompido && reconexoes < _intervalosRetentativa.length) {
         _etapaConsultaBackend = EtapaConsultaBackend.aguardandoRetentativa;
         notifyListeners();
@@ -540,7 +677,12 @@ class ValidadorController extends ChangeNotifier {
   }
 
   Future<
-    ({ResultadoLoteEvento? resultado, AppException? erro, bool streamFechou})
+    ({
+      ResultadoLoteEvento? resultado,
+      AppException? erro,
+      BloqueioPortal? bloqueio,
+      bool streamFechou,
+    })
   >
   _lerEventosLote(
     ConexaoSse conexao, {
@@ -551,6 +693,7 @@ class ValidadorController extends ChangeNotifier {
           ({
             ResultadoLoteEvento? resultado,
             AppException? erro,
+            BloqueioPortal? bloqueio,
             bool streamFechou,
           })
         >();
@@ -569,6 +712,7 @@ class ValidadorController extends ChangeNotifier {
                 erro: const ErroDesconhecidoException(
                   'Evento de resultado SSE inválido.',
                 ),
+                bloqueio: null,
                 streamFechou: false,
               ));
               return;
@@ -576,6 +720,30 @@ class ValidadorController extends ChangeNotifier {
             completer.complete((
               resultado: ResultadoLoteEvento.fromJson(dados),
               erro: null,
+              bloqueio: null,
+              streamFechou: false,
+            ));
+          }
+          if (evento.evento == 'erro') {
+            final Map<String, dynamic>? dados = _decodificarEvento(
+              evento.dados,
+            );
+            final Object? valorBloqueio = dados?['bloqueio'];
+            final BloqueioPortal? bloqueio = valorBloqueio is Map &&
+                    valorBloqueio['ativo'] == true
+                ? BloqueioPortal.fromJson(
+                    valorBloqueio.cast<String, dynamic>(),
+                  )
+                : null;
+            completer.complete((
+              resultado: null,
+              erro: bloqueio == null
+                  ? ErroDesconhecidoException(
+                      dados?['mensagem'] as String? ??
+                          AppStrings.erroConsultaBackendGenerico,
+                    )
+                  : null,
+              bloqueio: bloqueio,
               streamFechou: false,
             ));
           }
@@ -586,6 +754,7 @@ class ValidadorController extends ChangeNotifier {
               erro: const ErroDesconhecidoException(
                 AppStrings.erroConsultaBackendGenerico,
               ),
+              bloqueio: null,
               streamFechou: false,
             ));
           }
@@ -596,6 +765,7 @@ class ValidadorController extends ChangeNotifier {
               erro: const ErroDesconhecidoException(
                 AppStrings.erroConsultaBackendGenerico,
               ),
+              bloqueio: null,
               streamFechou: false,
             ));
           }
@@ -610,13 +780,19 @@ class ValidadorController extends ChangeNotifier {
                 : const ErroDesconhecidoException(
                     AppStrings.erroConsultaBackendGenerico,
                   ),
+            bloqueio: null,
             streamFechou: false,
           ));
         }
       },
       onDone: () {
         if (!completer.isCompleted) {
-          completer.complete((resultado: null, erro: null, streamFechou: true));
+          completer.complete((
+            resultado: null,
+            erro: null,
+            bloqueio: null,
+            streamFechou: true,
+          ));
         }
       },
     );
@@ -769,6 +945,7 @@ class ValidadorController extends ChangeNotifier {
         _retentativaManualEmAndamento) {
       return;
     }
+    if (await _consultarBloqueio()) return;
     _retentativaManualEmAndamento = true;
     _etapaConsultaBackend = EtapaConsultaBackend.consultando;
     final List<ConsultaLoteItem> consultas = _consultasPendentes.values
@@ -905,6 +1082,9 @@ class ValidadorController extends ChangeNotifier {
       onSuccess: (_) => null,
       onFailure: (erro) => erro,
     );
+    if (await _consultarBloqueioAposFalha(falha)) {
+      return (token: null, mensagemErro: falha!.mensagem, falha: falha);
+    }
     final Duration? retryAfter = falha == null ? null : _retryAfter(falha);
     if ((falha is FilaCheiaException ||
             falha is ServicoIndisponivelException) &&
@@ -920,6 +1100,9 @@ class ValidadorController extends ChangeNotifier {
         onSuccess: (_) => null,
         onFailure: (erro) => erro,
       );
+      if (await _consultarBloqueioAposFalha(falha)) {
+        return (token: null, mensagemErro: falha!.mensagem, falha: falha);
+      }
     }
 
     if (falha != null) {
