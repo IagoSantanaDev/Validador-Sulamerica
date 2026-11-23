@@ -106,8 +106,15 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Consultas temporariamente bloqueadas (429)'), findsOneWidget);
+    final Finder tituloBloqueio = find.text(
+      'Consultas temporariamente bloqueadas (429)',
+    );
+    expect(tituloBloqueio, findsOneWidget);
     expect(find.textContaining('01:30'), findsOneWidget);
     expect(find.text(AppStrings.dropZoneTexto), findsNothing);
+    expect(
+      tester.getTopLeft(tituloBloqueio).dy,
+      greaterThan(tester.getTopLeft(find.text(AppStrings.jumbotronLegenda)).dy),
+    );
   });
 }

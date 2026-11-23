@@ -81,7 +81,6 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
     return Column(
       children: [
         NavbarSite(onTituloTap: _voltarParaHome),
-        if (controller.bloqueioPortal != null) _painelBloqueio(controller),
         Expanded(
           child: AnimatedSwitcher(
             duration: const Duration(milliseconds: 200),
@@ -140,6 +139,10 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
                   cor: AppColors.textMuted,
                   alinhamento: TextAlign.center,
                 ),
+                if (c.bloqueioPortal != null) ...[
+                  const SizedBox(height: AppDimens.spaceLg),
+                  _painelBloqueio(c),
+                ],
                 if (conexao != EstadoConexao.pronto) ...[
                   const SizedBox(height: AppDimens.spaceLg),
                   _painelConexao(c, conexao),
