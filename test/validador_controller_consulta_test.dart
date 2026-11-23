@@ -32,6 +32,7 @@ class _FakeAsyncBackend extends SulAmericaBackendService {
 
   final List<Result<String>> respostasSessao = [];
   final List<Result<LoteRemoto>> respostasLote = [];
+  final List<Result<Map<String, dynamic>>> respostasStatus = [];
   final List<Stream<EventoSse>> streams = [];
   final List<String> chavesIdempotencia = [];
   final List<String> tokensSubmissao = [];
@@ -40,7 +41,17 @@ class _FakeAsyncBackend extends SulAmericaBackendService {
   final List<List<ConsultaLoteItem>> lotes = [];
   final Map<String, List<ConsultaLoteItem>> _consultasPorLote = {};
   int chamadasSessao = 0;
+  int chamadasStatus = 0;
   int _proximoLote = 0;
+
+  @override
+  Future<Result<Map<String, dynamic>>> status() async {
+    chamadasStatus++;
+    if (respostasStatus.isNotEmpty) return respostasStatus.removeAt(0);
+    return Result.success({
+      'bloqueio': {'ativo': false},
+    });
+  }
 
   @override
   Future<Result<String>> criarSessao({
@@ -211,6 +222,383 @@ Stream<EventoSse> _erroDepoisDoEvento(EventoSse evento, Object erro) async* {
 
 void main() {
   group('ValidadorController - fluxo assíncrono de consultas', () {
+    test('bloqueio do status impede começar validação', () async {
+      final _FakeAsyncBackend service = _FakeAsyncBackend()
+        ..respostasStatus.add(
+          Result.success({
+            'bloqueio': {
+              'ativo': true,
+              'motivo': 'limite_portal',
+              'codigo': '429',
+              'mensagem': 'Limite de consultas do portal atingido (429)',
+              'retryAfterSegundos': 120,
+            },
+          }),
+        );
+      final ValidadorController controller = _novoController(
+        service: service,
+        retorno: const [GuiaValidada(guia: _guiaSemSenha, erros: [])],
+      );
+      addTearDown(controller.dispose);
+
+      await _validar(controller);
+
+      expect(controller.status, StatusValidador.semArquivo);
+      expect(controller.nomeArquivo, isNull);
+      expect(controller.bloqueioPortal?.motivo, 'limite_portal');
+      expect(service.chamadasSessao, 0);
+      expect(service.tokensSubmissao, isEmpty);
+    });
+
+    test(
+      'erro SSE de bloqueio descarta lote e retorna à tela inicial',
+      () async {
+        const Map<String, Object?> bloqueio = {
+          'ativo': true,
+          'motivo': 'rejeicao_f5',
+          'codigo': 'F5',
+          'mensagem': 'Portal bloqueou a consulta (F5)',
+          'retryAfterSegundos': 120,
+        };
+        final _FakeAsyncBackend service = _FakeAsyncBackend()
+          ..streams.add(
+            Stream<EventoSse>.value(
+              EventoSse(
+                id: '1',
+                evento: 'erro',
+                dados: jsonEncode({
+                  'mensagem': bloqueio['mensagem'],
+                  'bloqueio': bloqueio,
+                }),
+              ),
+            ),
+          );
+        final ValidadorController controller = _novoController(
+          service: service,
+          retorno: const [GuiaValidada(guia: _guiaSemSenha, erros: [])],
+        );
+        addTearDown(controller.dispose);
+
+        await _validar(controller);
+
+        expect(controller.status, StatusValidador.semArquivo);
+        expect(controller.nomeArquivo, isNull);
+        expect(controller.guias, isEmpty);
+        expect(controller.bloqueioPortal?.codigo, 'F5');
+        expect(
+          controller.etapaConsultaBackend,
+          EtapaConsultaBackend.naoIniciada,
+        );
+        expect(service.lotes, hasLength(1));
+      },
+    );
+
+    test(
+      'retry manual de pendência entra no bloqueio ao receber erro SSE',
+      () async {
+        const Map<String, Object?> bloqueio = {
+          'ativo': true,
+          'motivo': 'limite_portal',
+          'codigo': '429',
+          'mensagem': 'Limite de consultas do portal atingido (429)',
+          'retryAfterSegundos': 120,
+        };
+        final _FakeAsyncBackend service = _FakeAsyncBackend()
+          ..streams.addAll([
+            _resultadoStream(
+              [
+                _resultado(
+                  chave: _carteira,
+                  sucesso: false,
+                  erro: 'Falha na consulta ao portal SulAmerica.',
+                ),
+              ],
+              status: 'parcial',
+              pendentes: [
+                {
+                  'tipo': 'elegibilidade',
+                  'chave': _carteira,
+                  'motivo': 'tentativas_esgotadas',
+                },
+              ],
+            ),
+            Stream<EventoSse>.value(
+              EventoSse(
+                id: '1',
+                evento: 'erro',
+                dados: jsonEncode({
+                  'mensagem': bloqueio['mensagem'],
+                  'bloqueio': bloqueio,
+                }),
+              ),
+            ),
+          ]);
+        final ValidadorController controller = await _validar(
+          _novoController(
+            service: service,
+            retorno: const [GuiaValidada(guia: _guiaSemSenha, erros: [])],
+          ),
+        );
+        addTearDown(controller.dispose);
+
+        expect(controller.temConsultasPendentes, isTrue);
+
+        await controller.retentarConsultasPendentes();
+
+        expect(controller.status, StatusValidador.semArquivo);
+        expect(controller.nomeArquivo, isNull);
+        expect(controller.guias, isEmpty);
+        expect(controller.temConsultasPendentes, isFalse);
+        expect(controller.bloqueioPortal?.codigo, '429');
+        expect(
+          controller.etapaConsultaBackend,
+          EtapaConsultaBackend.naoIniciada,
+        );
+        expect(service.lotes, hasLength(2));
+      },
+    );
+
+    test(
+      'não mantém pendências quando o bloqueio abre junto ao resultado SSE',
+      () async {
+        const Map<String, Object?> bloqueio = {
+          'ativo': true,
+          'motivo': 'limite_portal',
+          'codigo': '429',
+          'mensagem': 'Limite de consultas do portal atingido (429)',
+          'retryAfterSegundos': 120,
+        };
+        final Map<String, String> pendencia = {
+          'tipo': 'elegibilidade',
+          'chave': _carteira,
+          'motivo': 'tentativas_esgotadas',
+        };
+        final _FakeAsyncBackend service = _FakeAsyncBackend()
+          ..respostasStatus.addAll([
+            Result.success({
+              'bloqueio': {'ativo': false},
+            }),
+            Result.success({
+              'bloqueio': {'ativo': false},
+            }),
+            Result.success({
+              'bloqueio': {'ativo': false},
+            }),
+            Result.success({'bloqueio': bloqueio}),
+          ])
+          ..streams.addAll([
+            _resultadoStream(
+              [
+                _resultado(
+                  chave: _carteira,
+                  sucesso: false,
+                  erro: 'Falha na consulta ao portal SulAmerica.',
+                ),
+              ],
+              status: 'parcial',
+              pendentes: [pendencia],
+            ),
+            _resultadoStream(
+              [
+                _resultado(
+                  chave: _carteira,
+                  sucesso: false,
+                  erro: 'Falha na consulta ao portal SulAmerica.',
+                ),
+              ],
+              status: 'parcial',
+              pendentes: [pendencia],
+            ),
+          ]);
+        final ValidadorController controller = await _validar(
+          _novoController(
+            service: service,
+            retorno: const [GuiaValidada(guia: _guiaSemSenha, erros: [])],
+          ),
+        );
+        addTearDown(controller.dispose);
+
+        expect(controller.temConsultasPendentes, isTrue);
+        expect(controller.etapaConsultaBackend, EtapaConsultaBackend.pendente);
+
+        await controller.retentarConsultasPendentes();
+
+        expect(controller.status, StatusValidador.semArquivo);
+        expect(controller.nomeArquivo, isNull);
+        expect(controller.guias, isEmpty);
+        expect(controller.temConsultasPendentes, isFalse);
+        expect(
+          controller.etapaConsultaBackend,
+          EtapaConsultaBackend.naoIniciada,
+        );
+        expect(controller.bloqueioPortal?.codigo, '429');
+      },
+    );
+
+    test(
+      'fica consultando e repete criação de sessão após cada Retry-After',
+      () async {
+        final List<Duration> esperas = [];
+        final _FakeAsyncBackend service = _FakeAsyncBackend()
+          ..respostasSessao.addAll([
+            Result.failure(
+              const FilaCheiaException(
+                retryAfter: Duration(seconds: 75),
+                mensagem: 'Limite de criação de sessões.',
+              ),
+            ),
+            Result.failure(
+              const FilaCheiaException(
+                retryAfter: Duration(seconds: 30),
+                mensagem: 'Limite de criação de sessões.',
+              ),
+            ),
+            Result.success('token-liberado'),
+          ]);
+        late final ValidadorController controller;
+        controller = ValidadorController(
+          repository: _FakeValidadorGuiasRepository(const [
+            GuiaValidada(guia: _guiaSemSenha, erros: []),
+          ]),
+          service: service,
+          regraCredenciais: const _RegraCredenciaisFixa('27372066000673'),
+          aguardarRetentativa: (Duration duracao) async {
+            esperas.add(duracao);
+            expect(controller.status, StatusValidador.validando);
+            expect(
+              controller.etapaConsultaBackend,
+              EtapaConsultaBackend.aguardandoRetentativa,
+            );
+            expect(controller.temConsultasPendentes, isFalse);
+          },
+        );
+        addTearDown(controller.dispose);
+        controller.definirArquivo(
+          nomeArquivo: 'lote.xml',
+          bytes: Uint8List.fromList(
+            '<mensagemTISS><guiaSP-SADT/></mensagemTISS>'.codeUnits,
+          ),
+        );
+
+        await controller.validar();
+
+        expect(service.chamadasSessao, 3);
+        expect(esperas, [
+          const Duration(seconds: 75),
+          const Duration(seconds: 30),
+        ]);
+        expect(controller.status, StatusValidador.concluido);
+        expect(controller.temConsultasPendentes, isFalse);
+        expect(controller.guias.single.consultas, hasLength(1));
+      },
+    );
+
+    test('503 consulta status antes de tentar novamente', () async {
+      const Map<String, dynamic> bloqueio = {
+        'ativo': true,
+        'motivo': 'limite_portal',
+        'codigo': '429',
+        'mensagem': 'Limite de consultas do portal atingido (429)',
+        'retryAfterSegundos': 120,
+      };
+      final _FakeAsyncBackend service = _FakeAsyncBackend()
+        ..respostasSessao.add(
+          Result.failure(
+            const ServicoIndisponivelException(
+              retryAfter: Duration(seconds: 60),
+            ),
+          ),
+        )
+        ..respostasStatus.addAll([
+          Result.success({
+            'bloqueio': {'ativo': false},
+          }),
+          Result.success({'bloqueio': bloqueio}),
+        ]);
+      final ValidadorController controller = _novoController(
+        service: service,
+        retorno: const [GuiaValidada(guia: _guiaSemSenha, erros: [])],
+      );
+      addTearDown(controller.dispose);
+
+      await _validar(controller);
+
+      expect(service.chamadasSessao, 1);
+      expect(service.chamadasStatus, 2);
+      expect(controller.status, StatusValidador.semArquivo);
+      expect(controller.bloqueioPortal?.codigo, '429');
+    });
+
+    test('erro SSE verifica status antes de reconectar ou retentar', () async {
+      const Map<String, Object?> bloqueio = {
+        'ativo': true,
+        'motivo': 'rejeicao_f5',
+        'codigo': 'F5',
+        'mensagem': 'Portal bloqueou a consulta (F5)',
+        'retryAfterSegundos': 120,
+      };
+      final _FakeAsyncBackend service = _FakeAsyncBackend()
+        ..streams.add(
+          Stream<EventoSse>.value(
+            EventoSse(
+              id: '1',
+              evento: 'erro',
+              dados: jsonEncode({'mensagem': 'Consulta interrompida'}),
+            ),
+          ),
+        )
+        ..respostasStatus.addAll([
+          Result.success({
+            'bloqueio': {'ativo': false},
+          }),
+          Result.success({'bloqueio': bloqueio}),
+        ]);
+      final ValidadorController controller = _novoController(
+        service: service,
+        retorno: const [GuiaValidada(guia: _guiaSemSenha, erros: [])],
+      );
+      addTearDown(controller.dispose);
+
+      await _validar(controller);
+
+      expect(service.chamadasStatus, 2);
+      expect(service.idsSse, [null]);
+      expect(controller.status, StatusValidador.semArquivo);
+      expect(controller.guias, isEmpty);
+      expect(controller.bloqueioPortal?.codigo, 'F5');
+    });
+
+    test('503 com bloqueio não repete criação de sessão', () async {
+      const Map<String, dynamic> bloqueio = {
+        'ativo': true,
+        'motivo': 'portal_indisponivel',
+        'codigo': '5xx',
+        'mensagem': 'Portal temporariamente indisponível',
+        'retryAfterSegundos': 60,
+      };
+      final _FakeAsyncBackend service = _FakeAsyncBackend()
+        ..respostasSessao.add(
+          Result.failure(
+            const ServicoIndisponivelException(
+              retryAfter: Duration(seconds: 60),
+              bloqueio: bloqueio,
+            ),
+          ),
+        );
+      final ValidadorController controller = _novoController(
+        service: service,
+        retorno: const [GuiaValidada(guia: _guiaSemSenha, erros: [])],
+      );
+      addTearDown(controller.dispose);
+
+      await _validar(controller);
+
+      expect(service.chamadasSessao, 1);
+      expect(service.tokensSubmissao, isEmpty);
+      expect(controller.status, StatusValidador.semArquivo);
+      expect(controller.bloqueioPortal?.codigo, '5xx');
+    });
+
     test(
       'submete lotes e aplica progresso e resultado recebidos por SSE',
       () async {
@@ -280,7 +668,7 @@ void main() {
       expect(controller.guias, hasLength(3301));
     });
 
-    test('429 de sessão só repete uma vez quando Retry-After existe', () async {
+    test('429 de sessão respeita Retry-After antes de repetir', () async {
       final List<Duration> esperas = [];
       final _FakeAsyncBackend service = _FakeAsyncBackend()
         ..respostasSessao.addAll([
@@ -303,11 +691,16 @@ void main() {
     });
 
     test(
-      '429 de sessão sem Retry-After não repete e deixa consulta pendente',
+      '429 de sessão sem Retry-After usa espera progressiva até sucesso',
       () async {
-        final _FakeAsyncBackend service = _FakeAsyncBackend()
-          ..respostasSessao.add(Result.failure(const FilaCheiaException()));
         final List<Duration> esperas = [];
+        final _FakeAsyncBackend service = _FakeAsyncBackend()
+          ..respostasSessao.addAll([
+            Result.failure(const FilaCheiaException()),
+            Result.failure(const FilaCheiaException()),
+            Result.failure(const FilaCheiaException()),
+            Result.success('token-liberado'),
+          ]);
         final ValidadorController controller = await _validar(
           _novoController(
             service: service,
@@ -316,16 +709,20 @@ void main() {
           ),
         );
 
-        expect(service.chamadasSessao, 1);
-        expect(service.lotes, isEmpty);
-        expect(esperas, isEmpty);
-        expect(controller.temConsultasPendentes, isTrue);
-        expect(controller.mensagemAvisoConsultaBackend, contains('fila'));
+        expect(service.chamadasSessao, 4);
+        expect(esperas, [
+          const Duration(seconds: 1),
+          const Duration(seconds: 2),
+          const Duration(seconds: 4),
+        ]);
+        expect(controller.status, StatusValidador.concluido);
+        expect(controller.temConsultasPendentes, isFalse);
+        expect(controller.mensagemAvisoConsultaBackend, isNull);
       },
     );
 
     test(
-      '429 do lote usa a mesma chave e Retry-After limitado a 60 segundos',
+      '429 do lote aguarda Retry-After até conseguir criar o lote',
       () async {
         final List<Duration> esperas = [];
         final _FakeAsyncBackend service = _FakeAsyncBackend()
@@ -333,9 +730,14 @@ void main() {
             Result.failure(
               const FilaCheiaException(retryAfter: Duration(seconds: 90)),
             ),
-            Result.failure(const FilaCheiaException()),
+            Result.failure(
+              const FilaCheiaException(retryAfter: Duration(seconds: 30)),
+            ),
             Result.failure(
               const FilaCheiaException(retryAfter: Duration(seconds: 10)),
+            ),
+            Result.failure(
+              const FilaCheiaException(retryAfter: Duration(seconds: 5)),
             ),
           ]);
         final ValidadorController controller = await _validar(
@@ -346,14 +748,50 @@ void main() {
           ),
         );
 
-        expect(service.lotes, hasLength(4));
+        expect(service.lotes, hasLength(5));
         expect(service.chavesIdempotencia.toSet(), hasLength(1));
         expect(esperas, [
-          const Duration(seconds: 60),
-          const Duration(seconds: 2),
+          const Duration(seconds: 90),
+          const Duration(seconds: 30),
           const Duration(seconds: 10),
+          const Duration(seconds: 5),
         ]);
+        expect(controller.status, StatusValidador.concluido);
+        expect(controller.temConsultasPendentes, isFalse);
         expect(controller.guias.single.consulta?.descricao, 'Elegível: SIM');
+      },
+    );
+
+    test(
+      '429 do lote sem Retry-After usa espera progressiva até sucesso',
+      () async {
+        final List<Duration> esperas = [];
+        final _FakeAsyncBackend service = _FakeAsyncBackend()
+          ..respostasLote.addAll(
+            List<Result<LoteRemoto>>.generate(
+              4,
+              (_) => Result.failure(const FilaCheiaException()),
+            ),
+          );
+        final ValidadorController controller = await _validar(
+          _novoController(
+            service: service,
+            retorno: const [GuiaValidada(guia: _guiaSemSenha, erros: [])],
+            esperas: esperas,
+          ),
+        );
+
+        expect(service.lotes, hasLength(5));
+        expect(service.chavesIdempotencia.toSet(), hasLength(1));
+        expect(esperas, [
+          const Duration(seconds: 1),
+          const Duration(seconds: 2),
+          const Duration(seconds: 4),
+          const Duration(seconds: 4),
+        ]);
+        expect(controller.status, StatusValidador.concluido);
+        expect(controller.temConsultasPendentes, isFalse);
+        expect(controller.mensagemAvisoConsultaBackend, isNull);
       },
     );
 
@@ -559,43 +997,93 @@ void main() {
       expect(controller.temConsultasPendentes, isFalse);
     });
 
-    test('resultado parcial aplica concluídas e deixa pendências para retry manual', () async {
-      const String senha = '5000000000';
-      final _FakeAsyncBackend service = _FakeAsyncBackend()
-        ..streams.add(
-          _resultadoStream(
-            [_resultado(chave: _carteira)],
-            status: 'parcial',
-            pendentes: [
-              {'tipo': 'senha', 'chave': senha, 'motivo': 'prazo_5_minutos'},
+    test(
+      'resultado parcial não exibe dados do portal e mantém tudo pendente',
+      () async {
+        const String senha = '5000000000';
+        final _FakeAsyncBackend service = _FakeAsyncBackend()
+          ..streams.add(
+            _resultadoStream(
+              [_resultado(chave: _carteira)],
+              status: 'parcial',
+              pendentes: [
+                {'tipo': 'senha', 'chave': senha, 'motivo': 'prazo_5_minutos'},
+              ],
+            ),
+          );
+        final ValidadorController controller = await _validar(
+          _novoController(
+            service: service,
+            retorno: const [
+              GuiaValidada(
+                guia: GuiaTiss(
+                  numeroGuiaPrestador: '111',
+                  numeroCarteira: _carteira,
+                  senha: senha,
+                ),
+                erros: [],
+              ),
             ],
           ),
         );
-      final ValidadorController controller = await _validar(
-        _novoController(
-          service: service,
-          retorno: const [
-            GuiaValidada(
-              guia: GuiaTiss(
-                numeroGuiaPrestador: '111',
-                numeroCarteira: _carteira,
-                senha: senha,
-              ),
-              erros: [],
+
+        expect(controller.temConsultasPendentes, isTrue);
+        expect(controller.totalConsultasPendentes, 2);
+        expect(controller.guias.single.consultas, isEmpty);
+        expect(
+          controller.mensagemAvisoConsultaBackend,
+          AppStrings.consultasPrazoExpirado,
+        );
+        expect(service.lotes, hasLength(1));
+
+        await controller.retentarConsultasPendentes();
+
+        expect(controller.temConsultasPendentes, isFalse);
+        expect(controller.guias.single.consultas, hasLength(2));
+      },
+    );
+
+    test('resultado parcial em chunk posterior oculta resultados de chunks anteriores', () async {
+      final List<GuiaValidada> guias = [
+        for (int indice = 0; indice < 301; indice++)
+          GuiaValidada(
+            guia: GuiaTiss(
+              numeroGuiaPrestador: indice.toString().padLeft(3, '0'),
+              numeroCarteira: indice.toString().padLeft(20, '0'),
+              senha: null,
             ),
-          ],
-        ),
+            erros: const [],
+          ),
+      ];
+      final _FakeAsyncBackend service = _FakeAsyncBackend()
+        ..streams.addAll([
+          _resultadoStream([
+            for (int indice = 0; indice < 300; indice++)
+              _resultado(chave: indice.toString().padLeft(20, '0')),
+          ]),
+          _resultadoStream(
+            [_resultado(chave: '300'.padLeft(20, '0'))],
+            status: 'parcial',
+            pendentes: [
+              {
+                'tipo': 'elegibilidade',
+                'chave': '300'.padLeft(20, '0'),
+                'motivo': 'tentativas_esgotadas',
+              },
+            ],
+          ),
+        ]);
+      final ValidadorController controller = await _validar(
+        _novoController(service: service, retorno: guias),
       );
 
       expect(controller.temConsultasPendentes, isTrue);
       expect(controller.totalConsultasPendentes, 1);
-      expect(controller.guias.single.consultas, hasLength(1));
-      expect(controller.guias.single.consulta?.descricao, 'Elegível: SIM');
+      expect(controller.guias, hasLength(301));
       expect(
-        controller.mensagemAvisoConsultaBackend,
-        AppStrings.consultasPrazoExpirado,
+        controller.guias.every((GuiaValidada guia) => guia.consultas.isEmpty),
+        isTrue,
       );
-      expect(service.lotes, hasLength(1));
     });
 
     test('falha de transporte permite retry automático, rejeição de portal fica manual', () async {
@@ -664,56 +1152,52 @@ void main() {
       },
     );
 
-    test(
-      'falha transitória declarada como pendente permanece disponível para retry',
-      () async {
-        const String senha = '5000000000';
-        final _FakeAsyncBackend service = _FakeAsyncBackend()
-          ..streams.add(
-            _resultadoStream(
-              [
-                _resultado(chave: _carteira),
-                _resultado(
-                  chave: senha,
-                  tipo: 'senha',
-                  sucesso: false,
-                  erro: 'Falha na consulta ao portal SulAmerica (HTTP 503).',
-                ),
-              ],
-              status: 'parcial',
-              pendentes: [
-                {
-                  'tipo': 'senha',
-                  'chave': senha,
-                  'motivo': 'tentativas_esgotadas',
-                },
-              ],
-            ),
-          );
-        final ValidadorController controller = await _validar(
-          _novoController(
-            service: service,
-            retorno: const [
-              GuiaValidada(
-                guia: GuiaTiss(
-                  numeroGuiaPrestador: '111',
-                  numeroCarteira: _carteira,
-                  senha: senha,
-                ),
-                erros: [],
+    test('falha transitória declarada como pendente permanece disponível para retry', () async {
+      const String senha = '5000000000';
+      final _FakeAsyncBackend service = _FakeAsyncBackend()
+        ..streams.add(
+          _resultadoStream(
+            [
+              _resultado(chave: _carteira),
+              _resultado(
+                chave: senha,
+                tipo: 'senha',
+                sucesso: false,
+                erro: 'Falha na consulta ao portal SulAmerica (HTTP 503).',
               ),
+            ],
+            status: 'parcial',
+            pendentes: [
+              {
+                'tipo': 'senha',
+                'chave': senha,
+                'motivo': 'tentativas_esgotadas',
+              },
             ],
           ),
         );
+      final ValidadorController controller = await _validar(
+        _novoController(
+          service: service,
+          retorno: const [
+            GuiaValidada(
+              guia: GuiaTiss(
+                numeroGuiaPrestador: '111',
+                numeroCarteira: _carteira,
+                senha: senha,
+              ),
+              erros: [],
+            ),
+          ],
+        ),
+      );
 
-        expect(controller.temConsultasPendentes, isTrue);
-        expect(controller.totalConsultasPendentes, 1);
-        expect(controller.guias.single.consultas, hasLength(1));
-        expect(controller.guias.single.consulta?.descricao, 'Elegível: SIM');
-        expect(controller.mensagemAvisoConsultaBackend, isNull);
-        expect(service.lotes, hasLength(1));
-      },
-    );
+      expect(controller.temConsultasPendentes, isTrue);
+      expect(controller.totalConsultasPendentes, 2);
+      expect(controller.guias.single.consultas, isEmpty);
+      expect(controller.mensagemAvisoConsultaBackend, isNull);
+      expect(service.lotes, hasLength(1));
+    });
 
     test('não faz login quando não há identificador do prestador', () async {
       final _FakeAsyncBackend service = _FakeAsyncBackend();

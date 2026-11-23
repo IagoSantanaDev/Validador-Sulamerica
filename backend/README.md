@@ -46,10 +46,10 @@ autenticada no pool.
 - `201`: `{ "token": "<32 hex>", "identificadorPrestador": "..." }`
 - `400`: identificador ausente ou vazio.
 - `401`: identificador desconhecido ou credencial recusada.
-- `429`: limite de taxa ou capacidade; somente a rejeição por taxa pode trazer
-  `Retry-After`.
-- `503`: disjuntor do portal aberto ou sonda de recuperação ainda indisponível;
-  inclui `Retry-After`.
+- `429`: limite local de taxa inclui `Retry-After`; capacidade de sessões
+  esgotada pode não incluir o header.
+- `503`: bloqueio global do portal, com `Retry-After` e um objeto `bloqueio`
+  contendo `ativo`, `motivo`, `codigo`, `mensagem` e `retryAfterSegundos`.
 - `500` ou `502`: falha interna ou resposta inesperada, sem detalhe interno.
 
 ### Criar lote
@@ -69,20 +69,22 @@ autenticada no pool.
 `202 Accepted` devolve `id`, `estado` e `total`, com `Location` apontando para
 `/api/lotes/{id}/eventos`. Repetir a chave com o mesmo payload retorna a
 execução existente; payload diferente retorna `409`. Limite acima de 300 itens
-retorna `413`; capacidade esgotada retorna `429` com `Retry-After: 10`.
-Submissões novas retornam `503` com `Retry-After` enquanto o disjuntor estiver
-aberto ou ocupado pela sonda; um replay idempotente válido continua retornando
-a execução original.
+retorna `413`. O limite local de taxa retorna `429` com `Retry-After`;
+capacidade da fila esgotada retorna `429` sem esse header.
+Submissões novas retornam `503` com o bloqueio ativo; um replay idempotente
+válido continua retornando a execução original.
 
 ### Acompanhar execução
 
 `GET /api/lotes/{id}/eventos` requer o mesmo Bearer. É um stream
 `text/event-stream`; progresso e resultado são enviados como eventos `progresso`
-e `resultado`. A conexão pode retomar eventos enquanto o lote está ativo usando
-`desde` ou `Last-Event-ID`. Há no máximo um stream ativo por lote e o heartbeat
-é enviado a cada 15 segundos. O frontend tenta reconectar até três vezes,
-aguardando 2, 4 e 8 segundos e retomando do último id recebido. O resultado não
-é retido após a execução.
+e `resultado`. O cancelamento global envia `erro` com o objeto `bloqueio`, sem
+entregar resultados parciais. A conexão pode retomar eventos enquanto o lote
+está ativo ou cancelado por bloqueio usando `desde` ou `Last-Event-ID`. Há no
+máximo um stream ativo por lote e o heartbeat é enviado a cada 15 segundos. O
+frontend tenta reconectar até três vezes em interrupções de transporte,
+aguardando 2, 4 e 8 segundos e retomando do último id recebido. Execuções
+canceladas ficam retidas por cinco minutos para replay idempotente e SSE.
 
 `401` indica token inválido; `404` indica lote inexistente, descartado ou de
 outro token. Sem assinantes por 30 segundos, o lote é cancelado. Cancelar uma
@@ -97,20 +99,40 @@ limite.
 ### Estado do serviço
 
 `GET /api/status` não exige token e fica fora dos limites de requisições ao
-portal. Devolve somente `status`, `portalSulAmerica` e `timestamp`:
+portal. Devolve `status`, `portalSulAmerica`, `bloqueio` e `timestamp`:
 
 ```json
 {
   "status": "ok",
   "portalSulAmerica": {"alcançavel": true, "status": 200},
+  "bloqueio": {"ativo": false},
   "timestamp": "2026-11-22T10:00:00.000Z"
 }
 ```
 
+Com bloqueio ativo, `bloqueio` também informa o motivo, código curto, mensagem
+e segundos restantes. Enquanto bloqueado, o endpoint não sonda o portal; ao
+terminar o cooldown, faz uma sonda exclusiva para decidir se libera consultas.
 Não publica sessões, lotes, memória, contadores de falha, tokens,
 identificadores, carteirinhas, senhas, cookies, corpos de resposta ou Support
 IDs. Métricas operacionais detalhadas podem continuar registradas internamente,
 mas não são expostas neste endpoint público.
+
+### Bloqueio global do portal
+
+A primeira falha elegível abre bloqueio para todos os prestadores e cancela
+consultas em andamento e lotes na fila. O bloqueio cobre HTTP 429, rejeição F5,
+HTTP 408/5xx, falha de rede ou timeout, 401/403 que persistem após renovação de
+sessão e respostas inesperadas do portal. Falhas de credenciais, rejeições
+locais da API, HTTP 404, erros de negócio e cancelamentos não abrem o bloqueio.
+
+O cooldown escala em 1, 3, 10 e 15 minutos, com limite de 15 minutos. Um
+`Retry-After` do portal só prolonga o cooldown quando for maior que o nível
+atual. Uma sonda bem-sucedida ao fim do cooldown libera novas consultas; um
+sucesso real de consulta ou 15 minutos sem bloqueio reinicia a escala. O
+frontend mostra a causa e a contagem regressiva, desabilita o envio e, ao abrir
+o bloqueio durante um lote, volta à tela inicial e descarta seus resultados.
+Após a liberação, o usuário precisa selecionar e enviar o XML novamente.
 
 ## Capacidade e execução
 
@@ -133,32 +155,19 @@ mas não são expostas neste endpoint público.
 O agendador alterna entre identificadores e lotes, seleciona primeiro uma
 sessão autenticada menos ocupada e não abre sessões extras para cada lote.
 Resultados de consulta são tipados por chamada. Uma rejeição de sessão (401/403)
-pode provocar uma renovação compartilhada e uma repetição. Falhas de transporte
-e respostas HTTP 408, 500, 502, 503 ou 504 recebem até quatro tentativas totais
-por item no agendador, com backoff exponencial e jitter. Os retries são
-coordenados com o disjuntor; chamadas diretas do harness E2 mantêm o retry
-interno de `SessaoPortal`. HTTP 429, 401/403 após renovação e respostas
-inesperadas não são repetidas automaticamente. Rejeições HTTP não são tratadas
-como falhas de rede.
+pode provocar uma renovação compartilhada e uma repetição. O primeiro erro
+elegível abre o bloqueio antes de qualquer retry do item e cancela todos os
+lotes; chamadas diretas do harness E2 mantêm o retry interno de
+`SessaoPortal`. Rejeições HTTP não são tratadas como falhas de rede.
 Configure `PORTAL_RETRY_MAX_TENTATIVAS` (padrão 3),
 `PORTAL_RETRY_BACKOFF_BASE_MS` (1000), `PORTAL_RETRY_BACKOFF_MAX_MS` (20000) e
 `PORTAL_RETRY_JITTER_PERCENT` (30) no ambiente do backend.
-`GET /api/status` publica os valores efetivos em `resilienciaPortal.retryConfiguracao`
-e, em `resilienciaPortal.retriesAgendador`, os contadores `iniciados`,
-`resolvidos` e `esgotados`. Um retry é contado como iniciado depois do backoff
-e da permissão do disjuntor; cancelamentos durante o backoff não são contados.
-`resolvidos` conta itens que tiveram sucesso após retry. `esgotados` conta
-somente itens cuja última tentativa permitida também falhou de forma retryable;
-uma cadeia que termina em falha não retryable não incrementa esse contador.
-
 Em 401 na submissão ou no SSE, o frontend cria uma sessão uma vez; na submissão,
-mantém a mesma chave idempotente, e no SSE, o último id recebido. Na criação de
-sessão, 429 e 503 só são repetidos uma vez se houver `Retry-After`. Para criação
-de lote, 429 e 503 permitem até três reenvios com a mesma chave e backoff de 1, 2 e 4
-segundos; um `Retry-After` substitui a espera correspondente e é limitado a 60
-segundos. Rejeições HTTP diferentes não são repetidas automaticamente. Falhas de rede
-não têm SLA numérico definido: o harness registra duração p50 e p95 para
-caracterizar o comportamento medido.
+mantém a mesma chave idempotente, e no SSE, o último id recebido. Erros 503 com
+`bloqueio.ativo` não são repetidos: o lote é descartado e o usuário retorna à
+tela inicial. Rejeições HTTP diferentes não são repetidas automaticamente.
+Falhas de rede não têm SLA numérico definido: o harness registra duração p50 e
+p95 para caracterizar o comportamento medido.
 
 ## Segurança e operação
 

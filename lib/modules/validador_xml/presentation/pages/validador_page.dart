@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
@@ -97,12 +99,7 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
 
     if (c.status == StatusValidador.arquivoPronto ||
         c.status == StatusValidador.validando) {
-      final String textoEtapa = switch (c.etapaConsultaBackend) {
-        EtapaConsultaBackend.consultando => AppStrings.consultandoSulAmerica,
-        EtapaConsultaBackend.aguardandoRetentativa =>
-          AppStrings.consultasAguardandoRetentativa,
-        _ => AppStrings.lendoValidandoXml,
-      };
+      final String textoEtapa = _textoEtapaValidacao(c);
       return Center(
         child: Padding(
           padding: const EdgeInsets.only(top: AppDimens.spaceXs),
@@ -137,18 +134,21 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
                   cor: AppColors.textMuted,
                   alinhamento: TextAlign.center,
                 ),
+                if (c.bloqueioPortal != null) ...[
+                  const SizedBox(height: AppDimens.spaceLg),
+                  _painelBloqueio(c),
+                ],
                 if (conexao != EstadoConexao.pronto) ...[
                   const SizedBox(height: AppDimens.spaceLg),
                   _painelConexao(c, conexao),
                 ],
-                if (conexao != EstadoConexao.verificando) ...[
+                if (conexao == EstadoConexao.pronto &&
+                    c.bloqueioPortal == null) ...[
                   const SizedBox(height: AppDimens.spaceLg),
                   DropZoneSite(
-                    onArquivoSelecionado: (nome, bytes) =>
-                        context.read<ValidadorController>().definirArquivo(
-                              nomeArquivo: nome,
-                              bytes: bytes,
-                            ),
+                    onArquivoSelecionado: (nome, bytes) {
+                      unawaited(_selecionarArquivo(nome, bytes));
+                    },
                   ),
                 ],
                 if (c.status == StatusValidador.erro && c.mensagemErro != null)
@@ -167,6 +167,62 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
         ),
       ),
     );
+  }
+
+  String _textoEtapaValidacao(ValidadorController controller) {
+    if (controller.etapaConsultaBackend ==
+        EtapaConsultaBackend.consultando) {
+      return AppStrings.consultandoSulAmerica;
+    }
+    if (controller.etapaConsultaBackend ==
+        EtapaConsultaBackend.aguardandoRetentativa) {
+      return AppStrings.consultasAguardandoRetentativa;
+    }
+    return switch (controller.etapaValidacaoLocal) {
+      EtapaValidacaoLocal.verificandoDisponibilidade =>
+        AppStrings.verificandoDisponibilidade,
+      EtapaValidacaoLocal.lendoXml => AppStrings.lendoXml,
+      EtapaValidacaoLocal.carregandoBaseTuss => AppStrings.carregandoBaseTuss,
+      EtapaValidacaoLocal.extraindoGuias => AppStrings.extraindoGuias,
+      EtapaValidacaoLocal.validandoGuias => AppStrings.validandoGuiasLocais,
+      null => AppStrings.lendoValidandoXml,
+    };
+  }
+
+  Widget _painelBloqueio(ValidadorController controller) {
+    final bloqueio = controller.bloqueioPortal!;
+    final int minutos = bloqueio.segundosRestantes ~/ 60;
+    final int segundos = bloqueio.segundosRestantes % 60;
+    final String restante = bloqueio.segundosRestantes == 0
+        ? AppStrings.bloqueioPortalVerificando
+        : '${AppStrings.bloqueioPortalLiberacao}'
+              '${minutos.toString().padLeft(2, '0')}:'
+              '${segundos.toString().padLeft(2, '0')}.';
+    return Padding(
+      padding: const EdgeInsets.all(AppDimens.spaceMd),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(
+            maxWidth: AppDimens.larguraMaximaHome,
+          ),
+          child: PainelStatus(
+            icone: Icons.block,
+            cor: AppColors.error,
+            titulo:
+                '${AppStrings.bloqueioPortalTitulo} (${bloqueio.codigo})',
+            mensagem: '${bloqueio.mensagem}. $restante',
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _selecionarArquivo(String nome, Uint8List bytes) async {
+    final ValidadorController controller = context.read<ValidadorController>();
+    if (await controller.verificarBloqueioAgora() || !mounted) return;
+    _ultimoValidadoNome = null;
+    _identificador = null;
+    controller.definirArquivo(nomeArquivo: nome, bytes: bytes);
   }
 
   Widget _painelConexao(ValidadorController c, EstadoConexao conexao) {
@@ -345,11 +401,11 @@ class _ValidadorBodyState extends State<_ValidadorBody> {
                     },
                   ),
                 ],
-              ),
             ),
           ),
         ),
-      );
+      ),
+    );
   }
 
   Widget _filtroErros() {

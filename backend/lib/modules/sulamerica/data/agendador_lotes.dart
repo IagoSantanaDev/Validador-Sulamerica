@@ -5,6 +5,7 @@ import 'package:dio/dio.dart';
 import 'package:validador_backend/modules/sulamerica/data/credenciais_portal.dart';
 import 'package:validador_backend/modules/sulamerica/data/disjuntor_portal.dart';
 import 'package:validador_backend/modules/sulamerica/data/execucao_lote.dart';
+import 'package:validador_backend/modules/sulamerica/data/motivo_bloqueio_portal.dart';
 import 'package:validador_backend/modules/sulamerica/data/pool_sessoes_portal.dart';
 import 'package:validador_backend/modules/sulamerica/data/sessao_portal.dart';
 
@@ -27,11 +28,15 @@ class ResultadoConsultaAgendada {
     required this.dados,
     this.retryable = false,
     this.falhaElegivelCircuito = false,
+    this.motivoBloqueio,
+    this.retryAfter,
   });
 
   final Map<String, dynamic> dados;
   final bool retryable;
   final bool falhaElegivelCircuito;
+  final MotivoBloqueioPortal? motivoBloqueio;
+  final Duration? retryAfter;
 }
 
 class FilaCheiaException implements Exception {
@@ -80,6 +85,7 @@ class AgendadorLotes {
   final Map<String, int> _cursorLotes = <String, int>{};
   final List<String> _identificadores = <String>[];
   final Map<String, _LoteAgendado> _execucoes = <String, _LoteAgendado>{};
+  final Map<String, _LoteAgendado> _canceladas = <String, _LoteAgendado>{};
 
   int _cursorIdentificador = 0;
   int _requisicoesAtivas = 0;
@@ -109,9 +115,19 @@ class AgendadorLotes {
       };
 
   ExecucaoLote? obterExecucao(String id, String tokenDono) {
-    final _LoteAgendado? lote = _execucoes[id];
+    final _LoteAgendado? lote = _execucoes[id] ?? _canceladas[id];
     if (lote == null || lote.tokenDono != tokenDono) return null;
     return lote.execucao;
+  }
+
+  void cancelarTodos(Map<String, Object?> bloqueio) {
+    for (final _LoteAgendado lote
+        in List<_LoteAgendado>.of(_execucoes.values)) {
+      lote.execucao.cancelar(
+        mensagem: bloqueio['mensagem'] as String,
+        bloqueio: bloqueio,
+      );
+    }
   }
 
   ExecucaoAgendada agendar({
@@ -323,12 +339,18 @@ class AgendadorLotes {
           } finally {
             tempoPortalMs += tempoConsulta.elapsedMilliseconds;
           }
-          permissao?.concluir(_classificarResultado(resultado));
+          permissao?.concluir(
+            _classificarResultado(resultado),
+            motivo: resultado.motivoBloqueio,
+            retryAfter: resultado.retryAfter,
+          );
         } on FalhaPoolSessoesException catch (erro) {
           permissao?.concluir(
             erro.resultado.falhaElegivelCircuito
                 ? ResultadoDisjuntorPortal.falhaElegivel
                 : ResultadoDisjuntorPortal.neutra,
+            motivo: erro.resultado.motivoBloqueio,
+            retryAfter: erro.resultado.retryAfter,
           );
           resultado = mapearFalhaSessao?.call(consulta, erro.resultado) ??
               ResultadoConsultaAgendada(
@@ -339,6 +361,8 @@ class AgendadorLotes {
                 },
                 falhaElegivelCircuito: erro.resultado.falhaElegivelCircuito,
                 retryable: erro.resultado.falhaElegivelCircuito,
+                motivoBloqueio: erro.resultado.motivoBloqueio,
+                retryAfter: erro.resultado.retryAfter,
               );
         } finally {
           emprestimo?.liberar();
@@ -481,6 +505,15 @@ class AgendadorLotes {
       _timerRetentativaCircuito?.cancel();
       _timerRetentativaCircuito = null;
     }
+    if (lote.execucao.estado == EstadoExecucaoLote.cancelado) {
+      _canceladas[lote.id] = lote;
+      lote.timerRetencao = Timer(const Duration(minutes: 5), () {
+        if (!identical(_canceladas.remove(lote.id), lote)) return;
+        lote.execucao.descartar();
+        lote.aoFinalizar();
+      });
+      return;
+    }
     lote.execucao.descartar();
     lote.aoFinalizar();
   }
@@ -529,4 +562,5 @@ class _LoteAgendado {
   int ativas = 0;
   bool prazoEsgotado = false;
   Timer? timerPrazo;
+  Timer? timerRetencao;
 }

@@ -37,10 +37,15 @@ class FilaCheiaException extends AppException {
 }
 
 class ServicoIndisponivelException extends AppException {
-  const ServicoIndisponivelException({this.retryAfter, String? mensagem})
+  const ServicoIndisponivelException({
+    this.retryAfter,
+    this.bloqueio,
+    String? mensagem,
+  })
       : super(mensagem ?? 'O serviço está temporariamente indisponível.');
 
   final Duration? retryAfter;
+  final Map<String, dynamic>? bloqueio;
 }
 
 class ErroServidorException extends AppException {

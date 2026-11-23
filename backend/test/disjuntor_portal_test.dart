@@ -2,177 +2,158 @@ import 'dart:async';
 
 import 'package:test/test.dart';
 import 'package:validador_backend/modules/sulamerica/data/disjuntor_portal.dart';
+import 'package:validador_backend/modules/sulamerica/data/motivo_bloqueio_portal.dart';
 
 void main() {
-  test('abre após cinco falhas elegíveis consecutivas na janela', () async {
+  test('primeira falha elegível abre bloqueio global com sua causa', () async {
     final DateTime agora = DateTime.utc(2026);
+    Map<String, Object?>? aberto;
     final DisjuntorPortal disjuntor = DisjuntorPortal(
       sondarPortal: () async => const ResultadoSondaDisjuntor(status: 200),
       agora: () => agora,
+      aoAbrir: (Map<String, Object?> bloqueio) => aberto = bloqueio,
     );
 
-    for (int i = 0; i < 4; i++) {
-      (await disjuntor.tentarAdquirir())!.concluir(
-        ResultadoDisjuntorPortal.falhaElegivel,
-      );
-    }
-    expect(disjuntor.estado, EstadoDisjuntorPortal.fechado);
-    (await disjuntor.tentarAdquirir())!.concluir(
+    final PermissaoDisjuntorPortal permissao =
+        (await disjuntor.tentarAdquirir())!;
+    permissao.concluir(
       ResultadoDisjuntorPortal.falhaElegivel,
+      motivo: MotivoBloqueioPortal.limitePortal,
     );
+
     expect(disjuntor.estado, EstadoDisjuntorPortal.aberto);
-    expect(disjuntor.diagnostico['falhasConsecutivas'], 5);
+    expect(disjuntor.diagnostico['falhasConsecutivas'], 1);
+    expect(disjuntor.retryAfterSegundos, 60);
+    expect(disjuntor.bloqueio, containsPair('motivo', 'limite_portal'));
+    expect(aberto, disjuntor.bloqueio);
     expect(await disjuntor.tentarAdquirir(), isNull);
   });
 
-  test(
-    'resultado tardio de uma geração antiga não fecha o disjuntor',
-    () async {
-      final DisjuntorPortal disjuntor = DisjuntorPortal(
-        sondarPortal: () async => const ResultadoSondaDisjuntor(status: 200),
-      );
-      final List<PermissaoDisjuntorPortal> permissoes =
-          <PermissaoDisjuntorPortal>[
-            for (int i = 0; i < 6; i++) (await disjuntor.tentarAdquirir())!,
-          ];
-
-      for (final PermissaoDisjuntorPortal permissao
-          in permissoes.skip(1).take(5)) {
-        permissao.concluir(ResultadoDisjuntorPortal.falhaElegivel);
-      }
-      expect(disjuntor.estado, EstadoDisjuntorPortal.aberto);
-
-      permissoes.first.concluir(ResultadoDisjuntorPortal.sucesso);
-      expect(disjuntor.estado, EstadoDisjuntorPortal.aberto);
-      expect(disjuntor.diagnostico['falhasConsecutivas'], 5);
-    },
-  );
-
-  test(
-    'sucesso elegível limpa sequência e falha fora da janela inicia outra',
-    () async {
-      DateTime agora = DateTime.utc(2026);
-      final DisjuntorPortal disjuntor = DisjuntorPortal(
-        sondarPortal: () async => const ResultadoSondaDisjuntor(status: 200),
-        agora: () => agora,
-      );
-
-      for (int i = 0; i < 4; i++) {
-        final PermissaoDisjuntorPortal permissao = (await disjuntor
-            .tentarAdquirir())!;
-        permissao.concluir(ResultadoDisjuntorPortal.falhaElegivel);
-      }
-      (await disjuntor.tentarAdquirir())!.concluir(
-        ResultadoDisjuntorPortal.sucesso,
-      );
-      expect(disjuntor.diagnostico['falhasConsecutivas'], 0);
-
-      for (int i = 0; i < 4; i++) {
-        (await disjuntor.tentarAdquirir())!.concluir(
-          ResultadoDisjuntorPortal.falhaElegivel,
-        );
-      }
-      agora = agora.add(const Duration(seconds: 61));
-      (await disjuntor.tentarAdquirir())!.concluir(
-        ResultadoDisjuntorPortal.falhaElegivel,
-      );
-      expect(disjuntor.estado, EstadoDisjuntorPortal.fechado);
-      expect(disjuntor.diagnostico['falhasConsecutivas'], 1);
-    },
-  );
-
-  test(
-    'cooldown exige sonda, e sonda malsucedida reabre por mais 60s',
-    () async {
-      DateTime agora = DateTime.utc(2026);
-      int statusSonda = 503;
-      final DisjuntorPortal disjuntor = DisjuntorPortal(
-        sondarPortal: () async => ResultadoSondaDisjuntor(status: statusSonda),
-        agora: () => agora,
-      );
-
-      for (int i = 0; i < 5; i++) {
-        (await disjuntor.tentarAdquirir())!.concluir(
-          ResultadoDisjuntorPortal.falhaElegivel,
-        );
-      }
-      expect(disjuntor.estado, EstadoDisjuntorPortal.aberto);
-
-      agora = agora.add(const Duration(seconds: 60));
-      expect(disjuntor.estado, EstadoDisjuntorPortal.meioAberto);
-      expect(await disjuntor.tentarAdquirir(), isNull);
-      expect(disjuntor.estado, EstadoDisjuntorPortal.aberto);
-      expect(disjuntor.retryAfterSegundos, 60);
-
-      agora = agora.add(const Duration(seconds: 60));
-      statusSonda = 200;
-      final PermissaoDisjuntorPortal? permissao = await disjuntor
-          .tentarAdquirir();
-      expect(permissao, isNotNull);
-      expect(disjuntor.estado, EstadoDisjuntorPortal.fechado);
-      permissao!.concluir(ResultadoDisjuntorPortal.neutra);
-    },
-  );
-
-  test('429 e respostas não elegíveis não acumulam falhas', () async {
+  test('falhas simultâneas abrem uma vez e resultados antigos não fecham', () async {
+    int aberturas = 0;
     final DisjuntorPortal disjuntor = DisjuntorPortal(
       sondarPortal: () async => const ResultadoSondaDisjuntor(status: 200),
+      aoAbrir: (_) => aberturas++,
     );
+    final List<PermissaoDisjuntorPortal> permissoes = <PermissaoDisjuntorPortal>[
+      for (int i = 0; i < 3; i++) (await disjuntor.tentarAdquirir())!,
+    ];
 
-    for (int i = 0; i < 8; i++) {
-      (await disjuntor.tentarAdquirir())!.concluir(
-        ResultadoDisjuntorPortal.neutra,
-      );
-    }
-    expect(disjuntor.estado, EstadoDisjuntorPortal.fechado);
-    expect(disjuntor.diagnostico['falhasConsecutivas'], 0);
+    permissoes[1].concluir(ResultadoDisjuntorPortal.falhaElegivel);
+    permissoes[2].concluir(ResultadoDisjuntorPortal.falhaElegivel);
+    permissoes.first.concluir(ResultadoDisjuntorPortal.sucesso);
+
+    expect(aberturas, 1);
+    expect(disjuntor.estado, EstadoDisjuntorPortal.aberto);
+    expect(disjuntor.diagnostico['falhasConsecutivas'], 1);
   });
 
-  test('F5 em resposta da sonda não é contado como falha elegível', () async {
+  test('sonda exclusiva escalona cooldown e respeita Retry-After maior', () async {
+    DateTime agora = DateTime.utc(2026);
+    int sondas = 0;
+    final DisjuntorPortal disjuntor = DisjuntorPortal(
+      sondarPortal: () async {
+        sondas++;
+        return sondas == 1
+            ? const ResultadoSondaDisjuntor(
+                status: 429,
+                retryAfter: Duration(minutes: 4),
+              )
+            : const ResultadoSondaDisjuntor(status: 503);
+      },
+      agora: () => agora,
+    );
+    disjuntor.registrar(ResultadoDisjuntorPortal.falhaElegivel);
+
+    agora = agora.add(const Duration(minutes: 1));
+    await disjuntor.verificarRecuperacao();
+    expect(sondas, 1);
+    expect(disjuntor.retryAfterSegundos, 240);
+    expect(disjuntor.bloqueio['motivo'], 'limite_portal');
+
+    agora = agora.add(const Duration(minutes: 4));
+    await disjuntor.verificarRecuperacao();
+    expect(sondas, 2);
+    expect(disjuntor.retryAfterSegundos, 600);
+    expect(disjuntor.diagnostico['nivelCooldown'], 3);
+  });
+
+  test('sonda de recuperação bem-sucedida libera e sucesso real reseta nível', () async {
     DateTime agora = DateTime.utc(2026);
     final DisjuntorPortal disjuntor = DisjuntorPortal(
-      sondarPortal: () async =>
-          const ResultadoSondaDisjuntor(status: 503, rejeicaoF5: true),
+      sondarPortal: () async => const ResultadoSondaDisjuntor(status: 200),
       agora: () => agora,
     );
-    for (int i = 0; i < 5; i++) {
-      (await disjuntor.tentarAdquirir())!.concluir(
-        ResultadoDisjuntorPortal.falhaElegivel,
-      );
-    }
+    disjuntor.registrar(ResultadoDisjuntorPortal.falhaElegivel);
+    agora = agora.add(const Duration(minutes: 1));
+    await disjuntor.verificarRecuperacao();
 
-    agora = agora.add(const Duration(seconds: 60));
-    expect(await disjuntor.tentarAdquirir(), isNull);
-    expect(disjuntor.diagnostico['falhasConsecutivas'], 5);
-    expect(disjuntor.estado, EstadoDisjuntorPortal.aberto);
+    expect(disjuntor.estaBloqueado, isFalse);
+    final PermissaoDisjuntorPortal permissao =
+        (await disjuntor.tentarAdquirir())!;
+    permissao.concluir(ResultadoDisjuntorPortal.sucesso);
+    expect(disjuntor.diagnostico['nivelCooldown'], 1);
+    expect(disjuntor.diagnostico['falhasConsecutivas'], 0);
+
+    disjuntor.registrar(ResultadoDisjuntorPortal.falhaElegivel);
+    expect(disjuntor.retryAfterSegundos, 60);
   });
 
-  test(
-    'sonda half-open é exclusiva e falha de sonda reabre após cancelamento',
-    () async {
-      DateTime agora = DateTime.utc(2026);
-      final Completer<ResultadoSondaDisjuntor> sonda =
-          Completer<ResultadoSondaDisjuntor>();
-      final DisjuntorPortal disjuntor = DisjuntorPortal(
-        sondarPortal: () => sonda.future,
-        agora: () => agora,
-      );
-      for (int i = 0; i < 5; i++) {
-        (await disjuntor.tentarAdquirir())!.concluir(
-          ResultadoDisjuntorPortal.falhaElegivel,
-        );
-      }
+  test('nível volta ao primeiro cooldown após 15 minutos sem bloqueio', () async {
+    DateTime agora = DateTime.utc(2026);
+    final DisjuntorPortal disjuntor = DisjuntorPortal(
+      sondarPortal: () async => const ResultadoSondaDisjuntor(status: 200),
+      agora: () => agora,
+    );
+    disjuntor.registrar(ResultadoDisjuntorPortal.falhaElegivel);
+    agora = agora.add(const Duration(minutes: 1));
+    await disjuntor.verificarRecuperacao();
+    disjuntor.registrar(ResultadoDisjuntorPortal.falhaElegivel);
+    expect(disjuntor.retryAfterSegundos, 180);
 
-      agora = agora.add(const Duration(seconds: 60));
-      final Future<PermissaoDisjuntorPortal?> primeira = disjuntor
-          .tentarAdquirir();
-      await Future<void>.delayed(Duration.zero);
-      expect(disjuntor.diagnostico['sondaEmAndamento'], isTrue);
-      expect(await disjuntor.tentarAdquirir(), isNull);
-      sonda.completeError(Exception('sonda cancelada'));
-      expect(await primeira, isNull);
-      expect(disjuntor.estado, EstadoDisjuntorPortal.aberto);
-      expect(disjuntor.retryAfterSegundos, 60);
-    },
-  );
+    agora = agora.add(const Duration(minutes: 3));
+    await disjuntor.verificarRecuperacao();
+    agora = agora.add(const Duration(minutes: 15));
+    disjuntor.registrar(ResultadoDisjuntorPortal.falhaElegivel);
+    expect(disjuntor.retryAfterSegundos, 60);
+  });
+
+  test('429, rejeição F5, transporte e resposta inesperada da sonda bloqueiam', () async {
+    final List<ResultadoSondaDisjuntor> respostas = <ResultadoSondaDisjuntor>[
+      const ResultadoSondaDisjuntor(status: 429),
+      const ResultadoSondaDisjuntor(status: 503, rejeicaoF5: true),
+      const ResultadoSondaDisjuntor(status: null, falhaTransporte: true),
+      const ResultadoSondaDisjuntor(status: 200, respostaInesperada: true),
+    ];
+    for (final ResultadoSondaDisjuntor resposta in respostas) {
+      final DisjuntorPortal disjuntor = DisjuntorPortal(
+        sondarPortal: () async => resposta,
+      );
+      disjuntor.registrar(ResultadoDisjuntorPortal.falhaElegivel);
+      await disjuntor.verificarRecuperacao();
+      expect(disjuntor.estaBloqueado, isTrue);
+    }
+  });
+
+  test('sonda meio-aberta permite somente uma recuperação simultânea', () async {
+    DateTime agora = DateTime.utc(2026);
+    final Completer<ResultadoSondaDisjuntor> sonda =
+        Completer<ResultadoSondaDisjuntor>();
+    final DisjuntorPortal disjuntor = DisjuntorPortal(
+      sondarPortal: () => sonda.future,
+      agora: () => agora,
+    );
+    disjuntor.registrar(ResultadoDisjuntorPortal.falhaElegivel);
+    agora = agora.add(const Duration(minutes: 1));
+
+    final Future<void> primeira = disjuntor.verificarRecuperacao();
+    await Future<void>.delayed(Duration.zero);
+    await disjuntor.verificarRecuperacao();
+    expect(disjuntor.diagnostico['sondaEmAndamento'], isTrue);
+    sonda.completeError(Exception('sonda interrompida'));
+    await primeira;
+
+    expect(disjuntor.estado, EstadoDisjuntorPortal.aberto);
+    expect(disjuntor.retryAfterSegundos, 180);
+  });
 }

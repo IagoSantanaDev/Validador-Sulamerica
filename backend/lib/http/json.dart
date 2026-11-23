@@ -65,13 +65,18 @@ Response respostaErro(
   String mensagem,
   int status, {
   Map<String, String>? headers,
+  Map<String, dynamic>? dadosAdicionais,
 }) {
   final Map<String, String> cabecalhos = <String, String>{
     ...?headers,
     if (status == 502) cabecalhoOrigemErroApi: 'api',
   };
   return respostaJson(
-    <String, dynamic>{'status': 'erro', 'mensagem': mensagem},
+    <String, dynamic>{
+      'status': 'erro',
+      'mensagem': mensagem,
+      ...?dadosAdicionais,
+    },
     status: status,
     headers: cabecalhos,
   );

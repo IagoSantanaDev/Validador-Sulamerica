@@ -51,7 +51,7 @@ Um detalhe operacional validado: o login no portal precisa começar com um GET n
 
 ## Como funciona a validação
 
-1. O site abre e verifica a API (`/api/status`). O login no portal acontece depois que um arquivo é carregado: o app envia o identificador do prestador daquele lote e o backend resolve as credenciais no servidor, a partir de secrets. Enquanto isso não acontece, a página mostra o motivo exato: API fora do ar, credenciais ausentes ou credenciais inválidas.
+1. O site abre e verifica a API (`/api/status`). O login no portal acontece depois que um arquivo é carregado: o app envia o identificador do prestador daquele lote e o backend resolve as credenciais no servidor, a partir de secrets. Se o portal limitar ou rejeitar uma consulta, o site bloqueia novas consultas, cancela lotes em andamento e mostra a causa e o tempo restante. Quando liberar, o usuário seleciona o XML novamente.
 2. Você arrasta um arquivo `.xml` de lote TISS para a área de upload. O app calcula o hash MD5 e extrai os metadados do lote.
 3. A validação local roda as regras por guia.
 4. As guias com dados bem formados são consultadas no portal, em lote: elegibilidade pela carteira e status da autorização pela senha.
@@ -203,7 +203,7 @@ segredos: use as variáveis de ambiente/secrets do serviço.
 |---|---|---|---|
 | POST | `/api/login` | `{identificadorPrestador}` | Autentica no portal e devolve `{token, autenticada: true}` |
 | POST | `/api/consultas` | `{token, consultas: [{tipo, chave}]}` | Consultas em lote, resultados na ordem da requisição |
-| GET | `/api/status` | nenhum | Health check, sessões ativas e alcance do portal |
+| GET | `/api/status` | nenhum | Health check, alcance do portal e bloqueio global ativo |
 
 Limites do backend, para não abusar do proxy: 300 itens por lote, corpo de até 1 MB, rate limit de 40 requisições por minuto nas rotas que tocam o portal (contado pelo endereço de conexão real) e no máximo 10 sessões ativas (a mais antiga é encerrada quando o limite é atingido). O estado das sessões é local ao processo, sem réplica.
 

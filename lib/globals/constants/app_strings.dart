@@ -13,6 +13,13 @@ class AppStrings {
   static const String dropZoneTexto =
       'Clique aqui para selecionar o arquivo ou arraste ele para cá para iniciar a validação.';
   static const String lendoValidandoXml = 'Lendo e validando XML...';
+  static const String verificandoDisponibilidade =
+      'Verificando disponibilidade...';
+  static const String lendoXml = 'Lendo XML...';
+  static const String carregandoBaseTuss =
+      'Carregando base de validação TUSS...';
+  static const String extraindoGuias = 'Localizando guias no XML...';
+  static const String validandoGuiasLocais = 'Validando guias...';
   static const String consultandoSulAmerica = 'Consultando SulAmérica...';
 
   static const String resultadoTitulo = 'Resultado da Validação';
@@ -40,6 +47,12 @@ class AppStrings {
       'A fila de consultas está ocupada. Aguarde um momento e tente novamente.';
   static const String servicoConsultaIndisponivel =
       'O serviço de consultas está temporariamente indisponível. Tente novamente em instantes.';
+  static const String bloqueioPortalTitulo =
+      'Consultas temporariamente bloqueadas';
+  static const String bloqueioPortalLiberacao =
+      'Nova consulta liberada em ';
+  static const String bloqueioPortalVerificando =
+      'Verificando disponibilidade...';
   static const String erroConexaoConsultaBackend =
       'Não foi possível conectar ao serviço de consultas. Verifique sua conexão e tente novamente.';
   static const String erroConsultaBackendExpirada =

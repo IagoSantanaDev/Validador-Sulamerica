@@ -71,6 +71,9 @@ class ValidadorApi {
                       status: await sondaPortalPersonalizada(),
                     )),
         );
+    _disjuntor.aoAbrir = (Map<String, Object?> bloqueio) {
+      _agendador.cancelarTodos(bloqueio);
+    };
     _agendador = AgendadorLotes(
       pool: _pool,
       limiteExecucoes: limiteExecucoes,
@@ -148,10 +151,15 @@ class ValidadorApi {
       return respostaErro('Identificador de prestador nao autorizado.', 401);
     }
 
+    final PermissaoDisjuntorPortal? permissao = await _disjuntor
+        .tentarAdquirir();
+    if (permissao == null) return _respostaDisjuntorAberto();
+
     final ResultadoRateLimit limite = _rateLimit.consumirPrestador(
       identificador,
     );
     if (!limite.permitido) {
+      permissao.concluir(ResultadoDisjuntorPortal.neutra);
       _rejeicoes429++;
       return respostaErro(
         'Muitas requisicoes. Aguarde um instante.',
@@ -159,10 +167,6 @@ class ValidadorApi {
         headers: cabecalhosRetryAfter(limite.retryAfterSegundos),
       );
     }
-
-    final PermissaoDisjuntorPortal? permissao = await _disjuntor
-        .tentarAdquirir();
-    if (permissao == null) return _respostaDisjuntorAberto();
 
     late final SessaoLogica sessaoLogica;
     try {
@@ -174,35 +178,24 @@ class ValidadorApi {
     }
 
     try {
-      final bool sessaoJaAutenticada = _pool.possuiSessaoAutenticada(
-        identificador,
-      );
       await _pool.garantirAutenticada(identificador, credenciais);
-      permissao.concluir(
-        sessaoJaAutenticada
-            ? ResultadoDisjuntorPortal.neutra
-            : ResultadoDisjuntorPortal.sucesso,
-      );
+      permissao.concluir(ResultadoDisjuntorPortal.neutra);
     } on FalhaPoolSessoesException catch (erro) {
       permissao.concluir(
         erro.resultado.falhaElegivelCircuito
             ? ResultadoDisjuntorPortal.falhaElegivel
             : ResultadoDisjuntorPortal.neutra,
+        motivo: erro.resultado.motivoBloqueio,
+        retryAfter: erro.resultado.retryAfter,
       );
       _repositorio.remover(sessaoLogica.token);
+      if (_disjuntor.estaBloqueado) return _respostaDisjuntorAberto();
       final int status = _statusFalhaLogin(erro.resultado);
       _contarFalhaUpstream(status);
       _logger.w('Criacao de sessao rejeitada: falha no login do portal.');
       return respostaErro(
         _mensagemFalhaLogin(status),
         status,
-        headers: status == 503
-            ? cabecalhosRetryAfter(
-                _disjuntor.retryAfterSegundos == 0
-                    ? 1
-                    : _disjuntor.retryAfterSegundos,
-              )
-            : null,
       );
     } on Exception {
       permissao.concluir(ResultadoDisjuntorPortal.neutra);
@@ -250,16 +243,6 @@ class ValidadorApi {
       return respostaErro('Token de sessao invalido ou ausente.', 401);
     }
 
-    final ResultadoRateLimit limite = _rateLimit.consumirToken(token);
-    if (!limite.permitido) {
-      _rejeicoes429++;
-      return respostaErro(
-        'Muitas requisicoes. Aguarde um instante.',
-        429,
-        headers: cabecalhosRetryAfter(limite.retryAfterSegundos),
-      );
-    }
-
     final String? chave = request.headers['idempotency-key']?.trim();
     if (chave == null || chave.isEmpty) {
       return respostaErro('Header Idempotency-Key e obrigatorio.', 400);
@@ -284,6 +267,16 @@ class ValidadorApi {
         .tentarAdquirir();
     if (permissao == null) return _respostaDisjuntorAberto();
     permissao.concluir(ResultadoDisjuntorPortal.neutra);
+
+    final ResultadoRateLimit limite = _rateLimit.consumirToken(token);
+    if (!limite.permitido) {
+      _rejeicoes429++;
+      return respostaErro(
+        'Muitas requisicoes. Aguarde um instante.',
+        429,
+        headers: cabecalhosRetryAfter(limite.retryAfterSegundos),
+      );
+    }
 
     final CredenciaisPortal? credenciais = CredenciaisPortal.resolver(
       sessaoLogica.identificadorPrestador,
@@ -310,7 +303,6 @@ class ValidadorApi {
       return respostaErro(
         'Fila de lotes cheia. Tente novamente.',
         429,
-        headers: cabecalhosRetryAfter(10),
       );
     }
     if (!_repositorio.vincular(token)) {
@@ -410,6 +402,8 @@ class ValidadorApi {
           ),
           retryable: resposta.retryable,
           falhaElegivelCircuito: resposta.falhaElegivelCircuito,
+          motivoBloqueio: resposta.motivoBloqueio,
+          retryAfter: resposta.retryAfter,
         );
       }
       final String html = resposta.dados!;
@@ -447,6 +441,8 @@ class ValidadorApi {
           ),
           retryable: resposta.retryable,
           falhaElegivelCircuito: resposta.falhaElegivelCircuito,
+          motivoBloqueio: resposta.motivoBloqueio,
+          retryAfter: resposta.retryAfter,
         );
       }
       return ResultadoConsultaAgendada(
@@ -473,6 +469,8 @@ class ValidadorApi {
       dados: _falhaItem(consulta, _mensagemFalhaLogin(status)),
       retryable: login.falhaElegivelCircuito,
       falhaElegivelCircuito: login.falhaElegivelCircuito,
+      motivoBloqueio: login.motivoBloqueio,
+      retryAfter: login.retryAfter,
     );
   }
 
@@ -535,10 +533,25 @@ class ValidadorApi {
   }
 
   Future<Response> _status(Request request) async {
-    final Map<String, dynamic> alcancePortal = await _alcancePortal();
+    final bool estavaBloqueado = _disjuntor.estaBloqueado;
+    await _disjuntor.verificarRecuperacao();
+    final bool recuperou = estavaBloqueado && !_disjuntor.estaBloqueado;
+    final Map<String, dynamic> alcancePortal;
+    if (_disjuntor.estaBloqueado) {
+      alcancePortal = <String, dynamic>{'alcançavel': false};
+    } else if (recuperou) {
+      final int? status = _disjuntor.statusUltimaSonda;
+      alcancePortal = <String, dynamic>{
+        'alcançavel': status != null && status < 500 && status != 429,
+        if (status != null) 'status': status,
+      };
+    } else {
+      alcancePortal = await _alcancePortal();
+    }
     return respostaJson(<String, dynamic>{
       'status': 'ok',
       'portalSulAmerica': alcancePortal,
+      'bloqueio': _disjuntor.bloqueio,
       'timestamp': DateTime.now().toIso8601String(),
     });
   }
@@ -618,6 +631,9 @@ class ValidadorApi {
       return ResultadoSondaDisjuntor(
         status: resposta.statusCode,
         rejeicaoF5: assinatura.f5Rejected,
+        retryAfter: _retryAfterPortal(resposta.headers.value('retry-after')),
+        respostaInesperada: resposta.statusCode == 302 &&
+            resposta.headers.value('location') == null,
       );
     } on Exception {
       return const ResultadoSondaDisjuntor(status: null, falhaTransporte: true);
@@ -633,7 +649,15 @@ class ValidadorApi {
       corpo.addAll(parte.take(limiteBytes - corpo.length));
       if (corpo.length >= limiteBytes) break;
     }
+
     return corpo;
+  }
+
+  static Duration? _retryAfterPortal(String? valor) {
+    final int? segundos = int.tryParse(valor?.trim() ?? '');
+    return segundos == null || segundos < 0
+        ? null
+        : Duration(seconds: segundos);
   }
 
   Response _erroCorpoGrande() => respostaErro(
@@ -642,9 +666,13 @@ class ValidadorApi {
   );
 
   Response _respostaDisjuntorAberto() => respostaErro(
-    'Portal SulAmerica temporariamente indisponivel.',
+    _disjuntor.bloqueio['mensagem'] as String? ??
+        'Portal SulAmerica temporariamente indisponivel.',
     503,
-    headers: cabecalhosRetryAfter(_disjuntor.retryAfterSegundos),
+    headers: cabecalhosRetryAfter(
+      _disjuntor.retryAfterSegundos == 0 ? 1 : _disjuntor.retryAfterSegundos,
+    ),
+    dadosAdicionais: <String, dynamic>{'bloqueio': _disjuntor.bloqueio},
   );
 
   List<Map<String, dynamic>>? _validarConsultas(Object? valor) {

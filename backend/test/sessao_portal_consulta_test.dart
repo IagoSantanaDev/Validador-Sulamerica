@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:logger/logger.dart';
 import 'package:test/test.dart';
+import 'package:validador_backend/modules/sulamerica/data/motivo_bloqueio_portal.dart';
 import 'package:validador_backend/modules/sulamerica/data/resultado_consulta_portal.dart';
 import 'package:validador_backend/modules/sulamerica/data/sessao_portal.dart';
 
@@ -48,8 +49,7 @@ ResponseBody _resposta(
   String corpo,
   int status, {
   Map<String, List<String>>? headers,
-}) =>
-    ResponseBody.fromString(corpo, status, headers: headers);
+}) => ResponseBody.fromString(corpo, status, headers: headers);
 
 void main() {
   test('HTTP 429 é devolvido sem retry de consulta', () async {
@@ -94,13 +94,144 @@ void main() {
     expect(resultado.sucesso, isFalse);
     expect(resultado.status, 429);
     expect(resultado.categoria, CategoriaFalhaConsultaPortal.http);
+    expect(resultado.falhaElegivelCircuito, isTrue);
+    expect(resultado.motivoBloqueio, MotivoBloqueioPortal.rejeicaoF5);
     expect(sessao.diagnosticoSessao['assinaturaResposta'], 1);
     expect(sessao.diagnosticoSessao['assinaturaF5Rejected'], 1);
     expect(sessao.diagnosticoSessao['assinaturaF5MarkerSupportId'], 1);
-    expect(
-      jsonEncode(sessao.diagnosticoSessao),
-      isNot(contains('ABC12345')),
+    expect(jsonEncode(sessao.diagnosticoSessao), isNot(contains('ABC12345')));
+    await sessao.encerrar();
+  });
+
+  test('HTTP 429 do portal preserva motivo e Retry-After', () async {
+    final _AdapterTeste adapter = _AdapterTeste((RequestOptions request) async {
+      if (request.method == 'POST' &&
+          request.uri.queryParameters['lumPageId'] == _idLogin) {
+        return _resposta(
+          '',
+          302,
+          headers: <String, List<String>>{
+            'location': <String>['/prestador/'],
+          },
+        );
+      }
+      if (request.uri.path == '/prestador/') {
+        return _resposta('<html>logout</html>', 200);
+      }
+      if (request.method == 'POST' &&
+          request.uri.queryParameters['lumPageId'] == _idConsulta) {
+        return _resposta(
+          'rate limit',
+          429,
+          headers: <String, List<String>>{
+            'retry-after': <String>['300'],
+            'content-type': <String>['text/plain'],
+          },
+        );
+      }
+      return _resposta('<html>formulario</html>', 200);
+    });
+    final SessaoPortal sessao = SessaoPortal(
+      dio: Dio()..httpClientAdapter = adapter,
+      logger: Logger(output: const _LogMudo(), level: Level.off),
     );
+    await _login(sessao);
+
+    final ResultadoConsultaPortal<String> resultado = await sessao
+        .consultarBeneficiario(carteirinhaCompleta: '12345678901234567890');
+
+    expect(resultado.falhaElegivelCircuito, isTrue);
+    expect(resultado.motivoBloqueio, MotivoBloqueioPortal.limitePortal);
+    expect(resultado.retryAfter, const Duration(minutes: 5));
+    await sessao.encerrar();
+  });
+
+  test(
+    '401/403 persistente após renovação abre por sessão rejeitada',
+    () async {
+      int logins = 0;
+      int consultas = 0;
+      final _AdapterTeste adapter = _AdapterTeste((
+        RequestOptions request,
+      ) async {
+        if (request.method == 'POST' &&
+            request.uri.queryParameters['lumPageId'] == _idLogin) {
+          logins++;
+          return _resposta(
+            '',
+            302,
+            headers: <String, List<String>>{
+              'location': <String>['/prestador/'],
+            },
+          );
+        }
+        if (request.uri.path == '/prestador/') {
+          return _resposta('<html>logout</html>', 200);
+        }
+        if (request.method == 'POST' &&
+            request.uri.queryParameters['lumPageId'] == _idConsulta) {
+          consultas++;
+          return _resposta('sessao expirada', 403);
+        }
+        return _resposta('<html>formulario</html>', 200);
+      });
+      final SessaoPortal sessao = SessaoPortal(
+        dio: Dio()..httpClientAdapter = adapter,
+        logger: Logger(output: const _LogMudo(), level: Level.off),
+      );
+      await _login(sessao);
+
+      final ResultadoConsultaPortal<String> resultado = await sessao
+          .consultarBeneficiario(carteirinhaCompleta: '12345678901234567890');
+
+      expect(logins, 2);
+      expect(consultas, 2);
+      expect(resultado.falhaElegivelCircuito, isTrue);
+      expect(resultado.motivoBloqueio, MotivoBloqueioPortal.sessaoRejeitada);
+      expect(resultado.retryable, isFalse);
+      await sessao.encerrar();
+    },
+  );
+
+  test('falha 401/403 durante renovação abre bloqueio de sessão', () async {
+    int logins = 0;
+    int consultas = 0;
+    final _AdapterTeste adapter = _AdapterTeste((RequestOptions request) async {
+      if (request.method == 'POST' &&
+          request.uri.queryParameters['lumPageId'] == _idLogin) {
+        logins++;
+        if (logins > 1) return _resposta('sessao rejeitada', 403);
+        return _resposta(
+          '',
+          302,
+          headers: <String, List<String>>{
+            'location': <String>['/prestador/'],
+          },
+        );
+      }
+      if (request.uri.path == '/prestador/') {
+        return _resposta('<html>logout</html>', 200);
+      }
+      if (request.method == 'POST' &&
+          request.uri.queryParameters['lumPageId'] == _idConsulta) {
+        consultas++;
+        return _resposta('sessao expirada', 403);
+      }
+      return _resposta('<html>formulario</html>', 200);
+    });
+    final SessaoPortal sessao = SessaoPortal(
+      dio: Dio()..httpClientAdapter = adapter,
+      logger: Logger(output: const _LogMudo(), level: Level.off),
+    );
+    await _login(sessao);
+
+    final ResultadoConsultaPortal<String> resultado = await sessao
+        .consultarBeneficiario(carteirinhaCompleta: '12345678901234567890');
+
+    expect(logins, 2);
+    expect(consultas, 1);
+    expect(resultado.falhaElegivelCircuito, isTrue);
+    expect(resultado.motivoBloqueio, MotivoBloqueioPortal.sessaoRejeitada);
     await sessao.encerrar();
   });
 
@@ -136,8 +267,8 @@ void main() {
     );
     await _login(sessao);
 
-    final ResultadoConsultaPortal<Map<String, dynamic>> resultado =
-        await sessao.consultarSenha(senha: '5000000000');
+    final ResultadoConsultaPortal<Map<String, dynamic>> resultado = await sessao
+        .consultarSenha(senha: '5000000000');
 
     expect(
       resultado.categoria,
@@ -148,10 +279,7 @@ void main() {
     expect(sessao.diagnosticoSessao['ajaxJsonInvalido'], 1);
     expect(sessao.diagnosticoSessao['assinaturaResposta'], 1);
     expect(sessao.diagnosticoSessao['assinaturaF5Rejected'], isNull);
-    expect(
-      jsonEncode(sessao.diagnosticoSessao),
-      isNot(contains('block page')),
-    );
+    expect(jsonEncode(sessao.diagnosticoSessao), isNot(contains('block page')));
     await sessao.encerrar();
   });
 
@@ -187,73 +315,74 @@ void main() {
     );
     await _login(sessao);
 
-    final ResultadoConsultaPortal<Map<String, dynamic>> resultado =
-        await sessao.consultarSenha(senha: '5000000000');
+    final ResultadoConsultaPortal<Map<String, dynamic>> resultado = await sessao
+        .consultarSenha(senha: '5000000000');
 
     expect(resultado.status, 502);
     expect(resultado.categoria, CategoriaFalhaConsultaPortal.http);
     expect(sessao.diagnosticoSessao['assinaturaResposta'], 1);
     expect(sessao.diagnosticoSessao['assinaturaF5Rejected'], 1);
     expect(sessao.diagnosticoSessao['assinaturaF5MarkerSupportId'], 1);
-    expect(
-      jsonEncode(sessao.diagnosticoSessao),
-      isNot(contains('ABC12345')),
-    );
+    expect(jsonEncode(sessao.diagnosticoSessao), isNot(contains('ABC12345')));
     await sessao.encerrar();
   });
 
-  test('nao repete transporte quando a resposta anexada tem marcador F5',
-      () async {
-    int consultas = 0;
-    final _AdapterTeste adapter = _AdapterTeste((RequestOptions request) async {
-      if (request.method == 'POST' &&
-          request.uri.queryParameters['lumPageId'] == _idLogin) {
-        return _resposta(
-          '',
-          302,
-          headers: <String, List<String>>{
-            'location': <String>['/prestador/'],
-          },
-        );
-      }
-      if (request.uri.path == '/prestador/') {
-        return _resposta('<html>logout</html>', 200);
-      }
-      if (request.method == 'POST' &&
-          request.uri.queryParameters['lumPageId'] == _idConsulta) {
-        consultas++;
-        throw DioException(
-          requestOptions: request,
-          type: DioExceptionType.connectionError,
-          response: Response<dynamic>(
+  test(
+    'nao repete transporte quando a resposta anexada tem marcador F5',
+    () async {
+      int consultas = 0;
+      final _AdapterTeste adapter = _AdapterTeste((
+        RequestOptions request,
+      ) async {
+        if (request.method == 'POST' &&
+            request.uri.queryParameters['lumPageId'] == _idLogin) {
+          return _resposta(
+            '',
+            302,
+            headers: <String, List<String>>{
+              'location': <String>['/prestador/'],
+            },
+          );
+        }
+        if (request.uri.path == '/prestador/') {
+          return _resposta('<html>logout</html>', 200);
+        }
+        if (request.method == 'POST' &&
+            request.uri.queryParameters['lumPageId'] == _idConsulta) {
+          consultas++;
+          throw DioException(
             requestOptions: request,
-            statusCode: 503,
-            data: '<html><title>Rejected</title>Support ID ABC12345</html>',
-            headers: Headers.fromMap(<String, List<String>>{
-              'content-type': <String>['text/html; charset=utf-8'],
-            }),
-          ),
-        );
-      }
-      return _resposta('<html>formulario</html>', 200);
-    });
-    final SessaoPortal sessao = SessaoPortal(
-      dio: Dio()..httpClientAdapter = adapter,
-      logger: Logger(output: const _LogMudo(), level: Level.off),
-    );
-    await _login(sessao);
+            type: DioExceptionType.connectionError,
+            response: Response<dynamic>(
+              requestOptions: request,
+              statusCode: 503,
+              data: '<html><title>Rejected</title>Support ID ABC12345</html>',
+              headers: Headers.fromMap(<String, List<String>>{
+                'content-type': <String>['text/html; charset=utf-8'],
+              }),
+            ),
+          );
+        }
+        return _resposta('<html>formulario</html>', 200);
+      });
+      final SessaoPortal sessao = SessaoPortal(
+        dio: Dio()..httpClientAdapter = adapter,
+        logger: Logger(output: const _LogMudo(), level: Level.off),
+      );
+      await _login(sessao);
 
-    final ResultadoConsultaPortal<String> resultado = await sessao
-        .consultarBeneficiario(carteirinhaCompleta: '12345678901234567890');
+      final ResultadoConsultaPortal<String> resultado = await sessao
+          .consultarBeneficiario(carteirinhaCompleta: '12345678901234567890');
 
-    expect(consultas, 1);
-    expect(resultado.sucesso, isFalse);
-    expect(resultado.status, 503);
-    expect(resultado.categoria, CategoriaFalhaConsultaPortal.http);
-    expect(sessao.diagnosticoSessao['assinaturaF5Rejected'], 1);
-    expect(sessao.diagnosticoSessao['retriesTransitoriosIniciados'], 0);
-    await sessao.encerrar();
-  });
+      expect(consultas, 1);
+      expect(resultado.sucesso, isFalse);
+      expect(resultado.status, 503);
+      expect(resultado.categoria, CategoriaFalhaConsultaPortal.http);
+      expect(sessao.diagnosticoSessao['assinaturaF5Rejected'], 1);
+      expect(sessao.diagnosticoSessao['retriesTransitoriosIniciados'], 0);
+      await sessao.encerrar();
+    },
+  );
 
   test('repete transporte com HTTP 503 sem marcador F5', () async {
     int consultas = 0;
@@ -351,10 +480,7 @@ void main() {
       sessao.diagnosticoSessao,
       containsPair('consultaDioHttpSemStatus', 1),
     );
-    expect(
-      sessao.diagnosticoSessao['consultaDioErroStateError'],
-      1,
-    );
+    expect(sessao.diagnosticoSessao['consultaDioErroStateError'], 1);
     expect(
       jsonEncode(sessao.diagnosticoSessao),
       isNot(contains('detalhe interno nao publico')),
@@ -393,11 +519,11 @@ void main() {
     );
     await _login(sessao);
 
-    final ResultadoConsultaPortal<String> resultado =
-        await sessao.consultarBeneficiario(
-      carteirinhaCompleta: '12345678901234567890',
-      recuperarFalhaSessao: false,
-    );
+    final ResultadoConsultaPortal<String> resultado = await sessao
+        .consultarBeneficiario(
+          carteirinhaCompleta: '12345678901234567890',
+          recuperarFalhaSessao: false,
+        );
 
     expect(consultas, 1);
     expect(logins, 1);
@@ -530,8 +656,8 @@ void main() {
     );
     await _login(sessao);
 
-    final List<ResultadoConsultaPortal<String>> resultados =
-        await Future.wait(<Future<ResultadoConsultaPortal<String>>>[
+    final List<ResultadoConsultaPortal<String>>
+    resultados = await Future.wait(<Future<ResultadoConsultaPortal<String>>>[
       sessao.consultarBeneficiario(carteirinhaCompleta: '12345678901234567890'),
       sessao.consultarBeneficiario(carteirinhaCompleta: '98765432109876543210'),
     ]);
@@ -616,9 +742,7 @@ void main() {
     },
   );
 
-  test(
-      'renovação falha uma vez para chamadas concorrentes e consulta futura tenta de novo',
-      () async {
+  test('renovação falha uma vez para chamadas concorrentes e consulta futura tenta de novo', () async {
     int logins = 0;
     int consultas = 0;
     final Completer<void> duasConsultas = Completer<void>();
@@ -656,8 +780,8 @@ void main() {
     );
     await _login(sessao);
 
-    final List<ResultadoConsultaPortal<String>> concorrentes =
-        await Future.wait(<Future<ResultadoConsultaPortal<String>>>[
+    final List<ResultadoConsultaPortal<String>>
+    concorrentes = await Future.wait(<Future<ResultadoConsultaPortal<String>>>[
       sessao.consultarBeneficiario(carteirinhaCompleta: '12345678901234567890'),
       sessao.consultarBeneficiario(carteirinhaCompleta: '98765432109876543210'),
     ]);

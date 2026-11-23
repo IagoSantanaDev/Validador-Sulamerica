@@ -155,10 +155,17 @@ class SulAmericaBackendService {
   }
 
   AppException _mapearResposta(Response<dynamic>? resposta) {
+    final Object? valorBloqueio = resposta?.data is Map
+        ? (resposta!.data as Map)['bloqueio']
+        : null;
+    final Map<String, dynamic>? bloqueio = valorBloqueio is Map
+        ? valorBloqueio.cast<String, dynamic>()
+        : null;
     return _mapearStatus(
       resposta?.statusCode,
       mensagem: _mensagemDoCorpo(resposta?.data),
       retryAfter: _retryAfter(resposta),
+      bloqueio: bloqueio,
     );
   }
 
@@ -166,6 +173,7 @@ class SulAmericaBackendService {
     int? statusCode, {
     String? mensagem,
     Duration? retryAfter,
+    Map<String, dynamic>? bloqueio,
   }) {
     if (statusCode == 401 || statusCode == 403) {
       return const NaoAutorizadoException();
@@ -179,6 +187,7 @@ class SulAmericaBackendService {
     if (statusCode == 503) {
       return ServicoIndisponivelException(
         retryAfter: retryAfter,
+        bloqueio: bloqueio,
         mensagem: mensagem,
       );
     }
