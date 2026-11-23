@@ -4,8 +4,7 @@ import 'package:validador_xml_sulamerica/modules/validador_xml/data/repositories
 void main() {
   const RegraCredenciaisPortal regra = RegraCredenciaisPortal();
 
-  test('normaliza o identificador e preserva apenas prestadores conhecidos',
-      () {
+  test('normaliza o CNPJ sem revelar uma lista fixa no frontend', () {
     expect(regra.resolver('27.372.066/0006-73'), '27372066000673');
     expect(regra.resolver('27.372.066/0001-69'), '27372066000169');
     expect(regra.resolver('00.000.000/0000-00'), isNull);
