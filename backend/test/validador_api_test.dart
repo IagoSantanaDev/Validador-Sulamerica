@@ -332,7 +332,7 @@ void main() {
       expect(cheia.headers.containsKey('retry-after'), isFalse);
     });
 
-    test('falha de taxa não inclui Retry-After do portal', () async {
+    test('limite de criação de sessão informa Retry-After da API', () async {
       final _ContextoApi contexto = _criarApi(limitePorChave: 1);
       await _criarSessao(contexto.api);
       final Response limitada = await contexto.api.handler(
@@ -344,7 +344,7 @@ void main() {
       );
 
       expect(limitada.statusCode, 429);
-      expect(limitada.headers.containsKey('retry-after'), isFalse);
+      expect(limitada.headers['retry-after'], '60');
     });
 
     test(

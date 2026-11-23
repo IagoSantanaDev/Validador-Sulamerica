@@ -435,6 +435,64 @@ void main() {
       },
     );
 
+    test(
+      'fica consultando e repete criação de sessão após cada Retry-After',
+      () async {
+        final List<Duration> esperas = [];
+        final _FakeAsyncBackend service = _FakeAsyncBackend()
+          ..respostasSessao.addAll([
+            Result.failure(
+              const FilaCheiaException(
+                retryAfter: Duration(seconds: 75),
+                mensagem: 'Limite de criação de sessões.',
+              ),
+            ),
+            Result.failure(
+              const FilaCheiaException(
+                retryAfter: Duration(seconds: 30),
+                mensagem: 'Limite de criação de sessões.',
+              ),
+            ),
+            Result.success('token-liberado'),
+          ]);
+        late final ValidadorController controller;
+        controller = ValidadorController(
+          repository: _FakeValidadorGuiasRepository(const [
+            GuiaValidada(guia: _guiaSemSenha, erros: []),
+          ]),
+          service: service,
+          regraCredenciais: const _RegraCredenciaisFixa('27372066000673'),
+          aguardarRetentativa: (Duration duracao) async {
+            esperas.add(duracao);
+            expect(controller.status, StatusValidador.validando);
+            expect(
+              controller.etapaConsultaBackend,
+              EtapaConsultaBackend.aguardandoRetentativa,
+            );
+            expect(controller.temConsultasPendentes, isFalse);
+          },
+        );
+        addTearDown(controller.dispose);
+        controller.definirArquivo(
+          nomeArquivo: 'lote.xml',
+          bytes: Uint8List.fromList(
+            '<mensagemTISS><guiaSP-SADT/></mensagemTISS>'.codeUnits,
+          ),
+        );
+
+        await controller.validar();
+
+        expect(service.chamadasSessao, 3);
+        expect(esperas, [
+          const Duration(seconds: 75),
+          const Duration(seconds: 30),
+        ]);
+        expect(controller.status, StatusValidador.concluido);
+        expect(controller.temConsultasPendentes, isFalse);
+        expect(controller.guias.single.consultas, hasLength(1));
+      },
+    );
+
     test('503 consulta status antes de tentar novamente', () async {
       const Map<String, dynamic> bloqueio = {
         'ativo': true,
@@ -604,7 +662,7 @@ void main() {
       expect(controller.guias, hasLength(3301));
     });
 
-    test('429 de sessão só repete uma vez quando Retry-After existe', () async {
+    test('429 de sessão respeita Retry-After antes de repetir', () async {
       final List<Duration> esperas = [];
       final _FakeAsyncBackend service = _FakeAsyncBackend()
         ..respostasSessao.addAll([

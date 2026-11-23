@@ -1150,33 +1150,10 @@ class ValidadorController extends ChangeNotifier {
       return (token: _tokenSessao, mensagemErro: null, falha: null);
     }
 
-    Result<String> resultado = await service.criarSessao(
-      identificadorPrestador: identificadorPrestador,
-    );
-    if (epocaBloqueio != _epocaBloqueio) {
-      return (token: null, mensagemErro: null, falha: null);
-    }
-    AppException? falha = resultado.fold<AppException?>(
-      onSuccess: (_) => null,
-      onFailure: (erro) => erro,
-    );
-    if (await _consultarBloqueioAposFalha(falha)) {
-      return (token: null, mensagemErro: falha!.mensagem, falha: falha);
-    }
-    if (epocaBloqueio != _epocaBloqueio) {
-      return (token: null, mensagemErro: null, falha: null);
-    }
-    final Duration? retryAfter = falha == null ? null : _retryAfter(falha);
-    if ((falha is FilaCheiaException ||
-            falha is ServicoIndisponivelException) &&
-        retryAfter != null) {
-      _etapaConsultaBackend = EtapaConsultaBackend.aguardandoRetentativa;
-      notifyListeners();
-      await _aguardarRetentativa(_limitarRetryAfter(retryAfter));
-      if (epocaBloqueio != _epocaBloqueio) {
-        return (token: null, mensagemErro: null, falha: null);
-      }
-      _etapaConsultaBackend = EtapaConsultaBackend.consultando;
+    late Result<String> resultado;
+    AppException? falha;
+    bool repetiuServicoIndisponivel = false;
+    while (true) {
       resultado = await service.criarSessao(
         identificadorPrestador: identificadorPrestador,
       );
@@ -1192,6 +1169,27 @@ class ValidadorController extends ChangeNotifier {
       }
       if (epocaBloqueio != _epocaBloqueio) {
         return (token: null, mensagemErro: null, falha: null);
+      }
+
+      final Duration? espera = switch (falha) {
+        FilaCheiaException(retryAfter: final Duration duracao) => duracao,
+        ServicoIndisponivelException(retryAfter: final Duration duracao)
+            when !repetiuServicoIndisponivel =>
+          _limitarRetryAfter(duracao),
+        _ => null,
+      };
+      if (espera == null) break;
+
+      _etapaConsultaBackend = EtapaConsultaBackend.aguardandoRetentativa;
+      notifyListeners();
+      await _aguardarRetentativa(espera);
+      if (epocaBloqueio != _epocaBloqueio) {
+        return (token: null, mensagemErro: null, falha: null);
+      }
+      _etapaConsultaBackend = EtapaConsultaBackend.consultando;
+      notifyListeners();
+      if (falha is ServicoIndisponivelException) {
+        repetiuServicoIndisponivel = true;
       }
     }
 

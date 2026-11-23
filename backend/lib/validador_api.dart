@@ -164,6 +164,7 @@ class ValidadorApi {
       return respostaErro(
         'Muitas requisicoes. Aguarde um instante.',
         429,
+        headers: cabecalhosRetryAfter(limite.retryAfterSegundos),
       );
     }
 
